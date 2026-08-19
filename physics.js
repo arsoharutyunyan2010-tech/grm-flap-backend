@@ -24,7 +24,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var PHYSICS_VERSION = 2;
+  var PHYSICS_VERSION = 3;
 
   // ---- Fixed logical playfield (device-independent) ----
   var LOGICAL_W = 480;
@@ -35,13 +35,13 @@
   var GRAVITY = 1900;          // px/s^2
   var FLAP_VELOCITY = -480;    // px/s
   var MAX_FALL_SPEED = 900;
-  var PIPE_GAP_BASE = 150;     // was 122 — wider vertical gap between top/bottom pipe
-  var PIPE_GAP_MIN = 120;      // was 100 — never shrinks below this even at high score
+  var PIPE_GAP_BASE = 150;
+  var PIPE_GAP_MIN = 120;
   var PIPE_WIDTH = 62;
   var PIPE_SPEED_BASE = 195;
-  var PIPE_INTERVAL_STEPS = Math.round(1.4 / STEP); // was 1.1 — more horizontal space between pipes
-  var PIPE_MARGIN = 80;        // was 60 — keeps pipes further from screen top/bottom edges
-  var PIPE_MAX_VERTICAL_JUMP = 150; // NEW — max px the next pipe's opening can shift vs the previous one
+  var PIPE_INTERVAL_STEPS = Math.round(1.25 / STEP); // ~1250ms between pipes
+  var PIPE_MARGIN = 80;
+  var PIPE_MAX_VERTICAL_JUMP = 150;
   var COIN_RADIUS = 16;
   var GROUND_HEIGHT = 70;
   var BIRD_X = LOGICAL_W * 0.32;
@@ -70,9 +70,9 @@
     return PIPE_SPEED_BASE + Math.min(score, 25) * 5;
   }
 
-  // NEW — instead of a fully independent random top each time, clamp the
-  // next pipe's opening to within PIPE_MAX_VERTICAL_JUMP of the previous
-  // one. This removes the "sudden extreme high/low pipe" feel while still
+  // Instead of a fully independent random top each time, clamp the next
+  // pipe's opening to within PIPE_MAX_VERTICAL_JUMP of the previous one.
+  // This removes the "sudden extreme high/low pipe" feel while still
   // being deterministic from the seeded rng.
   function nextPipeTop(rng, prevTop, gap, playH, margin) {
     var maxRange = playH - gap - margin * 2;
