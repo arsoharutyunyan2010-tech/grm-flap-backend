@@ -18,6 +18,7 @@ const store = require('./store.js');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+app.use(express.static(__dirname));
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const ALLOW_INSECURE_DEV = process.env.ALLOW_INSECURE_DEV === 'true'; // local testing only, without a real Telegram launch
