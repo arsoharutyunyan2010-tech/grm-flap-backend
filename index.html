@@ -665,7 +665,7 @@
     var groundY = LH - GROUND_HEIGHT;
     var crashed = false;
 
-    if (pipeTimer >= Math.round(1.4/STEP)) {
+    if (pipeTimer >= Math.round(1.25/STEP)) {
       pipeTimer = 0;
       var gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
       var top = P.nextPipeTop(rng, lastPipeTop, gap, playH, P.PIPE_MARGIN);
