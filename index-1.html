@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>GRM FLAP</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --gold: #f4c542;
+    --gold-dark: #b8892a;
+    --bg-top: #1b1033;
+    --bg-bottom: #3a1656;
+    --accent: #ff5d73;
+    --ink: #fff7e6;
+    --green: #3ddc84;
+  }
+  *{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body{
+    margin:0; padding:0; width:100%; height:100%;
+    overflow:hidden; background:#000;
+    font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+    touch-action: manipulation;
+    overscroll-behavior: none;
+  }
+  #wrap{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(circle at 50% 0%, #241245 0%, #0d0620 70%);
+  }
+  canvas{
+    display:block;
+    background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+    touch-action: none;
+  }
+  #hud{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; justify-content:center; align-items:center;
+    pointer-events:none;
+    padding-top: max(18px, env(safe-area-inset-top));
+    z-index:5;
+    gap: 10px;
+  }
+  #score{
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--ink);
+    text-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 18px rgba(244,197,66,0.5);
+    letter-spacing: 1px;
+  }
+  #syncBadge{
+    position:absolute; top: max(14px, env(safe-area-inset-top)); right: 14px;
+    font-size: 10px; font-weight:700; letter-spacing:0.5px;
+    padding: 4px 8px; border-radius: 8px;
+    background: rgba(255,255,255,0.08); color: var(--ink); opacity:0.7;
+    z-index:6;
+  }
+  #syncBadge.err{ background: rgba(255,93,115,0.25); color:#ffdfe4; opacity:1;}
+  #syncBadge.ok{ background: rgba(61,220,132,0.2); color:#d9ffea; opacity:1;}
+  .overlay{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    z-index:10;
+  }
+  .card{
+    background: rgba(20,10,40,0.92);
+    border: 2px solid var(--gold);
+    border-radius: 20px;
+    padding: 28px 30px 24px;
+    text-align:center;
+    width: min(320px, 82vw);
+    max-height: 86vh;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 6px rgba(244,197,66,0.06);
+    color: var(--ink);
+  }
+  .title{
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    margin: 0 0 4px;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold) 60%, var(--gold-dark));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .sub{
+    font-size: 13px;
+    opacity: 0.75;
+    margin-bottom: 18px;
+    letter-spacing: 0.5px;
+  }
+  .stat-row{
+    display:flex; justify-content:space-between;
+    margin: 6px 0;
+    font-size: 15px;
+    padding: 8px 14px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+  }
+  .stat-row b{ color: var(--gold); }
+  .new-badge{
+    display:inline-block;
+    margin-top:8px;
+    font-size: 11px;
+    font-weight:700;
+    color:#1b1033;
+    background: var(--gold);
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 1px;
+  }
+  button{
+    margin-top: 12px;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: 1px;
+    color: #1b1033;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+    padding: 13px 28px;
+    border-radius: 14px;
+    box-shadow: 0 5px 0 var(--gold-dark), 0 8px 18px rgba(0,0,0,0.4);
+    transition: transform 0.08s ease;
+    width: 100%;
+  }
+  button:active{
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 var(--gold-dark), 0 3px 8px rgba(0,0,0,0.4);
+  }
+  button.secondary{
+    background: rgba(255,255,255,0.08);
+    color: var(--ink);
+    box-shadow: 0 5px 0 rgba(0,0,0,0.3), 0 8px 18px rgba(0,0,0,0.3);
+  }
+  button.ad{
+    background: linear-gradient(180deg, #bff5da, var(--green));
+    box-shadow: 0 5px 0 #1f9d5e, 0 8px 18px rgba(0,0,0,0.4);
+  }
+  button:disabled{ opacity:0.5; cursor:default; }
+  .hint{
+    margin-top: 14px;
+    font-size: 12px;
+    opacity: 0.55;
+  }
+  #startCard .title{ font-size: 40px; }
+  .coin-icon{
+    width: 56px; height:56px;
+    margin: 0 auto 10px;
+    display:block;
+  }
+  .hidden{ display:none !important; }
+  .lb-row{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size: 14px; padding: 7px 10px; border-radius: 8px;
+    margin: 3px 0; background: rgba(255,255,255,0.04);
+  }
+  .lb-row.me{ background: rgba(244,197,66,0.18); border: 1px solid rgba(244,197,66,0.4); }
+  .lb-rank{ width: 26px; opacity:0.7; font-weight:700; }
+  .lb-name{ flex:1; text-align:left; padding: 0 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lb-score{ color: var(--gold); font-weight:800; }
+  .lb-list{ max-height: 46vh; overflow-y:auto; margin: 10px 0; }
+  .reward-note{ font-size: 11px; opacity:0.6; margin-top: 10px; line-height:1.4; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud"><div id="score">0</div></div>
+  <div id="syncBadge" class="hidden"></div>
+
+  <div class="overlay" id="startCard">
+    <div class="card">
+      <svg class="coin-icon" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r="28" fill="#26262e" stroke="#f4c542" stroke-width="2"/>
+        <path d="M 13 21 L 51 21 L 32 47 Z" fill="none" stroke="#ffffff" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+        <line x1="32" y1="21" x2="32" y2="41" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round"/>
+      </svg>
+      <div class="title">GRM FLAP</div>
+      <div class="sub">Tap to keep the coin flying</div>
+      <button id="adBtn" class="ad">▶ WATCH AD FOR BONUS</button>
+      <button id="startBtn">TAP TO START</button>
+      <button id="lbBtn" class="secondary">🏆 LEADERBOARD</button>
+      <div class="hint">Tap / click / space to flap</div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="overCard">
+    <div class="card">
+      <div class="title" style="font-size:26px;">GAME OVER</div>
+      <div class="stat-row"><span>Score</span><b id="finalScore">0</b></div>
+      <div class="stat-row"><span>Best</span><b id="finalBest">0</b></div>
+      <div class="stat-row"><span>Rank</span><b id="finalRank">—</b></div>
+      <div id="newBestBadge" class="new-badge hidden">NEW BEST!</div>
+      <div id="verifyNote" class="hint">Verifying score with server…</div>
+      <button id="restartBtn">PLAY AGAIN</button>
+      <button id="lbBtn2" class="secondary">🏆 LEADERBOARD</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="lbCard">
+    <div class="card">
+      <div class="title" style="font-size:24px;">WEEKLY TOP</div>
+      <div class="sub" id="lbPeriod">this week's GRM rewards</div>
+      <div class="lb-list" id="lbList"></div>
+      <div class="reward-note">Top players split the weekly GRM prize pool. Scores are verified server-side and cannot be forged from the browser.</div>
+      <button id="lbCloseBtn" class="secondary">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<script src="physics.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ============================================================
+  // 0. CONFIG — point this at your deployed backend (see server.js)
+  // ============================================================
+  var API_BASE_URL = window.GRM_FLAP_API_BASE || ""; // e.g. "https://api.yourdomain.com"
+  var DEMO_MODE = !API_BASE_URL; // no backend configured -> local demo only, clearly labeled
+
+  var P = window.GrmFlapPhysics;
+
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var startCard = document.getElementById('startCard');
+  var overCard = document.getElementById('overCard');
+  var lbCard = document.getElementById('lbCard');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var adBtn = document.getElementById('adBtn');
+  var lbBtn = document.getElementById('lbBtn');
+  var lbBtn2 = document.getElementById('lbBtn2');
+  var lbCloseBtn = document.getElementById('lbCloseBtn');
+  var lbList = document.getElementById('lbList');
+  var finalScoreEl = document.getElementById('finalScore');
+  var finalBestEl = document.getElementById('finalBest');
+  var finalRankEl = document.getElementById('finalRank');
+  var newBestBadge = document.getElementById('newBestBadge');
+  var verifyNote = document.getElementById('verifyNote');
+  var syncBadge = document.getElementById('syncBadge');
+
+  // ============================================================
+  // 1. Telegram Mini App bootstrap
+  // ============================================================
+  var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  var initData = tg ? tg.initData : "";
+  var tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    try { tg.setHeaderColor('#1b1033'); } catch(e){}
+    try { tg.setBackgroundColor('#0d0620'); } catch(e){}
+  }
+
+  function setSyncBadge(text, cls){
+    syncBadge.textContent = text;
+    syncBadge.className = cls ? cls : "";
+    syncBadge.classList.remove('hidden');
+  }
+  if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
+
+  // ============================================================
+  // 2. Canvas sizing — fixed LOGICAL playfield, letterboxed to device
+  // ============================================================
+  var LW = P.LOGICAL_W, LH = P.LOGICAL_H;
+  var DPR, scale, offX, offY, viewW, viewH;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    viewW = window.innerWidth;
+    viewH = window.innerHeight;
+    scale = Math.min(viewW / LW, viewH / LH);
+    var dispW = LW * scale, dispH = LH * scale;
+    offX = (viewW - dispW) / 2;
+    offY = (viewH - dispH) / 2;
+    canvas.style.width = viewW + 'px';
+    canvas.style.height = viewH + 'px';
+    canvas.width = Math.floor(viewW * DPR);
+    canvas.height = Math.floor(viewH * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+  resize();
+
+  var GROUND_HEIGHT = P.GROUND_HEIGHT, PIPE_WIDTH = P.PIPE_WIDTH, COIN_RADIUS = P.COIN_RADIUS;
+  var STORAGE_KEY = 'grmflap_best_local';
+
+  // ============================================================
+  // 3. Session (server-issued seed + one-time token)
+  // ============================================================
+  var session = null; // { sessionId, seed, startedAt }
+
+  function localSeed(){ return (Date.now() ^ Math.floor(Math.random()*1e9)) >>> 0; }
+
+  function apiFetch(path, opts){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    opts = opts || {};
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+    return fetch(API_BASE_URL + path, opts).then(function(r){
+      if(!r.ok) return r.json().catch(function(){return {};}).then(function(b){ throw new Error(b.error||('HTTP '+r.status)); });
+      return r.json();
+    });
+  }
+
+  function startSession(){
+    if (DEMO_MODE) {
+      session = { sessionId: 'demo-'+Date.now(), seed: localSeed(), startedAt: Date.now() };
+      return Promise.resolve(session);
+    }
+    return apiFetch('/api/start-session', {
+      method: 'POST',
+      body: JSON.stringify({ initData: initData })
+    }).then(function(res){
+      session = { sessionId: res.sessionId, seed: res.seed, startedAt: Date.now() };
+      setSyncBadge('connected', 'ok');
+      return session;
+    }).catch(function(err){
+      setSyncBadge('offline — score won\'t be saved', 'err');
+      session = { sessionId: null, seed: localSeed(), startedAt: Date.now(), offline: true };
+      return session;
+    });
+  }
+
+  function submitScore(flapLog, totalSteps, clientScore){
+    if (DEMO_MODE || !session.sessionId) {
+      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false });
+    }
+    return apiFetch('/api/submit-score', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: session.sessionId,
+        flapLog: flapLog,
+        totalSteps: totalSteps,
+        clientScore: clientScore
+      })
+    }).then(function(res){ res.verified = true; return res; })
+      .catch(function(err){
+        setSyncBadge('sync failed', 'err');
+        return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false, error: String(err.message||err) };
+      });
+  }
+
+  function fetchLeaderboard(){
+    if (DEMO_MODE) {
+      return Promise.resolve({
+        period: 'demo',
+        entries: [
+          {rank:1, name:'CryptoCoinFly', score:47},
+          {rank:2, name:'PurpleFlapper', score:39},
+          {rank:3, name:'GRMwhale', score:31}
+        ],
+        me: null
+      });
+    }
+    return apiFetch('/api/leaderboard' + (tgUser ? ('?uid='+tgUser.id) : ''), { method:'GET' });
+  }
+
+  // ============================================================
+  // 4. Rewarded ads hook
+  //    Wire this to your Mini-App ad network (e.g. Adsgram, RichAds,
+  //    or Telegram's own Ad Network SDK once available in your region).
+  //    Reward is only granted after the ad SDK confirms completion —
+  //    never grant it optimistically from the button click.
+  // ============================================================
+  function showRewardedAd(){
+    return new Promise(function(resolve, reject){
+      if (window.Adsgram && window.Adsgram.init) {
+        // Example integration shape (uncomment & configure with your Block ID):
+        // var AdController = window.Adsgram.init({ blockId: "YOUR_BLOCK_ID" });
+        // AdController.show().then(function(){ resolve(); }).catch(reject);
+        reject(new Error('configure your ad network SDK here'));
+        return;
+      }
+      reject(new Error('no ad SDK loaded'));
+    });
+  }
+
+  adBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    adBtn.disabled = true;
+    adBtn.textContent = 'LOADING AD…';
+    showRewardedAd().then(function(){
+      adBtn.textContent = '✓ BONUS GRANTED';
+      // The bonus itself (extra life, head start, score multiplier flag, etc.)
+      // should also be recorded in the session on the SERVER when the ad
+      // network confirms, so a fake client-side "ad watched" event can't
+      // be used to inflate a verified score.
+    }).catch(function(){
+      adBtn.textContent = '▶ WATCH AD FOR BONUS';
+      adBtn.disabled = false;
+    });
+  });
+
+  // ============================================================
+  // 5. Local "best" (device-only, cosmetic — server leaderboard is authoritative)
+  // ============================================================
+  function loadBest(){
+    try{ var v = localStorage.getItem(STORAGE_KEY); return v?parseInt(v,10):0; }catch(e){ return 0; }
+  }
+  function saveBest(v){ try{ localStorage.setItem(STORAGE_KEY, String(v)); }catch(e){} }
+  var best = loadBest();
+
+  // ============================================================
+  // 6. Game state — driven by physics.js, fixed-step, seeded
+  // ============================================================
+  var state = 'ready'; // ready | playing | over
+  var bird, pipes, particles;
+  var score, stepIndex, pipeTimer;
+  var flapLog, pendingFlap, lastFlapStep;
+  var groundOffset, elapsedMs;
+  var rng;
+  // Must match physics.js's own rate-limit exactly, or the client's
+  // displayed run can silently diverge from what the server verifies.
+  var MIN_FLAP_GAP_STEPS = Math.floor((1 / P.MAX_FLAPS_PER_SECOND) / P.STEP);
+
+  function resetGame(){
+    bird = { x: P.BIRD_X, y: P.BIRD_START_Y, r: COIN_RADIUS, vy: 0, rot: 0 };
+    pipes = [];
+    particles = [];
+    score = 0;
+    stepIndex = 0;
+    pipeTimer = 0;
+    flapLog = [];
+    pendingFlap = false;
+    lastFlapStep = -Infinity;
+    groundOffset = 0;
+    elapsedMs = 0;
+    scoreEl.textContent = '0';
+  }
+
+  function flap(){
+    if(state === 'ready'){ beginRound(); return; }
+    if(state === 'over') return;
+    pendingFlap = true;
+    for(var i=0;i<6;i++){
+      particles.push({
+        x: bird.x - bird.r*0.6, y: bird.y + (Math.random()-0.5)*10,
+        vx: -80 - Math.random()*60, vy: (Math.random()-0.5)*60,
+        life: 0.4 + Math.random()*0.2, age: 0, r: 2 + Math.random()*2
+      });
+    }
+  }
+
+  function beginRound(){
+    startCard.classList.add('hidden');
+    overCard.classList.add('hidden');
+    startBtn.disabled = true;
+    startSession().then(function(){
+      startBtn.disabled = false;
+      resetGame();
+      rng = P.makeRng(session.seed);
+      state = 'playing';
+      bird.vy = P.FLAP_VELOCITY * 0.7;
+    });
+  }
+
+  function endGame(){
+    state = 'over';
+    var totalSteps = stepIndex;
+    var clientScore = score;
+
+    finalScoreEl.textContent = clientScore;
+    finalBestEl.textContent = Math.max(best, clientScore);
+    finalRankEl.textContent = '—';
+    verifyNote.textContent = DEMO_MODE ? 'Demo mode — score not saved to server.' : 'Verifying score with server…';
+    verifyNote.classList.remove('hidden');
+    newBestBadge.classList.add('hidden');
+    overCard.classList.remove('hidden');
+
+    submitScore(flapLog, totalSteps, clientScore).then(function(res){
+      var verifiedScore = res.verified ? res.score : clientScore;
+      finalScoreEl.textContent = verifiedScore;
+      if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
+      finalBestEl.textContent = Math.max(best, res.best||0);
+      finalRankEl.textContent = res.rank ? ('#'+res.rank) : '—';
+      if (res.verified) {
+        verifyNote.textContent = (res.score === clientScore)
+          ? 'Score verified by server ✓'
+          : 'Server-verified score: ' + res.score + ' (client reported ' + clientScore + ')';
+        setSyncBadge('connected', 'ok');
+      } else if (DEMO_MODE) {
+        verifyNote.textContent = 'Demo mode — connect a backend to save real scores.';
+      } else {
+        verifyNote.textContent = 'Could not verify — score not saved. ' + (res.error||'');
+      }
+    });
+  }
+
+  // ---------- Input ----------
+  function onPointerDown(e){ e.preventDefault(); flap(); }
+  canvas.addEventListener('touchstart', onPointerDown, {passive:false});
+  canvas.addEventListener('mousedown', onPointerDown);
+  window.addEventListener('keydown', function(e){
+    if(e.code === 'Space' || e.code === 'ArrowUp'){ e.preventDefault(); flap(); }
+  });
+  startBtn.addEventListener('click', function(e){ e.preventDefault(); beginRound(); });
+  restartBtn.addEventListener('click', function(e){ e.preventDefault(); beginRound(); });
+  document.body.addEventListener('touchmove', function(e){ e.preventDefault(); }, {passive:false});
+
+  // ---------- Leaderboard UI ----------
+  function renderLeaderboard(data){
+    lbList.innerHTML = '';
+    var entries = data.entries || [];
+    if (entries.length === 0) {
+      lbList.innerHTML = '<div class="hint">No scores yet this week — be the first!</div>';
+    }
+    entries.forEach(function(e){
+      var row = document.createElement('div');
+      row.className = 'lb-row' + (data.me && data.me.rank === e.rank ? ' me' : '');
+      row.innerHTML = '<span class="lb-rank">#'+e.rank+'</span><span class="lb-name">'+
+        (e.name||'Player').replace(/</g,'&lt;') +'</span><span class="lb-score">'+e.score+'</span>';
+      lbList.appendChild(row);
+    });
+    if (data.me && !entries.some(function(e){return e.rank===data.me.rank;})) {
+      var row = document.createElement('div');
+      row.className = 'lb-row me';
+      row.innerHTML = '<span class="lb-rank">#'+data.me.rank+'</span><span class="lb-name">You</span><span class="lb-score">'+data.me.score+'</span>';
+      lbList.appendChild(row);
+    }
+  }
+  function openLeaderboard(){
+    lbList.innerHTML = '<div class="hint">Loading…</div>';
+    lbCard.classList.remove('hidden');
+    fetchLeaderboard().then(renderLeaderboard).catch(function(){
+      lbList.innerHTML = '<div class="hint">Could not load leaderboard.</div>';
+    });
+  }
+  lbBtn.addEventListener('click', function(e){ e.preventDefault(); openLeaderboard(); });
+  lbBtn2.addEventListener('click', function(e){ e.preventDefault(); openLeaderboard(); });
+  lbCloseBtn.addEventListener('click', function(e){ e.preventDefault(); lbCard.classList.add('hidden'); });
+
+  // ---------- Drawing (logical LW x LH coordinate space) ----------
+  function drawBackground(){
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath();
+    ctx.arc(LW*0.82, LH*0.16, 30, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    for(var i=0;i<3;i++){
+      var cx = ((elapsedMs*0.02 + i*160) % (LW+120)) - 60;
+      var cy = LH*0.2 + i*70;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 40, 16, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawGround(){
+    var y = LH - GROUND_HEIGHT;
+    ctx.save();
+    var grad = ctx.createLinearGradient(0,y,0,LH);
+    grad.addColorStop(0,'#6b3fa0');
+    grad.addColorStop(1,'#3a1656');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,y,LW,GROUND_HEIGHT);
+    ctx.fillStyle = 'rgba(244,197,66,0.5)';
+    ctx.fillRect(0,y,LW,4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    var dashW = 26, gap = 18;
+    var offset = groundOffset % (dashW+gap);
+    for(var x = -offset; x < LW; x += dashW+gap){ ctx.moveTo(x, y+16); ctx.lineTo(x+dashW, y+16); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPipe(p){
+    var y = LH - GROUND_HEIGHT;
+    var bottomY = p.top + p.gap;
+    ctx.save();
+    var bodyGrad = ctx.createLinearGradient(p.x,0,p.x+PIPE_WIDTH,0);
+    bodyGrad.addColorStop(0,'#ff8a9b'); bodyGrad.addColorStop(0.5,'#ff5d73'); bodyGrad.addColorStop(1,'#d43f58');
+    ctx.fillStyle = bodyGrad;
+    ctx.fillRect(p.x, 0, PIPE_WIDTH, p.top);
+    ctx.fillRect(p.x-4, p.top-22, PIPE_WIDTH+8, 22);
+    ctx.fillRect(p.x, bottomY, PIPE_WIDTH, y - bottomY);
+    ctx.fillRect(p.x-4, bottomY, PIPE_WIDTH+8, 22);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x, 0, PIPE_WIDTH, p.top);
+    ctx.strokeRect(p.x, bottomY, PIPE_WIDTH, y - bottomY);
+    ctx.restore();
+  }
+
+  function drawBird(){
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.rot);
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.shadowColor = 'rgba(244,197,66,0.65)';
+    ctx.shadowBlur = bird.r * 0.9;
+    ctx.fillStyle = 'rgba(244,197,66,0.001)';
+    ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    var grad = ctx.createRadialGradient(-bird.r*0.3,-bird.r*0.35,bird.r*0.2,0,0,bird.r);
+    grad.addColorStop(0,'#4a4a52'); grad.addColorStop(0.55,'#2b2b33'); grad.addColorStop(1,'#17171d');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(244,197,66,0.7)'; ctx.stroke();
+    drawGrmMark(bird.r);
+    ctx.restore();
+  }
+
+  function drawGrmMark(r){
+    var s = r * 0.9;
+    ctx.save();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s * 0.24; ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(-s*0.6, -s*0.48); ctx.lineTo(s*0.6, -s*0.48); ctx.lineTo(0, s*0.62); ctx.closePath(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -s*0.48); ctx.lineTo(0, s*0.3); ctx.lineWidth = s * 0.2; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawParticles(dt){
+    ctx.save();
+    for(var i=particles.length-1;i>=0;i--){
+      var p = particles[i];
+      p.age += dt;
+      if(p.age > p.life){ particles.splice(i,1); continue; }
+      p.x += p.vx*dt; p.y += p.vy*dt;
+      ctx.globalAlpha = 1 - (p.age/p.life);
+      ctx.fillStyle = '#f4c542';
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ---------- Fixed-step simulation (mirrors physics.js exactly) ----------
+  var STEP = P.STEP;
+  function simStep(){
+    if (pendingFlap) {
+      // Same rate-limit the server will apply during replay — keeping
+      // these identical is what makes the verified score match what
+      // the player actually saw on screen.
+      if (stepIndex - lastFlapStep >= MIN_FLAP_GAP_STEPS) {
+        bird.vy = P.FLAP_VELOCITY;
+        flapLog.push(stepIndex);
+        lastFlapStep = stepIndex;
+      }
+      pendingFlap = false;
+    }
+
+    bird.vy += P.GRAVITY * STEP;
+    if (bird.vy > P.MAX_FALL_SPEED) bird.vy = P.MAX_FALL_SPEED;
+    bird.y += bird.vy * STEP;
+    bird.rot = Math.max(-0.5, Math.min(1.2, bird.vy/500));
+
+    pipeTimer++;
+    var groundY = LH - GROUND_HEIGHT;
+    var crashed = false;
+
+    if (pipeTimer >= Math.round(1.1/STEP)) {
+      pipeTimer = 0;
+      var margin = 60, gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
+      var top = margin + rng() * (playH - gap - margin*2);
+      pipes.push({ x: LW + PIPE_WIDTH, top: top, gap: gap, passed: false });
+    }
+
+    var speed = P.currentSpeed(score);
+    if (bird.y + bird.r >= groundY) crashed = true;
+    if (bird.y - bird.r <= 0) { bird.y = bird.r; bird.vy = 0; }
+
+    for (var i = pipes.length-1; i>=0; i--){
+      var p = pipes[i];
+      p.x -= speed*STEP;
+      if(!p.passed && p.x + PIPE_WIDTH < bird.x - bird.r){ p.passed = true; score++; scoreEl.textContent = score; }
+      if(p.x < -PIPE_WIDTH-10){ pipes.splice(i,1); continue; }
+      if(!crashed && bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_WIDTH){
+        var bottomY = p.top + p.gap;
+        if (circleRectCollideLocal(bird.x,bird.y,bird.r*0.85, p.x,0,PIPE_WIDTH,p.top)) crashed = true;
+        if (circleRectCollideLocal(bird.x,bird.y,bird.r*0.85, p.x,bottomY,PIPE_WIDTH,groundY-bottomY)) crashed = true;
+      }
+    }
+
+    stepIndex++;
+    if (crashed) { endGame(); }
+  }
+  function circleRectCollideLocal(cx,cy,cr,rx,ry,rw,rh){
+    var closestX = Math.max(rx, Math.min(cx, rx+rw));
+    var closestY = Math.max(ry, Math.min(cy, ry+rh));
+    var dx = cx-closestX, dy = cy-closestY;
+    return (dx*dx+dy*dy) < (cr*cr);
+  }
+
+  // ---------- Main loop ----------
+  var lastTime, accumulator = 0;
+  function render(){
+    ctx.clearRect(0,0,viewW,viewH);
+    ctx.fillStyle = '#05030c';
+    ctx.fillRect(0,0,viewW,viewH);
+    ctx.save();
+    ctx.translate(offX, offY);
+    ctx.scale(scale, scale);
+    drawBackground();
+    for(var i=0;i<pipes.length;i++) drawPipe(pipes[i]);
+    drawGround();
+    drawParticles(1/60);
+    drawBird();
+    ctx.restore();
+  }
+
+  function loop(ts){
+    if(!lastTime) lastTime = ts;
+    var dt = Math.min((ts-lastTime)/1000, 0.05);
+    lastTime = ts;
+    elapsedMs += dt*1000;
+    groundOffset += P.currentSpeed(score)*dt;
+
+    if (state === 'playing') {
+      accumulator += dt;
+      while (accumulator >= STEP) { simStep(); accumulator -= STEP; if(state!=='playing') { accumulator=0; break; } }
+    } else if (state === 'ready') {
+      bird.y = P.BIRD_START_Y + Math.sin(elapsedMs/300)*8;
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  resetGame();
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
