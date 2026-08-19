@@ -24,7 +24,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var PHYSICS_VERSION = 1;
+  var PHYSICS_VERSION = 2;
 
   // ---- Fixed logical playfield (device-independent) ----
   var LOGICAL_W = 480;
@@ -35,10 +35,13 @@
   var GRAVITY = 1900;          // px/s^2
   var FLAP_VELOCITY = -480;    // px/s
   var MAX_FALL_SPEED = 900;
-  var PIPE_GAP_BASE = 122;
+  var PIPE_GAP_BASE = 150;     // was 122 — wider vertical gap between top/bottom pipe
+  var PIPE_GAP_MIN = 120;      // was 100 — never shrinks below this even at high score
   var PIPE_WIDTH = 62;
   var PIPE_SPEED_BASE = 195;
-  var PIPE_INTERVAL_STEPS = Math.round(1.1 / STEP); // ~1100ms between pipes
+  var PIPE_INTERVAL_STEPS = Math.round(1.4 / STEP); // was 1.1 — more horizontal space between pipes
+  var PIPE_MARGIN = 80;        // was 60 — keeps pipes further from screen top/bottom edges
+  var PIPE_MAX_VERTICAL_JUMP = 150; // NEW — max px the next pipe's opening can shift vs the previous one
   var COIN_RADIUS = 16;
   var GROUND_HEIGHT = 70;
   var BIRD_X = LOGICAL_W * 0.32;
@@ -61,10 +64,25 @@
   }
 
   function currentGap(score) {
-    return Math.max(100, PIPE_GAP_BASE - Math.min(score, 20) * 2.2);
+    return Math.max(PIPE_GAP_MIN, PIPE_GAP_BASE - Math.min(score, 20) * 1.5);
   }
   function currentSpeed(score) {
     return PIPE_SPEED_BASE + Math.min(score, 25) * 5;
+  }
+
+  // NEW — instead of a fully independent random top each time, clamp the
+  // next pipe's opening to within PIPE_MAX_VERTICAL_JUMP of the previous
+  // one. This removes the "sudden extreme high/low pipe" feel while still
+  // being deterministic from the seeded rng.
+  function nextPipeTop(rng, prevTop, gap, playH, margin) {
+    var maxRange = playH - gap - margin * 2;
+    if (prevTop === null || prevTop === undefined) {
+      return margin + rng() * maxRange;
+    }
+    var lo = Math.max(margin, prevTop - PIPE_MAX_VERTICAL_JUMP);
+    var hi = Math.min(margin + maxRange, prevTop + PIPE_MAX_VERTICAL_JUMP);
+    if (hi < lo) hi = lo; // degenerate safety
+    return lo + rng() * (hi - lo);
   }
 
   function circleRectCollide(cx, cy, cr, rx, ry, rw, rh) {
@@ -110,6 +128,7 @@
     var score = 0;
     var pipeTimer = 0;
     var groundY = LOGICAL_H - GROUND_HEIGHT;
+    var lastPipeTop = null;
 
     for (var step = 0; step < cappedMax; step++) {
       if (flapSet[step]) {
@@ -123,10 +142,10 @@
       pipeTimer++;
       if (pipeTimer >= PIPE_INTERVAL_STEPS) {
         pipeTimer = 0;
-        var margin = 60;
         var gap = currentGap(score);
         var playH = LOGICAL_H - GROUND_HEIGHT;
-        var top = margin + rng() * (playH - gap - margin * 2);
+        var top = nextPipeTop(rng, lastPipeTop, gap, playH, PIPE_MARGIN);
+        lastPipeTop = top;
         pipes.push({ x: LOGICAL_W + PIPE_WIDTH, top: top, gap: gap, passed: false });
       }
 
@@ -184,9 +203,11 @@
     MAX_FALL_SPEED: MAX_FALL_SPEED,
     MAX_FLAPS_PER_SECOND: MAX_FLAPS_PER_SECOND,
     MAX_STEPS_PER_SESSION: MAX_STEPS_PER_SESSION,
+    PIPE_MARGIN: PIPE_MARGIN,
     makeRng: makeRng,
     currentGap: currentGap,
     currentSpeed: currentSpeed,
+    nextPipeTop: nextPipeTop,
     simulate: simulate
   };
 });
