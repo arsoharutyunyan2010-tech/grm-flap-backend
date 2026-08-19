@@ -411,7 +411,7 @@
   // 6. Game state — driven by physics.js, fixed-step, seeded
   // ============================================================
   var state = 'ready'; // ready | playing | over
-  var bird, pipes, particles;
+  var bird, pipes, particles, lastPipeTop;
   var score, stepIndex, pipeTimer;
   var flapLog, pendingFlap, lastFlapStep;
   var groundOffset, elapsedMs;
@@ -432,6 +432,7 @@
     lastFlapStep = -Infinity;
     groundOffset = 0;
     elapsedMs = 0;
+    lastPipeTop = null;
     scoreEl.textContent = '0';
   }
 
@@ -664,10 +665,11 @@
     var groundY = LH - GROUND_HEIGHT;
     var crashed = false;
 
-    if (pipeTimer >= Math.round(1.1/STEP)) {
+    if (pipeTimer >= Math.round(1.4/STEP)) {
       pipeTimer = 0;
-      var margin = 60, gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
-      var top = margin + rng() * (playH - gap - margin*2);
+      var gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
+      var top = P.nextPipeTop(rng, lastPipeTop, gap, playH, P.PIPE_MARGIN);
+      lastPipeTop = top;
       pipes.push({ x: LW + PIPE_WIDTH, top: top, gap: gap, passed: false });
     }
 
