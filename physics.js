@@ -4,7 +4,8 @@
  * This file is loaded BOTH in the browser (client) and in Node.js (server).
  * The client uses it to actually run the game the player sees.
  * The server uses the EXACT same code to replay the player's inputs
- * (a seed + a list of "flap" steps) and compute the true score.
+ * (a seed + a list of "flap" steps + a list of "revive" steps) and
+ * compute the true score.
  *
  * Because both sides run identical code with identical fixed-point-in-time
  * steps and a seeded PRNG (instead of Math.random()), the simulation is
@@ -24,7 +25,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var PHYSICS_VERSION = 3;
+  var PHYSICS_VERSION = 4;
 
   // ---- Fixed logical playfield (device-independent) ----
   var LOGICAL_W = 480;
@@ -52,6 +53,11 @@
   var MAX_STEPS_PER_SESSION = 60 * 60 * 20; // 20 minutes of play, generous cap
   var MAX_FLAPS_PER_SECOND = 6; // no human taps faster than this sustainably
 
+  // Max number of "watch an ad, continue the same run" revives allowed
+  // per run. Enforced server-side too, so a forged reviveLog can't grant
+  // more than this.
+  var MAX_REVIVES = 2;
+
   // ---- Seeded PRNG (mulberry32) so both sides draw identical "random" pipes ----
   function makeRng(seed) {
     var a = seed >>> 0;
@@ -72,8 +78,6 @@
 
   // Instead of a fully independent random top each time, clamp the next
   // pipe's opening to within PIPE_MAX_VERTICAL_JUMP of the previous one.
-  // This removes the "sudden extreme high/low pipe" feel while still
-  // being deterministic from the seeded rng.
   function nextPipeTop(rng, prevTop, gap, playH, margin) {
     var maxRange = playH - gap - margin * 2;
     if (prevTop === null || prevTop === undefined) {
@@ -94,17 +98,19 @@
   }
 
   /**
-   * Replays a full run from a seed and a set of step indices at which the
-   * player flapped.
+   * Replays a full run from a seed, a set of step indices at which the
+   * player flapped, and a set of step indices at which the player used a
+   * "watch ad, continue" revive (score is kept, bird/pipes reset).
    *
-   * @param {number} seed - session seed (issued by the server at session start)
-   * @param {number[]} flapSteps - sorted array of step indices (0-based) at
-   *        which a flap was applied, as recorded by the client input loop.
-   * @param {number} maxSteps - hard cap on how many steps to simulate
-   *        (server passes the number of real-time-elapsed steps allowed).
-   * @returns {{score:number, crashedAtStep:number|null, steps:number, flapCount:number}}
+   * @param {number} seed
+   * @param {number[]} flapSteps
+   * @param {number} maxSteps
+   * @param {number[]} [reviveSteps] - step indices at which a crash was
+   *        forgiven (up to MAX_REVIVES of them; extras are ignored).
+   * @returns {{score:number, crashedAtStep:number|null, steps:number, flapCount:number, revivesUsed:number}}
    */
-  function simulate(seed, flapSteps, maxSteps) {
+  function simulate(seed, flapSteps, maxSteps, reviveSteps) {
+    reviveSteps = reviveSteps || [];
     var rng = makeRng(seed);
     var flapSet = {};
     var flapCount = 0;
@@ -114,11 +120,18 @@
     for (var i = 0; i < flapSteps.length; i++) {
       var s = flapSteps[i] | 0;
       if (s < 0) continue;
-      // Reject/ignore physically-impossible tap rates instead of trusting them.
       if (s - lastFlapStep < minGapSteps) continue;
       lastFlapStep = s;
       flapSet[s] = true;
       flapCount++;
+    }
+
+    var reviveSet = {};
+    var sortedRevives = reviveSteps.slice().sort(function (a, b) { return a - b; });
+    var revivesAllowedCount = Math.min(sortedRevives.length, MAX_REVIVES);
+    for (var r = 0; r < revivesAllowedCount; r++) {
+      var rs = sortedRevives[r] | 0;
+      if (rs >= 0) reviveSet[rs] = true;
     }
 
     var cappedMax = Math.min(maxSteps | 0, MAX_STEPS_PER_SESSION);
@@ -129,6 +142,7 @@
     var pipeTimer = 0;
     var groundY = LOGICAL_H - GROUND_HEIGHT;
     var lastPipeTop = null;
+    var revivesUsed = 0;
 
     for (var step = 0; step < cappedMax; step++) {
       if (flapSet[step]) {
@@ -179,13 +193,20 @@
       }
 
       if (crashed) {
-        return { score: score, crashedAtStep: step, steps: step + 1, flapCount: flapCount };
+        if (reviveSet[step] && revivesUsed < MAX_REVIVES) {
+          revivesUsed++;
+          bird.y = BIRD_START_Y;
+          bird.vy = FLAP_VELOCITY * 0.7;
+          pipes = [];
+          pipeTimer = 0;
+          lastPipeTop = null;
+          continue; // score is preserved, run continues
+        }
+        return { score: score, crashedAtStep: step, steps: step + 1, flapCount: flapCount, revivesUsed: revivesUsed };
       }
     }
 
-    // Ran out of allotted steps without crashing (e.g. still flying) —
-    // valid mid-game state, not a crash.
-    return { score: score, crashedAtStep: null, steps: cappedMax, flapCount: flapCount };
+    return { score: score, crashedAtStep: null, steps: cappedMax, flapCount: flapCount, revivesUsed: revivesUsed };
   }
 
   return {
@@ -203,6 +224,7 @@
     MAX_FALL_SPEED: MAX_FALL_SPEED,
     MAX_FLAPS_PER_SECOND: MAX_FLAPS_PER_SECOND,
     MAX_STEPS_PER_SESSION: MAX_STEPS_PER_SESSION,
+    MAX_REVIVES: MAX_REVIVES,
     PIPE_MARGIN: PIPE_MARGIN,
     makeRng: makeRng,
     currentGap: currentGap,
