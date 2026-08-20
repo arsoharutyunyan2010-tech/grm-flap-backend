@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -343,6 +344,7 @@
 
 <script>
   window.GRM_FLAP_API_BASE = "https://grm-flap-backend-production.up.railway.app";
+  window.GRM_FLAP_ADSGRAM_BLOCK_ID = "43756";
 </script>
 <script src="physics.js"></script>
 <script>
@@ -354,6 +356,7 @@
   // ============================================================
   var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
   var DEMO_MODE = !API_BASE_URL;
+  var ADSGRAM_BLOCK_ID = window.GRM_FLAP_ADSGRAM_BLOCK_ID || "";
 
   var P = window.GrmFlapPhysics;
   var MAX_REVIVES = P.MAX_REVIVES || 2;
@@ -512,20 +515,27 @@
   }
 
   // ============================================================
-  // 4. Rewarded ads hook
-  //    Wire this to your Mini-App ad network (e.g. Adsgram, RichAds).
-  //    Until a real ad SDK is configured, this always rejects — that
-  //    is expected and intentional (no fake "watched" bypass).
+  // 4. Rewarded ads hook — Adsgram
+  //    Uses window.Adsgram (loaded via sad.min.js) and the block id
+  //    configured in window.GRM_FLAP_ADSGRAM_BLOCK_ID.
   // ============================================================
+  var adController = null;
+  function getAdController(){
+    if (!window.Adsgram) return null;
+    if (!ADSGRAM_BLOCK_ID) return null;
+    if (!adController) {
+      adController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_ID });
+    }
+    return adController;
+  }
+
   function showRewardedAd(){
     return new Promise(function(resolve, reject){
-      if (window.Adsgram && window.Adsgram.init) {
-        // var AdController = window.Adsgram.init({ blockId: "YOUR_BLOCK_ID" });
-        // AdController.show().then(function(){ resolve(); }).catch(reject);
-        reject(new Error('configure your ad network SDK here'));
-        return;
-      }
-      reject(new Error('no ad SDK loaded'));
+      var controller = getAdController();
+      if (!controller) { reject(new Error('no ad SDK loaded')); return; }
+      controller.show()
+        .then(function(){ resolve(); })
+        .catch(function(err){ reject(err || new Error('ad skipped or unavailable')); });
     });
   }
 
