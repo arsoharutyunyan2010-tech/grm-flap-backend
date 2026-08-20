@@ -4,13 +4,18 @@
  * ⚠️ PRODUCTION NOTE: this resets whenever the process restarts and does
  * not work across multiple server instances. For real deployment, swap
  * this module for Redis (sessions, short TTL) + Postgres/Mongo
- * (leaderboard history) behind the same function signatures below.
+ * (leaderboard history, balances, withdrawals) behind the same function
+ * signatures below.
  */
 
 const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used }
 const weeklyScores = new Map();   // weekKey -> Map(userId -> { name, score, updatedAt })
 const rewardHistory = [];         // archived weekly results
 const rateBuckets = new Map();    // userId -> [timestamps]
+const allTimeBest = new Map();    // userId -> { name, score }
+const balances = new Map();       // userId -> number (GRM)
+const withdrawals = [];           // { id, userId, name, address, amount, status, requestedAt, paidAt? }
+let withdrawalSeq = 1;
 
 function currentWeekKey(d = new Date()) {
   // ISO week key, e.g. "2026-W34" — ties the leaderboard to a Mon–Sun week (UTC).
@@ -77,6 +82,66 @@ function archiveWeek(weekKey, payouts) {
   weeklyScores.delete(weekKey);
 }
 
+// ---------------------------------------------------------------
+// All-time best score (independent of the weekly leaderboard, which
+// resets). Shown on the player's profile.
+// ---------------------------------------------------------------
+function updateAllTimeBest(userId, name, score) {
+  const existing = allTimeBest.get(userId);
+  if (!existing || score > existing.score) {
+    allTimeBest.set(userId, { name, score });
+  }
+  return allTimeBest.get(userId).score;
+}
+function getAllTimeBest(userId) {
+  const e = allTimeBest.get(userId);
+  return e ? e.score : 0;
+}
+
+// ---------------------------------------------------------------
+// GRM balance — credited by the weekly reward job (see rewards.js),
+// debited when a withdrawal request is made.
+// ---------------------------------------------------------------
+function getBalance(userId) {
+  return balances.get(userId) || 0;
+}
+function creditBalance(userId, amount) {
+  const bal = getBalance(userId) + amount;
+  balances.set(userId, bal);
+  return bal;
+}
+
+// ---------------------------------------------------------------
+// Withdrawal requests — the player enters a TON address + amount,
+// the amount is deducted from their balance immediately (so it can't
+// be double-spent), and the request sits as "pending" until the admin
+// manually sends the TON and marks it paid.
+// ---------------------------------------------------------------
+function requestWithdrawal(userId, name, address, amount) {
+  const bal = getBalance(userId);
+  if (!(amount > 0)) return { ok: false, error: 'invalid amount' };
+  if (amount > bal) return { ok: false, error: 'insufficient balance' };
+  balances.set(userId, bal - amount);
+  const request = {
+    id: withdrawalSeq++,
+    userId, name, address, amount,
+    status: 'pending',
+    requestedAt: Date.now(),
+  };
+  withdrawals.push(request);
+  return { ok: true, request, balance: bal - amount };
+}
+function listWithdrawals(status) {
+  return status ? withdrawals.filter(w => w.status === status) : withdrawals.slice();
+}
+function markWithdrawalPaid(id) {
+  const w = withdrawals.find(w => w.id === id);
+  if (!w) return null;
+  w.status = 'paid';
+  w.paidAt = Date.now();
+  return w;
+}
+
 module.exports = {
   currentWeekKey,
   createSession, getSession, consumeSession,
@@ -84,4 +149,7 @@ module.exports = {
   allowRequest,
   archiveWeek,
   rewardHistory,
+  updateAllTimeBest, getAllTimeBest,
+  getBalance, creditBalance,
+  requestWithdrawal, listWithdrawals, markWithdrawalPaid,
 };
