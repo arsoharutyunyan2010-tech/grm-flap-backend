@@ -5,7 +5,7 @@
  * natural choice, matching store.currentWeekKey()). It:
  *   1. reads the just-finished week's leaderboard,
  *   2. computes GRM payouts by rank tier,
- *   3. hands them to distributeGrmRewards() for actual on-chain/DB payout,
+ *   3. credits each winner's balance (visible in Profile/Wallet),
  *   4. archives the week and clears it for the next round.
  *
  * Wire up a real scheduler in production, e.g.:
@@ -27,16 +27,15 @@ function grmForRank(rank) {
 }
 
 /**
- * Actually send GRM to winners. This is a stub — plug in your real
- * payment/blockchain integration here (e.g. a GRM ledger service, an
- * on-chain transfer, or a manual-approval payout queue). Keep it
- * idempotent: payouts should be safe to retry without double-paying.
+ * Credits each winner's GRM balance. The actual TON payout happens
+ * later, manually, when the player submits a withdrawal request from
+ * the Wallet tab and the admin sends it — this function just makes the
+ * GRM show up as spendable balance.
  */
-function distributeGrmRewards(payouts) {
+function distributeGrmRewards(payouts, store) {
   payouts.forEach(p => {
-    // TODO: replace with real transfer call, e.g.:
-    // await grmLedger.credit(p.userId, p.grm, { reason: `weekly-reward:${p.weekKey}:rank${p.rank}` });
-    console.log(`[rewards] would pay ${p.grm} GRM to user ${p.userId} (rank #${p.rank}, score ${p.score})`);
+    if (store) store.creditBalance(p.userId, p.grm);
+    console.log(`[rewards] credited ${p.grm} GRM to user ${p.userId} (rank #${p.rank}, score ${p.score})`);
   });
   return payouts;
 }
@@ -49,7 +48,7 @@ function runWeeklyRewardJob(store, weekKeyOverride) {
     .map(e => ({ ...e, weekKey, grm: grmForRank(e.rank) }))
     .filter(p => p.grm > 0);
 
-  distributeGrmRewards(payouts);
+  distributeGrmRewards(payouts, store);
   store.archiveWeek(weekKey, payouts);
 
   return { weekKey, paidOut: payouts.length, payouts };
