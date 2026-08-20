@@ -20,6 +20,11 @@ const app = express();
 app.use(express.json({ limit: '256kb' }));
 app.use(express.static(__dirname));
 
+// Maps sessionId -> verified display name, resolved once at session
+// start from the (verified) Telegram initData. Never trust a name the
+// client claims later at submit time.
+const sessionNames = new Map();
+
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const ALLOW_INSECURE_DEV = process.env.ALLOW_INSECURE_DEV === 'true'; // local testing only, without a real Telegram launch
 const INIT_DATA_MAX_AGE_SECONDS = 24 * 60 * 60;
@@ -58,6 +63,7 @@ app.post('/api/start-session', (req, res) => {
   const sessionId = crypto.randomBytes(16).toString('hex');
   const seed = crypto.randomInt(1, 2 ** 31 - 1);
   store.createSession(sessionId, String(user.id), seed);
+  sessionNames.set(sessionId, displayName(user));
 
   res.json({ sessionId, seed, physicsVersion: P.VERSION });
 });
@@ -99,7 +105,8 @@ app.post('/api/submit-score', (req, res) => {
 
   const verifiedScore = replay.score;
   const weekKey = store.currentWeekKey();
-  const name = req.body.name || 'Player'; // display name resolved from initData at start-session in production; simplified here
+  const name = sessionNames.get(sessionId) || 'Player';
+  sessionNames.delete(sessionId);
   const best = store.submitWeeklyScore(session.userId, name, verifiedScore, weekKey);
   const rankInfo = store.getUserRank(session.userId, weekKey);
 
