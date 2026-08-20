@@ -344,7 +344,6 @@
 
 <script>
   window.GRM_FLAP_API_BASE = "https://grm-flap-backend-production.up.railway.app";
-  window.GRM_FLAP_ADSGRAM_BLOCK_ID = "43756";
 </script>
 <script src="physics.js"></script>
 <script>
@@ -356,7 +355,6 @@
   // ============================================================
   var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
   var DEMO_MODE = !API_BASE_URL;
-  var ADSGRAM_BLOCK_ID = window.GRM_FLAP_ADSGRAM_BLOCK_ID || "";
 
   var P = window.GrmFlapPhysics;
   var MAX_REVIVES = P.MAX_REVIVES || 2;
@@ -515,27 +513,16 @@
   }
 
   // ============================================================
-  // 4. Rewarded ads hook — Adsgram
-  //    Uses window.Adsgram (loaded via sad.min.js) and the block id
-  //    configured in window.GRM_FLAP_ADSGRAM_BLOCK_ID.
+  // 4. Rewarded ads — Adsgram integration (Block ID: 43756)
   // ============================================================
-  var adController = null;
-  function getAdController(){
-    if (!window.Adsgram) return null;
-    if (!ADSGRAM_BLOCK_ID) return null;
-    if (!adController) {
-      adController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_ID });
-    }
-    return adController;
-  }
+  var AdController = (window.Adsgram && window.Adsgram.init)
+    ? window.Adsgram.init({ blockId: "43756" })
+    : null;
 
   function showRewardedAd(){
     return new Promise(function(resolve, reject){
-      var controller = getAdController();
-      if (!controller) { reject(new Error('no ad SDK loaded')); return; }
-      controller.show()
-        .then(function(){ resolve(); })
-        .catch(function(err){ reject(err || new Error('ad skipped or unavailable')); });
+      if (!AdController) { reject(new Error('no ad SDK loaded')); return; }
+      AdController.show().then(function(){ resolve(); }).catch(function(err){ reject(err); });
     });
   }
 
