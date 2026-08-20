@@ -162,8 +162,71 @@
   .lb-rank{ width: 26px; opacity:0.7; font-weight:700; }
   .lb-name{ flex:1; text-align:left; padding: 0 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lb-score{ color: var(--gold); font-weight:800; }
-  .lb-list{ max-height: 46vh; overflow-y:auto; margin: 10px 0; }
+  .lb-list{ max-height: 60vh; overflow-y:auto; margin: 10px 0; }
   .reward-note{ font-size: 11px; opacity:0.6; margin-top: 10px; line-height:1.4; }
+
+  /* ---------- Bottom navigation ---------- */
+  .navbar{
+    position:fixed; left:14px; right:14px; bottom: max(14px, env(safe-area-inset-bottom));
+    z-index:50;
+    background: rgba(15,8,28,0.92);
+    border: 1px solid rgba(244,197,66,0.25);
+    border-radius: 22px;
+    display:flex; justify-content:space-around; align-items:center;
+    padding: 8px 4px;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .nav-btn{
+    all: unset;
+    display:flex; align-items:center; justify-content:center;
+    width: 46px; height: 46px;
+    border-radius: 14px;
+    cursor:pointer;
+    color: rgba(255,247,230,0.55);
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .nav-btn svg{ width:22px; height:22px; }
+  .nav-btn.active{
+    color:#1b1033;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+    box-shadow: 0 4px 14px rgba(244,197,66,0.4);
+  }
+
+  /* ---------- Full-screen pages (profile / wallet / leaderboard / tasks) ---------- */
+  .page{
+    position:fixed; inset:0;
+    background: radial-gradient(circle at 50% 0%, #241245 0%, #0d0620 70%);
+    color: var(--ink);
+    overflow-y:auto;
+    z-index:20;
+    padding: max(24px, env(safe-area-inset-top)) 20px 120px;
+  }
+  .page-inner{ max-width: 420px; margin: 0 auto; }
+  .page .title{ font-size:24px; margin-bottom: 4px; }
+
+  .avatar-wrap{
+    width: 88px; height: 88px; border-radius: 50%;
+    margin: 10px auto 14px;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+    border: 3px solid var(--gold);
+    background: linear-gradient(180deg, #4a4a52, #17171d);
+    font-size: 32px; font-weight:800; color: var(--gold);
+  }
+  .avatar-wrap img{ width:100%; height:100%; object-fit:cover; }
+
+  .profile-name{ text-align:center; font-size:20px; font-weight:800; margin-bottom: 18px; }
+
+  .field-label{ display:block; font-size:12px; opacity:0.7; margin: 16px 0 6px; letter-spacing:0.5px; }
+  .field-input{
+    width:100%; padding: 12px 14px; border-radius: 12px;
+    border: 1px solid rgba(244,197,66,0.35);
+    background: rgba(255,255,255,0.06);
+    color: var(--ink); font-size: 15px; font-family: inherit;
+    outline:none;
+  }
+  .field-input:focus{ border-color: var(--gold); }
 </style>
 </head>
 <body>
@@ -182,35 +245,100 @@
       </svg>
       <div class="title">GRM FLAP</div>
       <div class="sub">Tap to keep the coin flying</div>
-      <button id="adBtn" class="ad">▶ WATCH AD FOR BONUS</button>
       <button id="startBtn">TAP TO START</button>
-      <button id="lbBtn" class="secondary">🏆 LEADERBOARD</button>
-      <div class="hint">Tap / click / space to flap</div>
+      <div class="hint">A short ad plays before each run</div>
     </div>
   </div>
 
   <div class="overlay hidden" id="overCard">
     <div class="card">
-      <div class="title" style="font-size:26px;">GAME OVER</div>
-      <div class="stat-row"><span>Score</span><b id="finalScore">0</b></div>
-      <div class="stat-row"><span>Best</span><b id="finalBest">0</b></div>
-      <div class="stat-row"><span>Rank</span><b id="finalRank">—</b></div>
-      <div id="newBestBadge" class="new-badge hidden">NEW BEST!</div>
-      <div id="verifyNote" class="hint">Verifying score with server…</div>
-      <button id="restartBtn">PLAY AGAIN</button>
-      <button id="lbBtn2" class="secondary">🏆 LEADERBOARD</button>
+      <div id="crashMode">
+        <div class="title" style="font-size:26px;">OOPS!</div>
+        <div class="stat-row"><span>Score</span><b id="crashScore">0</b></div>
+        <button id="continueBtn" class="ad">▶ WATCH AD & CONTINUE</button>
+        <button id="endRunBtn" class="secondary">END RUN</button>
+        <div class="hint" id="continueHint"></div>
+      </div>
+      <div id="finalMode" class="hidden">
+        <div class="title" style="font-size:26px;">GAME OVER</div>
+        <div class="stat-row"><span>Score</span><b id="finalScore">0</b></div>
+        <div class="stat-row"><span>Best</span><b id="finalBest">0</b></div>
+        <div class="stat-row"><span>Rank</span><b id="finalRank">—</b></div>
+        <div id="newBestBadge" class="new-badge hidden">NEW BEST!</div>
+        <div id="verifyNote" class="hint">Verifying score with server…</div>
+        <button id="restartBtn">PLAY AGAIN</button>
+      </div>
     </div>
   </div>
+</div>
 
-  <div class="overlay hidden" id="lbCard">
-    <div class="card">
-      <div class="title" style="font-size:24px;">WEEKLY TOP</div>
-      <div class="sub" id="lbPeriod">this week's GRM rewards</div>
-      <div class="lb-list" id="lbList"></div>
-      <div class="reward-note">Top players split the weekly GRM prize pool. Scores are verified server-side and cannot be forged from the browser.</div>
-      <button id="lbCloseBtn" class="secondary">CLOSE</button>
-    </div>
+<!-- ---------- Profile page ---------- -->
+<div class="page hidden" id="page-profile">
+  <div class="page-inner">
+    <div class="title">PROFILE</div>
+    <div class="avatar-wrap" id="profileAvatar"></div>
+    <div class="profile-name" id="profileName">Player</div>
+    <div class="stat-row"><span>Best score</span><b id="profileBest">0</b></div>
+    <div class="stat-row"><span>GRM balance</span><b id="profileBalance">0</b></div>
+    <div class="stat-row"><span>This week's rank</span><b id="profileRank">—</b></div>
+    <div class="hint" id="profileHint"></div>
   </div>
+</div>
+
+<!-- ---------- Wallet page ---------- -->
+<div class="page hidden" id="page-wallet">
+  <div class="page-inner">
+    <div class="title">WALLET</div>
+    <div class="sub">Request a GRM withdrawal to your TON wallet</div>
+    <div class="stat-row"><span>GRM balance</span><b id="walletBalance">0</b></div>
+
+    <label class="field-label">TON wallet address</label>
+    <input type="text" id="walletAddress" class="field-input" placeholder="UQ… / EQ…" autocomplete="off">
+
+    <label class="field-label">Amount (GRM)</label>
+    <input type="number" id="walletAmount" class="field-input" placeholder="0" min="0" step="1">
+
+    <button id="walletSubmitBtn">REQUEST WITHDRAWAL</button>
+    <div class="hint" id="walletMsg"></div>
+    <div class="reward-note">Requests are reviewed and paid out manually. This may take a little time.</div>
+  </div>
+</div>
+
+<!-- ---------- Leaderboard page ---------- -->
+<div class="page hidden" id="page-leaderboard">
+  <div class="page-inner">
+    <div class="title">WEEKLY TOP</div>
+    <div class="sub" id="lbPagePeriod">this week's GRM rewards</div>
+    <div class="lb-list" id="lbPageList"></div>
+    <div class="reward-note">Top players split the weekly GRM prize pool. Scores are verified server-side and cannot be forged from the browser.</div>
+  </div>
+</div>
+
+<!-- ---------- Tasks page (placeholder) ---------- -->
+<div class="page hidden" id="page-tasks">
+  <div class="page-inner">
+    <div class="title">TASKS</div>
+    <div class="hint">Coming soon.</div>
+  </div>
+</div>
+
+<!-- ---------- Bottom nav ---------- -->
+<div class="navbar" id="navbar">
+  <button class="nav-btn" data-page="profile" title="Profile">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
+  </button>
+  <button class="nav-btn" data-page="wallet" title="Wallet">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M7 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><circle cx="16" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg>
+  </button>
+  <button class="nav-btn active" data-page="home" title="Home">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+  </button>
+  <button class="nav-btn" data-page="leaderboard" title="Leaderboard">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="4" height="8"/><rect x="10" y="9" width="4" height="12"/><rect x="17" y="5" width="4" height="16"/></svg>
+  </button>
+  <button class="nav-btn" data-page="tasks" title="Tasks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9z"/><path d="M9 12l2 2 4-4"/></svg>
+  </button>
 </div>
 
 <script>
@@ -222,26 +350,28 @@
   "use strict";
 
   // ============================================================
-  // 0. CONFIG — point this at your deployed backend (see server.js)
+  // 0. CONFIG
   // ============================================================
-  var API_BASE_URL = window.GRM_FLAP_API_BASE || ""; // e.g. "https://api.yourdomain.com"
-  var DEMO_MODE = !API_BASE_URL; // no backend configured -> local demo only, clearly labeled
+  var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
+  var DEMO_MODE = !API_BASE_URL;
 
   var P = window.GrmFlapPhysics;
+  var MAX_REVIVES = P.MAX_REVIVES || 2;
 
   var canvas = document.getElementById('game');
   var ctx = canvas.getContext('2d');
   var scoreEl = document.getElementById('score');
+  var wrap = document.getElementById('wrap');
   var startCard = document.getElementById('startCard');
   var overCard = document.getElementById('overCard');
-  var lbCard = document.getElementById('lbCard');
+  var crashMode = document.getElementById('crashMode');
+  var finalMode = document.getElementById('finalMode');
   var startBtn = document.getElementById('startBtn');
   var restartBtn = document.getElementById('restartBtn');
-  var adBtn = document.getElementById('adBtn');
-  var lbBtn = document.getElementById('lbBtn');
-  var lbBtn2 = document.getElementById('lbBtn2');
-  var lbCloseBtn = document.getElementById('lbCloseBtn');
-  var lbList = document.getElementById('lbList');
+  var continueBtn = document.getElementById('continueBtn');
+  var endRunBtn = document.getElementById('endRunBtn');
+  var continueHint = document.getElementById('continueHint');
+  var crashScoreEl = document.getElementById('crashScore');
   var finalScoreEl = document.getElementById('finalScore');
   var finalBestEl = document.getElementById('finalBest');
   var finalRankEl = document.getElementById('finalRank');
@@ -270,7 +400,7 @@
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
   // ============================================================
-  // 2. Canvas sizing — fixed LOGICAL playfield, letterboxed to device
+  // 2. Canvas sizing
   // ============================================================
   var LW = P.LOGICAL_W, LH = P.LOGICAL_H;
   var DPR, scale, offX, offY, viewW, viewH;
@@ -296,9 +426,9 @@
   var STORAGE_KEY = 'grmflap_best_local';
 
   // ============================================================
-  // 3. Session (server-issued seed + one-time token)
+  // 3. Session
   // ============================================================
-  var session = null; // { sessionId, seed, startedAt }
+  var session = null;
 
   function localSeed(){ return (Date.now() ^ Math.floor(Math.random()*1e9)) >>> 0; }
 
@@ -331,7 +461,7 @@
     });
   }
 
-  function submitScore(flapLog, totalSteps, clientScore){
+  function submitScore(flapLog, reviveLog, totalSteps, clientScore){
     if (DEMO_MODE || !session.sessionId) {
       return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false });
     }
@@ -340,6 +470,7 @@
       body: JSON.stringify({
         sessionId: session.sessionId,
         flapLog: flapLog,
+        reviveLog: reviveLog,
         totalSteps: totalSteps,
         clientScore: clientScore
       })
@@ -365,17 +496,30 @@
     return apiFetch('/api/leaderboard' + (tgUser ? ('?uid='+tgUser.id) : ''), { method:'GET' });
   }
 
+  function fetchProfile(){
+    if (DEMO_MODE) {
+      return Promise.resolve({
+        name: tgUser ? (tgUser.username ? ('@'+tgUser.username) : tgUser.first_name) : 'Player',
+        best: loadBest(), balance: 0, rank: null, weekKey: 'demo'
+      });
+    }
+    return apiFetch('/api/profile', { method:'POST', body: JSON.stringify({ initData: initData }) });
+  }
+
+  function requestWithdrawal(address, amount){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    return apiFetch('/api/withdraw', { method:'POST', body: JSON.stringify({ initData: initData, address: address, amount: amount }) });
+  }
+
   // ============================================================
   // 4. Rewarded ads hook
-  //    Wire this to your Mini-App ad network (e.g. Adsgram, RichAds,
-  //    or Telegram's own Ad Network SDK once available in your region).
-  //    Reward is only granted after the ad SDK confirms completion —
-  //    never grant it optimistically from the button click.
+  //    Wire this to your Mini-App ad network (e.g. Adsgram, RichAds).
+  //    Until a real ad SDK is configured, this always rejects — that
+  //    is expected and intentional (no fake "watched" bypass).
   // ============================================================
   function showRewardedAd(){
     return new Promise(function(resolve, reject){
       if (window.Adsgram && window.Adsgram.init) {
-        // Example integration shape (uncomment & configure with your Block ID):
         // var AdController = window.Adsgram.init({ blockId: "YOUR_BLOCK_ID" });
         // AdController.show().then(function(){ resolve(); }).catch(reject);
         reject(new Error('configure your ad network SDK here'));
@@ -385,24 +529,8 @@
     });
   }
 
-  adBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    adBtn.disabled = true;
-    adBtn.textContent = 'LOADING AD…';
-    showRewardedAd().then(function(){
-      adBtn.textContent = '✓ BONUS GRANTED';
-      // The bonus itself (extra life, head start, score multiplier flag, etc.)
-      // should also be recorded in the session on the SERVER when the ad
-      // network confirms, so a fake client-side "ad watched" event can't
-      // be used to inflate a verified score.
-    }).catch(function(){
-      adBtn.textContent = '▶ WATCH AD FOR BONUS';
-      adBtn.disabled = false;
-    });
-  });
-
   // ============================================================
-  // 5. Local "best" (device-only, cosmetic — server leaderboard is authoritative)
+  // 5. Local "best" (device-only, cosmetic)
   // ============================================================
   function loadBest(){
     try{ var v = localStorage.getItem(STORAGE_KEY); return v?parseInt(v,10):0; }catch(e){ return 0; }
@@ -411,16 +539,14 @@
   var best = loadBest();
 
   // ============================================================
-  // 6. Game state — driven by physics.js, fixed-step, seeded
+  // 6. Game state
   // ============================================================
-  var state = 'ready'; // ready | playing | over
+  var state = 'ready'; // ready | playing | crashed | over
   var bird, pipes, particles, lastPipeTop;
   var score, stepIndex, pipeTimer;
-  var flapLog, pendingFlap, lastFlapStep;
+  var flapLog, reviveLog, revivesUsed, pendingFlap, lastFlapStep;
   var groundOffset, elapsedMs;
   var rng;
-  // Must match physics.js's own rate-limit exactly, or the client's
-  // displayed run can silently diverge from what the server verifies.
   var MIN_FLAP_GAP_STEPS = Math.floor((1 / P.MAX_FLAPS_PER_SECOND) / P.STEP);
 
   function resetGame(){
@@ -431,6 +557,8 @@
     stepIndex = 0;
     pipeTimer = 0;
     flapLog = [];
+    reviveLog = [];
+    revivesUsed = 0;
     pendingFlap = false;
     lastFlapStep = -Infinity;
     groundOffset = 0;
@@ -440,8 +568,7 @@
   }
 
   function flap(){
-    if(state === 'ready'){ beginRound(); return; }
-    if(state === 'over') return;
+    if(state === 'ready' || state === 'crashed' || state === 'over') return;
     pendingFlap = true;
     for(var i=0;i<6;i++){
       particles.push({
@@ -456,16 +583,50 @@
     startCard.classList.add('hidden');
     overCard.classList.add('hidden');
     startBtn.disabled = true;
-    startSession().then(function(){
+    startBtn.textContent = 'LOADING AD…';
+    showRewardedAd().then(function(){
+      return startSession();
+    }).then(function(){
       startBtn.disabled = false;
+      startBtn.textContent = 'TAP TO START';
       resetGame();
       rng = P.makeRng(session.seed);
       state = 'playing';
       bird.vy = P.FLAP_VELOCITY * 0.7;
+    }).catch(function(){
+      startBtn.disabled = false;
+      startBtn.textContent = 'TAP TO START';
+      startCard.classList.remove('hidden');
+      setSyncBadge('ad unavailable — try again', 'err');
     });
   }
 
-  function endGame(){
+  function handleCrash(){
+    state = 'crashed';
+    crashScoreEl.textContent = score;
+    var canContinue = revivesUsed < MAX_REVIVES;
+    if (!canContinue) { finalizeRun(); return; }
+    continueBtn.disabled = false;
+    continueBtn.textContent = '▶ WATCH AD & CONTINUE';
+    continueHint.textContent = (MAX_REVIVES - revivesUsed) + ' continue(s) left';
+    crashMode.classList.remove('hidden');
+    finalMode.classList.add('hidden');
+    overCard.classList.remove('hidden');
+  }
+
+  function doRevive(){
+    reviveLog.push(stepIndex);
+    revivesUsed++;
+    bird.y = P.BIRD_START_Y;
+    bird.vy = P.FLAP_VELOCITY * 0.7;
+    pipes = [];
+    pipeTimer = 0;
+    lastPipeTop = null;
+    overCard.classList.add('hidden');
+    state = 'playing';
+  }
+
+  function finalizeRun(){
     state = 'over';
     var totalSteps = stepIndex;
     var clientScore = score;
@@ -476,9 +637,11 @@
     verifyNote.textContent = DEMO_MODE ? 'Demo mode — score not saved to server.' : 'Verifying score with server…';
     verifyNote.classList.remove('hidden');
     newBestBadge.classList.add('hidden');
+    crashMode.classList.add('hidden');
+    finalMode.classList.remove('hidden');
     overCard.classList.remove('hidden');
 
-    submitScore(flapLog, totalSteps, clientScore).then(function(res){
+    submitScore(flapLog, reviveLog, totalSteps, clientScore).then(function(res){
       var verifiedScore = res.verified ? res.score : clientScore;
       finalScoreEl.textContent = verifiedScore;
       if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
@@ -504,43 +667,129 @@
   window.addEventListener('keydown', function(e){
     if(e.code === 'Space' || e.code === 'ArrowUp'){ e.preventDefault(); flap(); }
   });
+
   startBtn.addEventListener('click', function(e){ e.preventDefault(); beginRound(); });
-  restartBtn.addEventListener('click', function(e){ e.preventDefault(); beginRound(); });
+
+  restartBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    overCard.classList.add('hidden');
+    startCard.classList.remove('hidden');
+  });
+
+  continueBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    continueBtn.disabled = true;
+    continueBtn.textContent = 'LOADING AD…';
+    showRewardedAd().then(function(){
+      doRevive();
+    }).catch(function(){
+      continueBtn.disabled = false;
+      continueBtn.textContent = '▶ WATCH AD & CONTINUE';
+      continueHint.textContent = 'Ad unavailable — try again';
+    });
+  });
+
+  endRunBtn.addEventListener('click', function(e){ e.preventDefault(); finalizeRun(); });
+
   document.body.addEventListener('touchmove', function(e){ e.preventDefault(); }, {passive:false});
 
-  // ---------- Leaderboard UI ----------
-  function renderLeaderboard(data){
-    lbList.innerHTML = '';
+  // ---------- Leaderboard page ----------
+  function renderLeaderboardInto(el, data){
+    el.innerHTML = '';
     var entries = data.entries || [];
     if (entries.length === 0) {
-      lbList.innerHTML = '<div class="hint">No scores yet this week — be the first!</div>';
+      el.innerHTML = '<div class="hint">No scores yet this week — be the first!</div>';
     }
     entries.forEach(function(e){
       var row = document.createElement('div');
       row.className = 'lb-row' + (data.me && data.me.rank === e.rank ? ' me' : '');
       row.innerHTML = '<span class="lb-rank">#'+e.rank+'</span><span class="lb-name">'+
         (e.name||'Player').replace(/</g,'&lt;') +'</span><span class="lb-score">'+e.score+'</span>';
-      lbList.appendChild(row);
+      el.appendChild(row);
     });
     if (data.me && !entries.some(function(e){return e.rank===data.me.rank;})) {
       var row = document.createElement('div');
       row.className = 'lb-row me';
       row.innerHTML = '<span class="lb-rank">#'+data.me.rank+'</span><span class="lb-name">You</span><span class="lb-score">'+data.me.score+'</span>';
-      lbList.appendChild(row);
+      el.appendChild(row);
     }
   }
-  function openLeaderboard(){
-    lbList.innerHTML = '<div class="hint">Loading…</div>';
-    lbCard.classList.remove('hidden');
-    fetchLeaderboard().then(renderLeaderboard).catch(function(){
-      lbList.innerHTML = '<div class="hint">Could not load leaderboard.</div>';
+  function loadLeaderboardPage(){
+    var list = document.getElementById('lbPageList');
+    list.innerHTML = '<div class="hint">Loading…</div>';
+    fetchLeaderboard().then(function(data){ renderLeaderboardInto(list, data); }).catch(function(){
+      list.innerHTML = '<div class="hint">Could not load leaderboard.</div>';
     });
   }
-  lbBtn.addEventListener('click', function(e){ e.preventDefault(); openLeaderboard(); });
-  lbBtn2.addEventListener('click', function(e){ e.preventDefault(); openLeaderboard(); });
-  lbCloseBtn.addEventListener('click', function(e){ e.preventDefault(); lbCard.classList.add('hidden'); });
 
-  // ---------- Drawing (logical LW x LH coordinate space) ----------
+  // ---------- Profile page ----------
+  function loadProfilePage(){
+    var avatarEl = document.getElementById('profileAvatar');
+    avatarEl.innerHTML = '';
+    if (tgUser && tgUser.photo_url) {
+      var img = document.createElement('img');
+      img.src = tgUser.photo_url;
+      avatarEl.appendChild(img);
+    } else {
+      var base = tgUser && (tgUser.first_name || tgUser.username) ? (tgUser.first_name || tgUser.username) : 'P';
+      avatarEl.textContent = base.charAt(0).toUpperCase();
+    }
+    document.getElementById('profileName').textContent = tgUser ? (tgUser.username ? '@'+tgUser.username : (tgUser.first_name||'Player')) : 'Player';
+    document.getElementById('profileHint').textContent = 'Loading…';
+    fetchProfile().then(function(p){
+      document.getElementById('profileBest').textContent = p.best;
+      document.getElementById('profileBalance').textContent = p.balance + ' GRM';
+      document.getElementById('profileRank').textContent = p.rank ? ('#'+p.rank) : '—';
+      document.getElementById('profileHint').textContent = DEMO_MODE ? 'Demo mode — connect a backend to see real stats.' : '';
+    }).catch(function(){
+      document.getElementById('profileHint').textContent = 'Could not load profile.';
+    });
+  }
+
+  // ---------- Wallet page ----------
+  function loadWalletPage(){
+    var msg = document.getElementById('walletMsg');
+    msg.textContent = DEMO_MODE ? 'Demo mode — connect a backend to withdraw.' : '';
+    fetchProfile().then(function(p){
+      document.getElementById('walletBalance').textContent = p.balance + ' GRM';
+    }).catch(function(){});
+  }
+  document.getElementById('walletSubmitBtn').addEventListener('click', function(e){
+    e.preventDefault();
+    var addr = document.getElementById('walletAddress').value.trim();
+    var amt = parseFloat(document.getElementById('walletAmount').value);
+    var msg = document.getElementById('walletMsg');
+    if (!addr) { msg.textContent = 'Enter a TON wallet address.'; return; }
+    if (!(amt > 0)) { msg.textContent = 'Enter a valid amount.'; return; }
+    msg.textContent = 'Submitting…';
+    requestWithdrawal(addr, amt).then(function(res){
+      msg.textContent = 'Withdrawal request submitted. Balance: ' + res.balance + ' GRM';
+      document.getElementById('walletBalance').textContent = res.balance + ' GRM';
+      document.getElementById('walletAddress').value = '';
+      document.getElementById('walletAmount').value = '';
+    }).catch(function(err){
+      msg.textContent = 'Error: ' + (err.message || err);
+    });
+  });
+
+  // ---------- Nav switching ----------
+  document.querySelectorAll('.nav-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var page = btn.getAttribute('data-page');
+      document.querySelectorAll('.nav-btn').forEach(function(b){
+        b.classList.toggle('active', b.getAttribute('data-page') === page);
+      });
+      wrap.classList.toggle('hidden', page !== 'home');
+      ['profile','wallet','leaderboard','tasks'].forEach(function(p){
+        document.getElementById('page-'+p).classList.toggle('hidden', page !== p);
+      });
+      if (page === 'profile') loadProfilePage();
+      if (page === 'wallet') loadWalletPage();
+      if (page === 'leaderboard') loadLeaderboardPage();
+    });
+  });
+
+  // ---------- Drawing ----------
   function drawBackground(){
     ctx.save();
     ctx.globalAlpha = 0.5;
@@ -644,13 +893,10 @@
     ctx.restore();
   }
 
-  // ---------- Fixed-step simulation (mirrors physics.js exactly) ----------
+  // ---------- Fixed-step simulation (mirrors physics.js exactly, incl. revive) ----------
   var STEP = P.STEP;
   function simStep(){
     if (pendingFlap) {
-      // Same rate-limit the server will apply during replay — keeping
-      // these identical is what makes the verified score match what
-      // the player actually saw on screen.
       if (stepIndex - lastFlapStep >= MIN_FLAP_GAP_STEPS) {
         bird.vy = P.FLAP_VELOCITY;
         flapLog.push(stepIndex);
@@ -693,7 +939,7 @@
     }
 
     stepIndex++;
-    if (crashed) { endGame(); }
+    if (crashed) { handleCrash(); }
   }
   function circleRectCollideLocal(cx,cy,cr,rx,ry,rw,rh){
     var closestX = Math.max(rx, Math.min(cx, rx+rw));
