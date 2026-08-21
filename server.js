@@ -219,6 +219,19 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
 });
 
 // ---------------------------------------------------------------
+// GET /adsgram-reward?userid=...
+// Server-side postback Adsgram calls when a rewarded ad has been
+// watched in full. The game's own logic (start-session / revive) is
+// already what actually gates the game, so this endpoint just has to
+// exist and respond 200 — it's logged for visibility/debugging.
+// ---------------------------------------------------------------
+app.get('/adsgram-reward', (req, res) => {
+  const userId = req.query.userid || 'unknown';
+  console.log(`[adsgram] reward postback received for user ${userId}`);
+  res.status(200).send('OK');
+});
+
+// ---------------------------------------------------------------
 // Weekly reward distribution (see rewards.js).
 // ---------------------------------------------------------------
 const { runWeeklyRewardJob } = require('./rewards.js');
