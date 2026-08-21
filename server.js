@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
+require('./bot.js'); // Starts the Telegram bot (long polling) in this same process
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
