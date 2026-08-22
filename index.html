@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -137,10 +136,6 @@
     color: var(--ink);
     box-shadow: 0 5px 0 rgba(0,0,0,0.3), 0 8px 18px rgba(0,0,0,0.3);
   }
-  button.ad{
-    background: linear-gradient(180deg, #bff5da, var(--green));
-    box-shadow: 0 5px 0 #1f9d5e, 0 8px 18px rgba(0,0,0,0.4);
-  }
   button:disabled{ opacity:0.5; cursor:default; }
   .hint{
     margin-top: 14px;
@@ -228,6 +223,17 @@
     outline:none;
   }
   .field-input:focus{ border-color: var(--gold); }
+
+  .tiers-box{
+    margin-top: 14px;
+    font-size: 12px;
+    text-align:left;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .tiers-box div{ display:flex; justify-content:space-between; padding:2px 0; opacity:0.85; }
+  .tiers-box b{ color: var(--gold); }
 </style>
 </head>
 <body>
@@ -247,7 +253,7 @@
       <div class="title">GRM FLAP</div>
       <div class="sub">Tap to keep the coin flying</div>
       <button id="startBtn">TAP TO START</button>
-      <div class="hint">A short ad plays before each run</div>
+      <div class="hint">Earn 0.05 GRM for every pipe you pass</div>
     </div>
   </div>
 
@@ -256,7 +262,7 @@
       <div id="crashMode">
         <div class="title" style="font-size:26px;">OOPS!</div>
         <div class="stat-row"><span>Score</span><b id="crashScore">0</b></div>
-        <button id="continueBtn" class="ad">▶ WATCH AD & CONTINUE</button>
+        <button id="continueBtn">CONTINUE</button>
         <button id="endRunBtn" class="secondary">END RUN</button>
         <div class="hint" id="continueHint"></div>
       </div>
@@ -265,6 +271,7 @@
         <div class="stat-row"><span>Score</span><b id="finalScore">0</b></div>
         <div class="stat-row"><span>Best</span><b id="finalBest">0</b></div>
         <div class="stat-row"><span>Rank</span><b id="finalRank">—</b></div>
+        <div class="stat-row"><span>GRM earned</span><b id="finalGrm">0</b></div>
         <div id="newBestBadge" class="new-badge hidden">NEW BEST!</div>
         <div id="verifyNote" class="hint">Verifying score with server…</div>
         <button id="restartBtn">PLAY AGAIN</button>
@@ -311,7 +318,14 @@
     <div class="title">WEEKLY TOP</div>
     <div class="sub" id="lbPagePeriod">this week's GRM rewards</div>
     <div class="lb-list" id="lbPageList"></div>
-    <div class="reward-note">Top players split the weekly GRM prize pool. Scores are verified server-side and cannot be forged from the browser.</div>
+    <div class="tiers-box">
+      <div><span>🥇 1st place</span><b>5000 GRM</b></div>
+      <div><span>🥈 2nd place</span><b>2500 GRM</b></div>
+      <div><span>🥉 3rd place</span><b>1000 GRM</b></div>
+      <div><span>4th place</span><b>500 GRM</b></div>
+      <div><span>5th – 10th place</span><b>200 GRM</b></div>
+    </div>
+    <div class="reward-note">Top players win GRM every week. Scores are verified server-side and cannot be forged from the browser.</div>
   </div>
 </div>
 
@@ -376,6 +390,7 @@
   var finalScoreEl = document.getElementById('finalScore');
   var finalBestEl = document.getElementById('finalBest');
   var finalRankEl = document.getElementById('finalRank');
+  var finalGrmEl = document.getElementById('finalGrm');
   var newBestBadge = document.getElementById('newBestBadge');
   var verifyNote = document.getElementById('verifyNote');
   var syncBadge = document.getElementById('syncBadge');
@@ -464,7 +479,7 @@
 
   function submitScore(flapLog, reviveLog, totalSteps, clientScore){
     if (DEMO_MODE || !session.sessionId) {
-      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false });
+      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false, grmEarned: 0 });
     }
     return apiFetch('/api/submit-score', {
       method: 'POST',
@@ -478,7 +493,7 @@
     }).then(function(res){ res.verified = true; return res; })
       .catch(function(err){
         setSyncBadge('sync failed', 'err');
-        return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false, error: String(err.message||err) };
+        return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false, grmEarned: 0, error: String(err.message||err) };
       });
   }
 
@@ -513,21 +528,7 @@
   }
 
   // ============================================================
-  // 4. Rewarded ads — Adsgram integration (Block ID: 43830)
-  // ============================================================
-  var AdController = (window.Adsgram && window.Adsgram.init)
-    ? window.Adsgram.init({ blockId: "43895" })
-    : null;
-
-  function showRewardedAd(){
-    return new Promise(function(resolve, reject){
-      if (!AdController) { reject(new Error('no ad SDK loaded')); return; }
-      AdController.show().then(function(){ resolve(); }).catch(function(err){ reject(err); });
-    });
-  }
-
-  // ============================================================
-  // 5. Local "best" (device-only, cosmetic)
+  // 4. Local "best" (device-only, cosmetic)
   // ============================================================
   function loadBest(){
     try{ var v = localStorage.getItem(STORAGE_KEY); return v?parseInt(v,10):0; }catch(e){ return 0; }
@@ -536,7 +537,7 @@
   var best = loadBest();
 
   // ============================================================
-  // 6. Game state
+  // 5. Game state
   // ============================================================
   var state = 'ready'; // ready | playing | crashed | over
   var bird, pipes, particles, lastPipeTop;
@@ -580,21 +581,12 @@
     startCard.classList.add('hidden');
     overCard.classList.add('hidden');
     startBtn.disabled = true;
-    startBtn.textContent = 'LOADING AD…';
-    showRewardedAd().then(function(){
-      return startSession();
-    }).then(function(){
+    startSession().then(function(){
       startBtn.disabled = false;
-      startBtn.textContent = 'TAP TO START';
       resetGame();
       rng = P.makeRng(session.seed);
       state = 'playing';
       bird.vy = P.FLAP_VELOCITY * 0.7;
-    }).catch(function(){
-      startBtn.disabled = false;
-      startBtn.textContent = 'TAP TO START';
-      startCard.classList.remove('hidden');
-      setSyncBadge('ad unavailable — try again', 'err');
     });
   }
 
@@ -603,8 +595,6 @@
     crashScoreEl.textContent = score;
     var canContinue = revivesUsed < MAX_REVIVES;
     if (!canContinue) { finalizeRun(); return; }
-    continueBtn.disabled = false;
-    continueBtn.textContent = '▶ WATCH AD & CONTINUE';
     continueHint.textContent = (MAX_REVIVES - revivesUsed) + ' continue(s) left';
     crashMode.classList.remove('hidden');
     finalMode.classList.add('hidden');
@@ -631,6 +621,7 @@
     finalScoreEl.textContent = clientScore;
     finalBestEl.textContent = Math.max(best, clientScore);
     finalRankEl.textContent = '—';
+    finalGrmEl.textContent = '0';
     verifyNote.textContent = DEMO_MODE ? 'Demo mode — score not saved to server.' : 'Verifying score with server…';
     verifyNote.classList.remove('hidden');
     newBestBadge.classList.add('hidden');
@@ -644,6 +635,7 @@
       if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
       finalBestEl.textContent = Math.max(best, res.best||0);
       finalRankEl.textContent = res.rank ? ('#'+res.rank) : '—';
+      finalGrmEl.textContent = (res.grmEarned || 0) + ' GRM';
       if (res.verified) {
         verifyNote.textContent = (res.score === clientScore)
           ? 'Score verified by server ✓'
@@ -673,18 +665,7 @@
     startCard.classList.remove('hidden');
   });
 
-  continueBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    continueBtn.disabled = true;
-    continueBtn.textContent = 'LOADING AD…';
-    showRewardedAd().then(function(){
-      doRevive();
-    }).catch(function(){
-      continueBtn.disabled = false;
-      continueBtn.textContent = '▶ WATCH AD & CONTINUE';
-      continueHint.textContent = 'Ad unavailable — try again';
-    });
-  });
+  continueBtn.addEventListener('click', function(e){ e.preventDefault(); doRevive(); });
 
   endRunBtn.addEventListener('click', function(e){ e.preventDefault(); finalizeRun(); });
 
