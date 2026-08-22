@@ -8,7 +8,8 @@
  * steps at which I tapped, and the exact list of steps at which I used a
  * revive." The server re-runs the same deterministic simulation (physics.js,
  * shared with the client) and computes the score itself. Only that
- * server-computed number is ever written to the leaderboard.
+ * server-computed number is ever written to the leaderboard, and only that
+ * number is ever used to credit GRM.
  */
 require('dotenv').config();
 const express = require('express');
@@ -16,7 +17,6 @@ const crypto = require('crypto');
 const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
-require('./bot.js'); // Starts the Telegram bot (long polling) in this same process
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -30,6 +30,11 @@ const sessionNames = new Map();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const ALLOW_INSECURE_DEV = process.env.ALLOW_INSECURE_DEV === 'true'; // local testing only, without a real Telegram launch
 const INIT_DATA_MAX_AGE_SECONDS = 24 * 60 * 60;
+
+// Reward for each pipe successfully passed (i.e. each point of score).
+// Applied server-side against the VERIFIED score only — never trusts a
+// client-claimed score.
+const GRM_PER_PIPE = 0.05;
 
 // ---------------------------------------------------------------
 // Auth helper: verify Telegram initData, or fall back to a fake
@@ -70,7 +75,7 @@ app.post('/api/start-session', (req, res) => {
 // ---------------------------------------------------------------
 // POST /api/submit-score
 // Replays the run server-side from the session's seed + the submitted
-// flap log + revive log, and only ever stores the SERVER's number.
+// flap log + revive log, and only ever stores/pays the SERVER's number.
 // ---------------------------------------------------------------
 app.post('/api/submit-score', (req, res) => {
   const { sessionId, flapLog, totalSteps, clientScore, reviveLog } = req.body || {};
@@ -89,20 +94,20 @@ app.post('/api/submit-score', (req, res) => {
 
   // Anti-cheat: you cannot claim more simulated game-time than real
   // wall-clock time has actually passed since the session started.
-  // Each revive gets a small extra time allowance (an ad takes real time).
+  // Each revive gets a small extra time allowance.
   const elapsedRealMs = Date.now() - session.startedAt;
   const revivesClaimed = Math.min(revives.length, P.MAX_REVIVES);
-  const AD_ALLOWANCE_MS = 20000; // generous allowance per ad watched
+  const REVIVE_ALLOWANCE_MS = 5000; // generous allowance per revive (no ad now, just a menu tap)
   const claimedMs = totalSteps * (P.STEP * 1000);
   const TOLERANCE = 1.15;
-  if (claimedMs > (elapsedRealMs + revivesClaimed * AD_ALLOWANCE_MS) * TOLERANCE + 2000) {
+  if (claimedMs > (elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) * TOLERANCE + 2000) {
     store.consumeSession(sessionId);
     return res.status(400).json({ error: 'submission rejected: implausible timing' });
   }
 
   const allowedSteps = Math.min(
     totalSteps,
-    Math.ceil(((elapsedRealMs + revivesClaimed * AD_ALLOWANCE_MS) / 1000) / P.STEP) + 5
+    Math.ceil(((elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) / 1000) / P.STEP) + 5
   );
   const replay = P.simulate(session.seed, flapLog, allowedSteps, revives);
 
@@ -116,6 +121,10 @@ app.post('/api/submit-score', (req, res) => {
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
   const rankInfo = store.getUserRank(session.userId, weekKey);
 
+  // Pay GRM for pipes passed this run, based only on the server-verified score.
+  const grmEarned = Math.round(verifiedScore * GRM_PER_PIPE * 100) / 100;
+  const balance = grmEarned > 0 ? store.creditBalance(session.userId, grmEarned) : store.getBalance(session.userId);
+
   res.json({
     score: verifiedScore,
     clientScoreMismatch: verifiedScore !== clientScore,
@@ -124,6 +133,8 @@ app.post('/api/submit-score', (req, res) => {
     rank: rankInfo ? rankInfo.rank : null,
     weekKey,
     revivesUsed: replay.revivesUsed,
+    grmEarned,
+    balance,
   });
 });
 
@@ -217,19 +228,6 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
   const w = store.markWithdrawalPaid(Number(req.params.id));
   if (!w) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, withdrawal: w });
-});
-
-// ---------------------------------------------------------------
-// GET /adsgram-reward?userid=...
-// Server-side postback Adsgram calls when a rewarded ad has been
-// watched in full. The game's own logic (start-session / revive) is
-// already what actually gates the game, so this endpoint just has to
-// exist and respond 200 — it's logged for visibility/debugging.
-// ---------------------------------------------------------------
-app.get('/adsgram-reward', (req, res) => {
-  const userId = req.query.userid || 'unknown';
-  console.log(`[adsgram] reward postback received for user ${userId}`);
-  res.status(200).send('OK');
 });
 
 // ---------------------------------------------------------------
