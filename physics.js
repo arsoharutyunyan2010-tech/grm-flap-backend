@@ -25,7 +25,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var PHYSICS_VERSION = 4;
+  var PHYSICS_VERSION = 5;
 
   // ---- Fixed logical playfield (device-independent) ----
   var LOGICAL_W = 480;
@@ -39,8 +39,8 @@
   var PIPE_GAP_BASE = 150;
   var PIPE_GAP_MIN = 120;
   var PIPE_WIDTH = 62;
-  var PIPE_SPEED_BASE = 195;
-  var PIPE_INTERVAL_STEPS = Math.round(1.25 / STEP); // ~1250ms between pipes
+  var PIPE_SPEED_BASE = 220;   // was 195 — faster overall game speed
+  var PIPE_INTERVAL_STEPS = Math.round(1.1 / STEP); // was 1.25 — pipes spaced a bit closer
   var PIPE_MARGIN = 80;
   var PIPE_MAX_VERTICAL_JUMP = 150;
   var COIN_RADIUS = 16;
@@ -53,9 +53,8 @@
   var MAX_STEPS_PER_SESSION = 60 * 60 * 20; // 20 minutes of play, generous cap
   var MAX_FLAPS_PER_SECOND = 6; // no human taps faster than this sustainably
 
-  // Max number of "watch an ad, continue the same run" revives allowed
-  // per run. Enforced server-side too, so a forged reviveLog can't grant
-  // more than this.
+  // Max number of "continue the same run" revives allowed per run.
+  // Enforced server-side too, so a forged reviveLog can't grant more.
   var MAX_REVIVES = 2;
 
   // ---- Seeded PRNG (mulberry32) so both sides draw identical "random" pipes ----
@@ -100,7 +99,7 @@
   /**
    * Replays a full run from a seed, a set of step indices at which the
    * player flapped, and a set of step indices at which the player used a
-   * "watch ad, continue" revive (score is kept, bird/pipes reset).
+   * "continue" revive (score is kept, bird/pipes reset).
    *
    * @param {number} seed
    * @param {number[]} flapSteps
