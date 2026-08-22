@@ -14,11 +14,11 @@
  */
 
 const REWARD_TIERS = [
-  { fromRank: 1, toRank: 1, grm: 500 },
-  { fromRank: 2, toRank: 2, grm: 300 },
-  { fromRank: 3, toRank: 3, grm: 150 },
-  { fromRank: 4, toRank: 10, grm: 50 },
-  { fromRank: 11, toRank: 25, grm: 20 },
+  { fromRank: 1, toRank: 1, grm: 5000 },
+  { fromRank: 2, toRank: 2, grm: 2500 },
+  { fromRank: 3, toRank: 3, grm: 1000 },
+  { fromRank: 4, toRank: 4, grm: 500 },
+  { fromRank: 5, toRank: 10, grm: 200 },
 ];
 
 function grmForRank(rank) {
