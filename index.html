@@ -48,6 +48,16 @@
     text-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 18px rgba(244,197,66,0.5);
     letter-spacing: 1px;
   }
+  #grmLive{
+    position:absolute; left:0; right:0;
+    top: calc(max(18px, env(safe-area-inset-top)) + 60px);
+    text-align:center;
+    font-size: 14px; font-weight:800; color: var(--gold);
+    letter-spacing: 0.5px;
+    text-shadow: 0 2px 0 rgba(0,0,0,0.35);
+    z-index:5;
+    pointer-events:none;
+  }
   #syncBadge{
     position:absolute; top: max(14px, env(safe-area-inset-top)); right: 14px;
     font-size: 10px; font-weight:700; letter-spacing:0.5px;
@@ -201,16 +211,20 @@
   .page-inner{ max-width: 420px; margin: 0 auto; }
   .page .title{ font-size:24px; margin-bottom: 4px; }
 
+  /* ---------- Donut-shaped avatar with flying GRM coins ---------- */
   .avatar-wrap{
-    width: 88px; height: 88px; border-radius: 50%;
+    width: 108px; height: 108px;
     margin: 10px auto 14px;
-    display:flex; align-items:center; justify-content:center;
-    overflow:hidden;
-    border: 3px solid var(--gold);
-    background: linear-gradient(180deg, #4a4a52, #17171d);
-    font-size: 32px; font-weight:800; color: var(--gold);
+    position: relative;
   }
-  .avatar-wrap img{ width:100%; height:100%; object-fit:cover; }
+  .avatar-wrap svg{ width:100%; height:100%; overflow: visible; display:block; }
+  .grm-coin{ animation: coinFloat 2.2s ease-in-out infinite; transform-origin: center; }
+  .grm-coin-2{ animation-delay: 0.6s; }
+  .grm-coin-3{ animation-delay: 1.1s; }
+  @keyframes coinFloat{
+    0%,100%{ transform: translateY(0) rotate(0deg); opacity:1; }
+    50%{ transform: translateY(-5px) rotate(10deg); opacity:0.8; }
+  }
 
   .profile-name{ text-align:center; font-size:20px; font-weight:800; margin-bottom: 18px; }
 
@@ -241,6 +255,7 @@
   <canvas id="game"></canvas>
 
   <div id="hud"><div id="score">0</div></div>
+  <div id="grmLive" class="hidden">0.00 GRM</div>
   <div id="syncBadge" class="hidden"></div>
 
   <div class="overlay" id="startCard">
@@ -284,7 +299,41 @@
 <div class="page hidden" id="page-profile">
   <div class="page-inner">
     <div class="title">PROFILE</div>
-    <div class="avatar-wrap" id="profileAvatar"></div>
+    <div class="avatar-wrap" id="profileAvatar">
+      <svg viewBox="0 0 100 100">
+        <defs>
+          <mask id="donutMask">
+            <rect width="100" height="100" fill="#000"/>
+            <circle cx="50" cy="50" r="46" fill="#fff"/>
+            <circle cx="50" cy="50" r="19" fill="#000"/>
+            <circle cx="87" cy="27" r="23" fill="#000"/>
+          </mask>
+          <radialGradient id="avatarFallbackGrad" cx="35%" cy="30%" r="80%">
+            <stop offset="0%" stop-color="#4a4a52"/>
+            <stop offset="100%" stop-color="#17171d"/>
+          </radialGradient>
+        </defs>
+        <g mask="url(#donutMask)">
+          <rect width="100" height="100" fill="url(#avatarFallbackGrad)"/>
+          <image id="avatarImgEl" width="100" height="100" preserveAspectRatio="xMidYMid slice" style="display:none"></image>
+          <text id="avatarInitialEl" x="50" y="61" text-anchor="middle" font-size="34" font-weight="800" fill="#f4c542" font-family="Segoe UI, Arial, sans-serif">P</text>
+          <circle cx="50" cy="50" r="46" fill="none" stroke="#f4c542" stroke-width="4"/>
+          <circle cx="50" cy="50" r="19" fill="none" stroke="#f4c542" stroke-width="4"/>
+        </g>
+        <g class="grm-coin grm-coin-1">
+          <circle cx="90" cy="10" r="8" fill="#26262e" stroke="#f4c542" stroke-width="1.5"/>
+          <path d="M 86 7 L 94 7 L 90 14 Z" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+        </g>
+        <g class="grm-coin grm-coin-2">
+          <circle cx="102" cy="28" r="5.5" fill="#26262e" stroke="#f4c542" stroke-width="1.2"/>
+          <path d="M 99.5 26 L 104.5 26 L 102 31 Z" fill="none" stroke="#fff" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+        </g>
+        <g class="grm-coin grm-coin-3">
+          <circle cx="93" cy="46" r="4" fill="#26262e" stroke="#f4c542" stroke-width="1"/>
+          <path d="M 91 44.5 L 95 44.5 L 93 48.5 Z" fill="none" stroke="#fff" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+        </g>
+      </svg>
+    </div>
     <div class="profile-name" id="profileName">Player</div>
     <div class="stat-row"><span>Best score</span><b id="profileBest">0</b></div>
     <div class="stat-row"><span>GRM balance</span><b id="profileBalance">0</b></div>
@@ -372,10 +421,12 @@
 
   var P = window.GrmFlapPhysics;
   var MAX_REVIVES = P.MAX_REVIVES || 2;
+  var GRM_PER_PIPE = 0.05;
 
   var canvas = document.getElementById('game');
   var ctx = canvas.getContext('2d');
   var scoreEl = document.getElementById('score');
+  var grmLiveEl = document.getElementById('grmLive');
   var wrap = document.getElementById('wrap');
   var startCard = document.getElementById('startCard');
   var overCard = document.getElementById('overCard');
@@ -563,6 +614,8 @@
     elapsedMs = 0;
     lastPipeTop = null;
     scoreEl.textContent = '0';
+    grmLiveEl.textContent = '0.00 GRM';
+    grmLiveEl.classList.remove('hidden');
   }
 
   function flap(){
@@ -602,7 +655,12 @@
   }
 
   function doRevive(){
-    reviveLog.push(stepIndex);
+    // stepIndex has already been incremented past the crash step (simStep
+    // does `stepIndex++` before calling handleCrash), so we log stepIndex-1
+    // to match the exact step the server's simulate() will see as the
+    // crash/revive point. Getting this wrong makes the server stop the
+    // replay at the first crash even though the player kept playing.
+    reviveLog.push(stepIndex - 1);
     revivesUsed++;
     bird.y = P.BIRD_START_Y;
     bird.vy = P.FLAP_VELOCITY * 0.7;
@@ -628,6 +686,7 @@
     crashMode.classList.add('hidden');
     finalMode.classList.remove('hidden');
     overCard.classList.remove('hidden');
+    grmLiveEl.classList.add('hidden');
 
     submitScore(flapLog, reviveLog, totalSteps, clientScore).then(function(res){
       var verifiedScore = res.verified ? res.score : clientScore;
@@ -702,15 +761,18 @@
 
   // ---------- Profile page ----------
   function loadProfilePage(){
-    var avatarEl = document.getElementById('profileAvatar');
-    avatarEl.innerHTML = '';
+    var imgEl = document.getElementById('avatarImgEl');
+    var initialEl = document.getElementById('avatarInitialEl');
     if (tgUser && tgUser.photo_url) {
-      var img = document.createElement('img');
-      img.src = tgUser.photo_url;
-      avatarEl.appendChild(img);
+      imgEl.setAttribute('href', tgUser.photo_url);
+      imgEl.setAttributeNS('http://www.w3.org/1999/xlink', 'href', tgUser.photo_url);
+      imgEl.style.display = '';
+      initialEl.style.display = 'none';
     } else {
+      imgEl.style.display = 'none';
+      initialEl.style.display = '';
       var base = tgUser && (tgUser.first_name || tgUser.username) ? (tgUser.first_name || tgUser.username) : 'P';
-      avatarEl.textContent = base.charAt(0).toUpperCase();
+      initialEl.textContent = base.charAt(0).toUpperCase();
     }
     document.getElementById('profileName').textContent = tgUser ? (tgUser.username ? '@'+tgUser.username : (tgUser.first_name||'Player')) : 'Player';
     document.getElementById('profileHint').textContent = 'Loading…';
@@ -892,7 +954,7 @@
     var groundY = LH - GROUND_HEIGHT;
     var crashed = false;
 
-    if (pipeTimer >= Math.round(1.25/STEP)) {
+    if (pipeTimer >= Math.round(1.1/STEP)) {
       pipeTimer = 0;
       var gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
       var top = P.nextPipeTop(rng, lastPipeTop, gap, playH, P.PIPE_MARGIN);
@@ -907,7 +969,12 @@
     for (var i = pipes.length-1; i>=0; i--){
       var p = pipes[i];
       p.x -= speed*STEP;
-      if(!p.passed && p.x + PIPE_WIDTH < bird.x - bird.r){ p.passed = true; score++; scoreEl.textContent = score; }
+      if(!p.passed && p.x + PIPE_WIDTH < bird.x - bird.r){
+        p.passed = true;
+        score++;
+        scoreEl.textContent = score;
+        grmLiveEl.textContent = (score * GRM_PER_PIPE).toFixed(2) + ' GRM';
+      }
       if(p.x < -PIPE_WIDTH-10){ pipes.splice(i,1); continue; }
       if(!crashed && bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_WIDTH){
         var bottomY = p.top + p.gap;
