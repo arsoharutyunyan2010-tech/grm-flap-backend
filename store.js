@@ -1,21 +1,111 @@
 /**
- * Minimal in-memory store.
+ * In-memory store with Upstash Redis persistence to survive redeploys.
  *
- * ⚠️ PRODUCTION NOTE: this resets whenever the process restarts and does
- * not work across multiple server instances. For real deployment, swap
- * this module for Redis (sessions, short TTL) + Postgres/Mongo
- * (leaderboard history, balances, withdrawals) behind the same function
- * signatures below.
+ * Requires two env vars (from your Upstash database's REST API panel):
+ *   UPSTASH_REDIS_REST_URL
+ *   UPSTASH_REDIS_REST_TOKEN
+ *
+ * Everything is kept as a single JSON blob under one Redis key, loaded
+ * once at boot and saved periodically + after any write that matters
+ * (withdrawals, weekly archive). Sessions/rate-limits are NOT persisted
+ * (short-lived, fine to reset on redeploy).
  */
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || '';
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const REDIS_KEY = 'grmflap:state';
 
-const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used }
-const weeklyScores = new Map();   // weekKey -> Map(userId -> { name, score, updatedAt })
-const rewardHistory = [];         // archived weekly results
-const rateBuckets = new Map();    // userId -> [timestamps]
-const allTimeBest = new Map();    // userId -> { name, score }
-const balances = new Map();       // userId -> number (GRM)
-const withdrawals = [];           // { id, userId, name, address, amount, status, requestedAt, paidAt? }
+const sessions = new Map();
+const weeklyScores = new Map();
+const rewardHistory = [];
+const rateBuckets = new Map();
+const allTimeBest = new Map();
+const balances = new Map();
+const withdrawals = [];
 let withdrawalSeq = 1;
+
+const knownUsers = new Set();
+const recentActivity = new Map();
+let totalRuns = 0;
+let totalGrmPaid = 0;
+
+// ---------------------------------------------------------------
+// Upstash REST helpers
+// ---------------------------------------------------------------
+async function redisGet(key) {
+  if (!REDIS_URL || !REDIS_TOKEN) return null;
+  const r = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
+  });
+  if (!r.ok) throw new Error('redis GET failed: ' + r.status);
+  const data = await r.json();
+  return data.result || null;
+}
+async function redisSet(key, value) {
+  if (!REDIS_URL || !REDIS_TOKEN) return;
+  const r = await fetch(`${REDIS_URL}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'text/plain' },
+    body: value
+  });
+  if (!r.ok) throw new Error('redis SET failed: ' + r.status);
+}
+
+// ---------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------
+let readyResolve;
+const ready = new Promise((res) => { readyResolve = res; });
+
+async function loadFromRedis() {
+  try {
+    const raw = await redisGet(REDIS_KEY);
+    if (!raw) { console.log('[store] no persisted data yet (fresh start)'); return; }
+    const data = JSON.parse(raw);
+    (data.weeklyScores || []).forEach(([wk, entries]) => weeklyScores.set(wk, new Map(entries)));
+    (data.allTimeBest || []).forEach(([uid, v]) => allTimeBest.set(uid, v));
+    (data.balances || []).forEach(([uid, v]) => balances.set(uid, v));
+    (data.withdrawals || []).forEach(w => withdrawals.push(w));
+    withdrawalSeq = data.withdrawalSeq || 1;
+    (data.rewardHistory || []).forEach(r => rewardHistory.push(r));
+    (data.knownUsers || []).forEach(u => knownUsers.add(u));
+    totalRuns = data.totalRuns || 0;
+    totalGrmPaid = data.totalGrmPaid || 0;
+    console.log('[store] loaded persisted data from Upstash');
+  } catch (e) {
+    console.error('[store] failed to load from Upstash:', e.message);
+  }
+}
+
+let saveInFlight = false;
+let saveQueued = false;
+async function saveToRedis() {
+  if (saveInFlight) { saveQueued = true; return; }
+  saveInFlight = true;
+  try {
+    const out = {
+      weeklyScores: Array.from(weeklyScores.entries()).map(([wk, m]) => [wk, Array.from(m.entries())]),
+      allTimeBest: Array.from(allTimeBest.entries()),
+      balances: Array.from(balances.entries()),
+      withdrawals,
+      withdrawalSeq,
+      rewardHistory,
+      knownUsers: Array.from(knownUsers),
+      totalRuns,
+      totalGrmPaid,
+    };
+    await redisSet(REDIS_KEY, JSON.stringify(out));
+  } catch (e) {
+    console.error('[store] failed to save to Upstash:', e.message);
+  } finally {
+    saveInFlight = false;
+    if (saveQueued) { saveQueued = false; saveToRedis(); }
+  }
+}
+
+loadFromRedis().finally(() => readyResolve());
+setInterval(saveToRedis, 15 * 1000).unref();
+process.on('SIGTERM', () => { saveToRedis().finally(() => process.exit(0)); });
+process.on('SIGINT', () => { saveToRedis().finally(() => process.exit(0)); });
 
 function currentWeekKey(d = new Date()) {
   // ISO week key, e.g. "2026-W34" — ties the leaderboard to a Mon–Sun week (UTC).
@@ -37,10 +127,11 @@ function consumeSession(sessionId) {
   const s = sessions.get(sessionId);
   if (s) s.used = true;
 }
-// Periodically forget old sessions so memory doesn't grow unbounded.
 setInterval(() => {
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000; // 2h
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
   for (const [id, s] of sessions) if (s.startedAt < cutoff) sessions.delete(id);
+  const actCutoff = Date.now() - 10 * 60 * 1000;
+  for (const [uid, ts] of recentActivity) if (ts < actCutoff) recentActivity.delete(uid);
 }, 10 * 60 * 1000).unref();
 
 function submitWeeklyScore(userId, name, score, weekKey = currentWeekKey()) {
@@ -67,7 +158,6 @@ function getUserRank(userId, weekKey = currentWeekKey()) {
   return ranked.find(e => e.userId === userId) || null;
 }
 
-// Simple sliding-window rate limiter: `limit` calls per `windowMs`.
 function allowRequest(userId, limit, windowMs) {
   const now = Date.now();
   const bucket = (rateBuckets.get(userId) || []).filter(t => now - t < windowMs);
@@ -80,6 +170,7 @@ function allowRequest(userId, limit, windowMs) {
 function archiveWeek(weekKey, payouts) {
   rewardHistory.push({ weekKey, payouts, archivedAt: Date.now() });
   weeklyScores.delete(weekKey);
+  saveToRedis();
 }
 
 // ---------------------------------------------------------------
@@ -99,8 +190,8 @@ function getAllTimeBest(userId) {
 }
 
 // ---------------------------------------------------------------
-// GRM balance — credited by the weekly reward job (see rewards.js),
-// debited when a withdrawal request is made.
+// GRM balance — credited by the weekly reward job (see rewards.js) and
+// by per-pipe run earnings, debited when a withdrawal request is made.
 // ---------------------------------------------------------------
 function getBalance(userId) {
   return balances.get(userId) || 0;
@@ -129,6 +220,7 @@ function requestWithdrawal(userId, name, address, amount) {
     requestedAt: Date.now(),
   };
   withdrawals.push(request);
+  saveToRedis();
   return { ok: true, request, balance: bal - amount };
 }
 function listWithdrawals(status) {
@@ -139,10 +231,39 @@ function markWithdrawalPaid(id) {
   if (!w) return null;
   w.status = 'paid';
   w.paidAt = Date.now();
+  saveToRedis();
   return w;
 }
 
+// ---------------------------------------------------------------
+// Bot-wide stats, for the admin panel.
+// ---------------------------------------------------------------
+function trackUser(userId) {
+  knownUsers.add(userId);
+  recentActivity.set(userId, Date.now());
+}
+function getTotalUsers() {
+  return knownUsers.size;
+}
+function getActivePlayers(windowMs = 5 * 60 * 1000) {
+  const now = Date.now();
+  let count = 0;
+  for (const ts of recentActivity.values()) if (now - ts < windowMs) count++;
+  return count;
+}
+function recordRun(grmEarned) {
+  totalRuns++;
+  totalGrmPaid += grmEarned || 0;
+}
+function getRunStats() {
+  return {
+    totalRuns,
+    avgGrmPerRun: totalRuns ? Math.round((totalGrmPaid / totalRuns) * 100) / 100 : 0,
+  };
+}
+
 module.exports = {
+  ready,
   currentWeekKey,
   createSession, getSession, consumeSession,
   submitWeeklyScore, getLeaderboard, getUserRank,
@@ -152,4 +273,5 @@ module.exports = {
   updateAllTimeBest, getAllTimeBest,
   getBalance, creditBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid,
+  trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
 };
