@@ -64,6 +64,8 @@ app.post('/api/start-session', (req, res) => {
     return res.status(429).json({ error: 'too many session starts, slow down' });
   }
 
+  store.trackUser(String(user.id));
+
   const sessionId = crypto.randomBytes(16).toString('hex');
   const seed = crypto.randomInt(1, 2 ** 31 - 1);
   store.createSession(sessionId, String(user.id), seed);
@@ -124,6 +126,7 @@ app.post('/api/submit-score', (req, res) => {
   // Pay GRM for pipes passed this run, based only on the server-verified score.
   const grmEarned = Math.round(verifiedScore * GRM_PER_PIPE * 100) / 100;
   const balance = grmEarned > 0 ? store.creditBalance(session.userId, grmEarned) : store.getBalance(session.userId);
+  store.recordRun(grmEarned);
 
   res.json({
     score: verifiedScore,
@@ -211,23 +214,37 @@ app.post('/api/withdraw', (req, res) => {
 });
 
 // ---------------------------------------------------------------
-// GET /internal/withdrawals?status=pending  (admin only)
-// POST /internal/withdrawals/:id/paid       (admin only, mark paid)
+// Admin-only endpoints (require x-admin-key header)
 // ---------------------------------------------------------------
-app.get('/internal/withdrawals', (req, res) => {
+function requireAdmin(req, res) {
   if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) {
-    return res.status(403).json({ error: 'forbidden' });
+    res.status(403).json({ error: 'forbidden' });
+    return false;
   }
+  return true;
+}
+
+app.get('/internal/withdrawals', (req, res) => {
+  if (!requireAdmin(req, res)) return;
   res.json({ withdrawals: store.listWithdrawals(req.query.status) });
 });
 
 app.post('/internal/withdrawals/:id/paid', (req, res) => {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) {
-    return res.status(403).json({ error: 'forbidden' });
-  }
+  if (!requireAdmin(req, res)) return;
   const w = store.markWithdrawalPaid(Number(req.params.id));
   if (!w) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, withdrawal: w });
+});
+
+app.get('/internal/stats', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const runStats = store.getRunStats();
+  res.json({
+    totalUsers: store.getTotalUsers(),
+    activePlayers: store.getActivePlayers(),
+    totalRuns: runStats.totalRuns,
+    avgGrmPerRun: runStats.avgGrmPerRun,
+  });
 });
 
 // ---------------------------------------------------------------
@@ -235,9 +252,7 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
 // ---------------------------------------------------------------
 const { runWeeklyRewardJob } = require('./rewards.js');
 app.post('/internal/run-weekly-rewards', (req, res) => {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) {
-    return res.status(403).json({ error: 'forbidden' });
-  }
+  if (!requireAdmin(req, res)) return;
   const result = runWeeklyRewardJob(store);
   res.json(result);
 });
