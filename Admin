@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GRM FLAP — Admin</title>
+<style>
+  body{ margin:0; font-family: 'Segoe UI', Arial, sans-serif; background:#0d0620; color:#fff7e6; padding:20px; }
+  h1{ font-size:20px; color:#f4c542; }
+  h2{ font-size:16px; color:#f4c542; margin-top:28px; }
+  .keybox{ display:flex; gap:8px; margin-bottom:20px; }
+  input{ flex:1; padding:10px; border-radius:8px; border:1px solid #f4c542; background:#1b1033; color:#fff; }
+  button{ padding:10px 16px; border-radius:8px; border:none; background:#f4c542; color:#1b1033; font-weight:800; cursor:pointer; }
+  .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; }
+  .stat-card{ background:rgba(255,255,255,0.06); border-radius:10px; padding:14px; }
+  .stat-card b{ display:block; font-size:22px; color:#f4c542; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); }
+  th{ opacity:0.6; font-weight:600; }
+  .status-pending{ color:#f4c542; }
+  .status-paid{ color:#3ddc84; }
+  .pay-btn{ padding:4px 10px; font-size:12px; }
+  .err{ color:#ff5d73; }
+</style>
+</head>
+<body>
+  <h1>GRM FLAP — Admin</h1>
+  <div class="keybox">
+    <input id="adminKey" type="password" placeholder="Admin key (x-admin-key)">
+    <button onclick="loadAll()">Load</button>
+  </div>
+  <div id="err" class="err"></div>
+
+  <h2>Stats</h2>
+  <div class="stat-grid" id="statsGrid">
+    <div class="stat-card"><span>Total users</span><b id="statUsers">—</b></div>
+    <div class="stat-card"><span>Playing now</span><b id="statActive">—</b></div>
+    <div class="stat-card"><span>Total runs</span><b id="statRuns">—</b></div>
+    <div class="stat-card"><span>Avg GRM / run</span><b id="statAvg">—</b></div>
+  </div>
+
+  <h2>Withdrawal requests</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Player</th><th>Address</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+    <tbody id="wRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
+  </table>
+
+<script>
+  var API_BASE = window.location.origin;
+
+  function getKey(){ return document.getElementById('adminKey').value.trim(); }
+
+  function loadAll(){
+    var key = getKey();
+    if (!key) return;
+    try { localStorage.setItem('grmflap_admin_key', key); } catch(e){}
+    document.getElementById('err').textContent = '';
+    loadStats(key);
+    loadWithdrawals(key);
+  }
+
+  function loadStats(key){
+    fetch(API_BASE + '/internal/stats', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        document.getElementById('statUsers').textContent = d.totalUsers;
+        document.getElementById('statActive').textContent = d.activePlayers;
+        document.getElementById('statRuns').textContent = d.totalRuns;
+        document.getElementById('statAvg').textContent = d.avgGrmPerRun + ' GRM';
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Stats error: ' + e.message; });
+  }
+
+  function loadWithdrawals(key){
+    fetch(API_BASE + '/internal/withdrawals', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ renderWithdrawals(d.withdrawals || [], key); })
+      .catch(function(e){ document.getElementById('err').textContent = 'Withdrawals error: ' + e.message; });
+  }
+
+  function renderWithdrawals(list, key){
+    var tbody = document.getElementById('wRows');
+    tbody.innerHTML = '';
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6">No withdrawal requests yet.</td></tr>';
+      return;
+    }
+    list.slice().reverse().forEach(function(w){
+      var tr = document.createElement('tr');
+      var payCell = w.status === 'pending'
+        ? '<button class="pay-btn" onclick="markPaid('+w.id+')">Mark paid</button>'
+        : '';
+      tr.innerHTML =
+        '<td>#'+w.id+'</td>' +
+        '<td>'+ (w.name||'').replace(/</g,'&lt;') +'</td>' +
+        '<td style="word-break:break-all;max-width:160px;">'+ w.address +'</td>' +
+        '<td>'+ w.amount +' GRM</td>' +
+        '<td class="status-'+w.status+'">'+ w.status +'</td>' +
+        '<td>'+ payCell +'</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  window.markPaid = function(id){
+    var key = getKey();
+    fetch(API_BASE + '/internal/withdrawals/' + id + '/paid', {
+      method: 'POST',
+      headers: { 'x-admin-key': key }
+    }).then(function(){ loadWithdrawals(key); });
+  };
+
+  try {
+    var saved = localStorage.getItem('grmflap_admin_key');
+    if (saved) document.getElementById('adminKey').value = saved;
+  } catch(e){}
+</script>
+</body>
+</html>
