@@ -243,6 +243,8 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`GRM FLAP backend listening on :${PORT}`));
+store.ready.then(() => {
+  app.listen(PORT, () => console.log(`GRM FLAP backend listening on :${PORT}`));
+});
 
 module.exports = app;
