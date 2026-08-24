@@ -99,7 +99,7 @@ app.post('/api/submit-score', (req, res) => {
   // Each revive gets a small extra time allowance.
   const elapsedRealMs = Date.now() - session.startedAt;
   const revivesClaimed = Math.min(revives.length, P.MAX_REVIVES);
-  const REVIVE_ALLOWANCE_MS = 5000; // generous allowance per revive (no ad now, just a menu tap)
+  const REVIVE_ALLOWANCE_MS = 5000;
   const claimedMs = totalSteps * (P.STEP * 1000);
   const TOLERANCE = 1.15;
   if (claimedMs > (elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) * TOLERANCE + 2000) {
@@ -123,7 +123,6 @@ app.post('/api/submit-score', (req, res) => {
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
   const rankInfo = store.getUserRank(session.userId, weekKey);
 
-  // Pay GRM for pipes passed this run, based only on the server-verified score.
   const grmEarned = Math.round(verifiedScore * GRM_PER_PIPE * 100) / 100;
   const balance = grmEarned > 0 ? store.creditBalance(session.userId, grmEarned) : store.getBalance(session.userId);
   store.recordRun(grmEarned);
@@ -160,8 +159,6 @@ app.get('/api/leaderboard', (req, res) => {
 
 // ---------------------------------------------------------------
 // POST /api/profile
-// Player's own stats: all-time best score + GRM balance + this
-// week's rank. Used by the Profile and Wallet tabs.
 // ---------------------------------------------------------------
 app.post('/api/profile', (req, res) => {
   const user = authenticate(req.body.initData);
@@ -182,9 +179,6 @@ app.post('/api/profile', (req, res) => {
 
 // ---------------------------------------------------------------
 // POST /api/withdraw
-// Player requests a GRM -> TON withdrawal. Balance is deducted
-// immediately; the request sits as "pending" until the admin manually
-// sends the TON (see GET /internal/withdrawals) and marks it paid.
 // ---------------------------------------------------------------
 const TON_ADDRESS_RE = /^(?:[A-Za-z0-9_-]{48}|-?\d:[0-9a-fA-F]{64})$/;
 
@@ -258,8 +252,6 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-store.ready.then(() => {
-  app.listen(PORT, () => console.log(`GRM FLAP backend listening on :${PORT}`));
-});
+app.listen(PORT, () => console.log(`GRM FLAP backend listening on :${PORT}`));
 
 module.exports = app;
