@@ -109,6 +109,7 @@
     }).then(function(){ loadWithdrawals(key); });
   };
 
+  // Prefill from a previous session on this device.
   try {
     var saved = localStorage.getItem('grmflap_admin_key');
     if (saved) document.getElementById('adminKey').value = saved;
