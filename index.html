@@ -353,7 +353,6 @@
           <circle cx="50" cy="50" r="46" fill="none" stroke="#f4c542" stroke-width="4"/>
           <circle cx="50" cy="50" r="19" fill="none" stroke="#f4c542" stroke-width="4"/>
         </g>
-        <!-- single coin sitting on the top edge of the bite notch, slowly self-rotating -->
         <g class="grm-coin-single">
           <circle cx="87" cy="6" r="9" fill="#26262e" stroke="#f4c542" stroke-width="1.6"/>
           <path d="M 82.5 3 L 91.5 3 L 87 10.5 Z" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
@@ -443,9 +442,6 @@
 (function(){
   "use strict";
 
-  // ============================================================
-  // 0. CONFIG
-  // ============================================================
   var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
   var DEMO_MODE = !API_BASE_URL;
 
@@ -491,9 +487,6 @@
   var verifyNote = document.getElementById('verifyNote');
   var syncBadge = document.getElementById('syncBadge');
 
-  // ============================================================
-  // 1. Telegram Mini App bootstrap
-  // ============================================================
   var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   var initData = tg ? tg.initData : "";
   var tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
@@ -511,9 +504,6 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  // ============================================================
-  // 2. Canvas sizing
-  // ============================================================
   var LW = P.LOGICAL_W, LH = P.LOGICAL_H;
   var DPR, scale, offX, offY, viewW, viewH;
   function resize(){
@@ -536,10 +526,6 @@
 
   var GROUND_HEIGHT = P.GROUND_HEIGHT, PIPE_WIDTH = P.PIPE_WIDTH, COIN_RADIUS = P.COIN_RADIUS;
   var STORAGE_KEY = 'grmflap_best_local';
-
-  // ============================================================
-  // 3. Session
-  // ============================================================
   var session = null;
 
   function localSeed(){ return (Date.now() ^ Math.floor(Math.random()*1e9)) >>> 0; }
@@ -623,12 +609,6 @@
     return apiFetch('/api/withdraw', { method:'POST', body: JSON.stringify({ initData: initData, address: address, amount: amount }) });
   }
 
-  // ============================================================
-  // 4. Cached profile/leaderboard data — refreshed ONLY:
-  //    (a) once, lazily, the first time a page is opened, and
-  //    (b) right after a run finishes (finalizeRun success).
-  //    Never refetched just from tapping a nav button.
-  // ============================================================
   var profileCache = null;
   var leaderboardCache = null;
 
@@ -675,9 +655,6 @@
   }
 
   function refreshStatsAfterRun(profileResult){
-    // Update caches straight from the submit-score response (no extra
-    // fetch needed for profile fields we already know), then refresh
-    // the leaderboard in the background since rank may have changed.
     if (profileCache) {
       profileCache.best = Math.max(profileCache.best||0, profileResult.allTimeBest||0);
       profileCache.balance = profileResult.balance != null ? profileResult.balance : profileCache.balance;
@@ -689,19 +666,13 @@
     if(!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache();
   }
 
-  // ============================================================
-  // 5. Local "best" (device-only, cosmetic)
-  // ============================================================
   function loadBest(){
     try{ var v = localStorage.getItem(STORAGE_KEY); return v?parseInt(v,10):0; }catch(e){ return 0; }
   }
   function saveBest(v){ try{ localStorage.setItem(STORAGE_KEY, String(v)); }catch(e){} }
   var best = loadBest();
 
-  // ============================================================
-  // 6. Game state
-  // ============================================================
-  var state = 'ready'; // ready | playing | crashed | over
+  var state = 'ready';
   var bird, pipes, particles, lastPipeTop;
   var score, stepIndex, pipeTimer;
   var flapLog, reviveLog, revivesUsed, pendingFlap, lastFlapStep;
@@ -815,7 +786,6 @@
     });
   }
 
-  // ---------- Input ----------
   function onPointerDown(e){ e.preventDefault(); flap(); }
   canvas.addEventListener('touchstart', onPointerDown, {passive:false});
   canvas.addEventListener('mousedown', onPointerDown);
@@ -837,7 +807,6 @@
 
   document.body.addEventListener('touchmove', function(e){ e.preventDefault(); }, {passive:false});
 
-  // ---------- Profile page ----------
   function loadProfilePage(){
     var imgEl = document.getElementById('avatarImgEl');
     var initialEl = document.getElementById('avatarInitialEl');
@@ -860,7 +829,6 @@
       .catch(function(){ document.getElementById('profileHint').textContent = 'Could not load profile.'; });
   }
 
-  // ---------- Wallet page ----------
   function loadWalletPage(){
     var msg = document.getElementById('walletMsg');
     msg.textContent = DEMO_MODE ? 'Demo mode — connect a backend to withdraw.' : '';
@@ -886,7 +854,6 @@
     });
   });
 
-  // ---------- Leaderboard page ----------
   function loadLeaderboardPage(){
     if (leaderboardCache) { renderLeaderboardFromCache(); return; }
     document.getElementById('lbPageList').innerHTML = '<div class="hint">Loading…</div>';
@@ -895,7 +862,6 @@
     });
   }
 
-  // ---------- Nav switching ----------
   document.querySelectorAll('.nav-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
       var page = btn.getAttribute('data-page');
@@ -912,7 +878,6 @@
     });
   });
 
-  // ---------- Drawing ----------
   function drawBackground(){
     ctx.save();
     ctx.globalAlpha = 0.5;
@@ -959,4 +924,159 @@
     var bottomY = p.top + p.gap;
     ctx.save();
     var bodyGrad = ctx.createLinearGradient(p.x,0,p.x+PIPE_WIDTH,0);
-    bodyGrad.addColorStop(0,'#ff8a9b'); bodyGr
+    bodyGrad.addColorStop(0,'#ff8a9b'); bodyGrad.addColorStop(0.5,'#ff5d73'); bodyGrad.addColorStop(1,'#d43f58');
+    ctx.fillStyle = bodyGrad;
+    ctx.fillRect(p.x, 0, PIPE_WIDTH, p.top);
+    ctx.fillRect(p.x-4, p.top-22, PIPE_WIDTH+8, 22);
+    ctx.fillRect(p.x, bottomY, PIPE_WIDTH, y - bottomY);
+    ctx.fillRect(p.x-4, bottomY, PIPE_WIDTH+8, 22);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x, 0, PIPE_WIDTH, p.top);
+    ctx.strokeRect(p.x, bottomY, PIPE_WIDTH, y - bottomY);
+    ctx.restore();
+  }
+
+  function drawBird(){
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.rot);
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.shadowColor = 'rgba(244,197,66,0.65)';
+    ctx.shadowBlur = bird.r * 0.9;
+    ctx.fillStyle = 'rgba(244,197,66,0.001)';
+    ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    var grad = ctx.createRadialGradient(-bird.r*0.3,-bird.r*0.35,bird.r*0.2,0,0,bird.r);
+    grad.addColorStop(0,'#4a4a52'); grad.addColorStop(0.55,'#2b2b33'); grad.addColorStop(1,'#17171d');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(244,197,66,0.7)'; ctx.stroke();
+    drawGrmMark(bird.r);
+    ctx.restore();
+  }
+
+  function drawGrmMark(r){
+    var s = r * 0.9;
+    ctx.save();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s * 0.24; ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(-s*0.6, -s*0.48); ctx.lineTo(s*0.6, -s*0.48); ctx.lineTo(0, s*0.62); ctx.closePath(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -s*0.48); ctx.lineTo(0, s*0.3); ctx.lineWidth = s * 0.2; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawParticles(dt){
+    ctx.save();
+    for(var i=particles.length-1;i>=0;i--){
+      var p = particles[i];
+      p.age += dt;
+      if(p.age > p.life){ particles.splice(i,1); continue; }
+      p.x += p.vx*dt; p.y += p.vy*dt;
+      ctx.globalAlpha = 1 - (p.age/p.life);
+      ctx.fillStyle = '#f4c542';
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  var STEP = P.STEP;
+  function simStep(){
+    if (pendingFlap) {
+      if (stepIndex - lastFlapStep >= MIN_FLAP_GAP_STEPS) {
+        bird.vy = P.FLAP_VELOCITY;
+        flapLog.push(stepIndex);
+        lastFlapStep = stepIndex;
+      }
+      pendingFlap = false;
+    }
+
+    bird.vy += P.GRAVITY * STEP;
+    if (bird.vy > P.MAX_FALL_SPEED) bird.vy = P.MAX_FALL_SPEED;
+    bird.y += bird.vy * STEP;
+    bird.rot = Math.max(-0.5, Math.min(1.2, bird.vy/500));
+
+    pipeTimer++;
+    var groundY = LH - GROUND_HEIGHT;
+    var crashed = false;
+
+    if (pipeTimer >= Math.round(1.1/STEP)) {
+      pipeTimer = 0;
+      var gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
+      var top = P.nextPipeTop(rng, lastPipeTop, gap, playH, P.PIPE_MARGIN);
+      lastPipeTop = top;
+      pipes.push({ x: LW + PIPE_WIDTH, top: top, gap: gap, passed: false });
+    }
+
+    var speed = P.currentSpeed(score);
+    if (bird.y + bird.r >= groundY) crashed = true;
+    if (bird.y - bird.r <= 0) { bird.y = bird.r; bird.vy = 0; }
+
+    for (var i = pipes.length-1; i>=0; i--){
+      var p = pipes[i];
+      p.x -= speed*STEP;
+      if(!p.passed && p.x + PIPE_WIDTH < bird.x - bird.r){
+        p.passed = true;
+        score++;
+        scoreEl.textContent = score;
+        grmLiveEl.textContent = (score * GRM_PER_PIPE).toFixed(2) + ' GRM';
+      }
+      if(p.x < -PIPE_WIDTH-10){ pipes.splice(i,1); continue; }
+      if(!crashed && bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_WIDTH){
+        var bottomY = p.top + p.gap;
+        if (circleRectCollideLocal(bird.x,bird.y,bird.r*0.85, p.x,0,PIPE_WIDTH,p.top)) crashed = true;
+        if (circleRectCollideLocal(bird.x,bird.y,bird.r*0.85, p.x,bottomY,PIPE_WIDTH,groundY-bottomY)) crashed = true;
+      }
+    }
+
+    stepIndex++;
+    if (crashed) { handleCrash(); }
+  }
+  function circleRectCollideLocal(cx,cy,cr,rx,ry,rw,rh){
+    var closestX = Math.max(rx, Math.min(cx, rx+rw));
+    var closestY = Math.max(ry, Math.min(cy, ry+rh));
+    var dx = cx-closestX, dy = cy-closestY;
+    return (dx*dx+dy*dy) < (cr*cr);
+  }
+
+  var lastTime, accumulator = 0;
+  function render(){
+    ctx.clearRect(0,0,viewW,viewH);
+    ctx.fillStyle = '#05030c';
+    ctx.fillRect(0,0,viewW,viewH);
+    ctx.save();
+    ctx.translate(offX, offY);
+    ctx.scale(scale, scale);
+    drawBackground();
+    for(var i=0;i<pipes.length;i++) drawPipe(pipes[i]);
+    drawGround();
+    drawParticles(1/60);
+    drawBird();
+    ctx.restore();
+  }
+
+  function loop(ts){
+    if(!lastTime) lastTime = ts;
+    var dt = Math.min((ts-lastTime)/1000, 0.05);
+    lastTime = ts;
+    elapsedMs += dt*1000;
+    groundOffset += P.currentSpeed(score)*dt;
+
+    if (state === 'playing') {
+      accumulator += dt;
+      while (accumulator >= STEP) { simStep(); accumulator -= STEP; if(state!=='playing') { accumulator=0; break; } }
+    } else if (state === 'ready') {
+      bird.y = P.BIRD_START_Y + Math.sin(elapsedMs/300)*8;
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  resetGame();
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
