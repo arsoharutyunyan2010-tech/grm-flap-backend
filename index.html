@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://w.tads.me/widget.js"></script>
+<script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -505,31 +505,27 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  // ---------- TADS rewarded ads (Widget ID: 11705) ----------
-  var TADS_WIDGET_ID = 11705;
-  var pendingAdResolve = null, pendingAdReject = null;
-  var tadsController = (window.tads && window.tads.init) ? window.tads.init({
-    widgetId: TADS_WIDGET_ID,
-    type: 'fullscreen',
-    debug: false,
-    onShowReward: function(){
-      if (pendingAdResolve) { pendingAdResolve(); pendingAdResolve = null; pendingAdReject = null; }
-    },
-    onAdsNotFound: function(){
-      if (pendingAdReject) { pendingAdReject(new Error('no ads')); pendingAdResolve = null; pendingAdReject = null; }
+  // ---------- RichAds rewarded ads ----------
+  var richadsController = (window.TelegramAdsController) ? new window.TelegramAdsController() : null;
+  if (richadsController) {
+    try {
+      richadsController.initialize({
+        pubId: "1021065",
+        appId: "8621",
+        debug: false
+      });
+    } catch(e){
+      richadsController = null;
     }
-  }) : null;
+  }
 
   function showRewardedAd(){
     return new Promise(function(resolve, reject){
-      if (!tadsController) { reject(new Error('no ad SDK loaded')); return; }
-      pendingAdResolve = resolve;
-      pendingAdReject = reject;
-      Promise.resolve(tadsController).then(function(ctrl){
-        var controller = (ctrl && ctrl.showAd) ? ctrl : tadsController;
-        return controller.showAd();
+      if (!richadsController) { reject(new Error('no ad SDK loaded')); return; }
+      richadsController.triggerInterstitialVideo().then(function(result){
+        resolve(result);
       }).catch(function(err){
-        if (pendingAdReject) { pendingAdReject(err); pendingAdResolve = null; pendingAdReject = null; }
+        reject(err);
       });
     });
   }
@@ -755,6 +751,8 @@
     showRewardedAd().then(function(){
       if (!showExtraAd) return;
       return showRewardedAd().catch(function(){});
+    }).catch(function(){
+      /* ad unavailable — continue anyway so the game is never blocked */
     }).then(function(){
       return startSession();
     }).then(function(){
@@ -764,11 +762,6 @@
       rng = P.makeRng(session.seed);
       state = 'playing';
       bird.vy = P.FLAP_VELOCITY * 0.7;
-    }).catch(function(){
-      startBtn.disabled = false;
-      startBtn.textContent = 'TAP TO START';
-      startCard.classList.remove('hidden');
-      setSyncBadge('ad unavailable — try again', 'err');
     });
   }
 
