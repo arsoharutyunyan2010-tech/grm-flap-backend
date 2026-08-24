@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://w.tads.me/widget.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -310,7 +311,7 @@
       <div id="crashMode">
         <div class="title" style="font-size:26px;">OOPS!</div>
         <div class="stat-row"><span>Score</span><b id="crashScore">0</b></div>
-        <button id="continueBtn">CONTINUE</button>
+        <button id="continueBtn">▶ WATCH AD & CONTINUE</button>
         <button id="endRunBtn" class="secondary">END RUN</button>
         <div class="hint" id="continueHint"></div>
       </div>
@@ -503,6 +504,37 @@
     syncBadge.classList.remove('hidden');
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
+
+  // ---------- TADS rewarded ads (Widget ID: 11705) ----------
+  var TADS_WIDGET_ID = 11705;
+  var pendingAdResolve = null, pendingAdReject = null;
+  var tadsController = (window.tads && window.tads.init) ? window.tads.init({
+    widgetId: TADS_WIDGET_ID,
+    type: 'fullscreen',
+    debug: false,
+    onShowReward: function(){
+      if (pendingAdResolve) { pendingAdResolve(); pendingAdResolve = null; pendingAdReject = null; }
+    },
+    onAdsNotFound: function(){
+      if (pendingAdReject) { pendingAdReject(new Error('no ads')); pendingAdResolve = null; pendingAdReject = null; }
+    }
+  }) : null;
+
+  function showRewardedAd(){
+    return new Promise(function(resolve, reject){
+      if (!tadsController) { reject(new Error('no ad SDK loaded')); return; }
+      pendingAdResolve = resolve;
+      pendingAdReject = reject;
+      Promise.resolve(tadsController).then(function(ctrl){
+        var controller = (ctrl && ctrl.showAd) ? ctrl : tadsController;
+        return controller.showAd();
+      }).catch(function(err){
+        if (pendingAdReject) { pendingAdReject(err); pendingAdResolve = null; pendingAdReject = null; }
+      });
+    });
+  }
+
+  var gameStartCount = 0;
 
   var LW = P.LOGICAL_W, LH = P.LOGICAL_H;
   var DPR, scale, offX, offY, viewW, viewH;
@@ -716,12 +748,27 @@
     startCard.classList.add('hidden');
     overCard.classList.add('hidden');
     startBtn.disabled = true;
-    startSession().then(function(){
+    startBtn.textContent = 'LOADING AD…';
+    gameStartCount++;
+    var showExtraAd = (gameStartCount % 3 === 0);
+
+    showRewardedAd().then(function(){
+      if (!showExtraAd) return;
+      return showRewardedAd().catch(function(){});
+    }).then(function(){
+      return startSession();
+    }).then(function(){
       startBtn.disabled = false;
+      startBtn.textContent = 'TAP TO START';
       resetGame();
       rng = P.makeRng(session.seed);
       state = 'playing';
       bird.vy = P.FLAP_VELOCITY * 0.7;
+    }).catch(function(){
+      startBtn.disabled = false;
+      startBtn.textContent = 'TAP TO START';
+      startCard.classList.remove('hidden');
+      setSyncBadge('ad unavailable — try again', 'err');
     });
   }
 
@@ -730,6 +777,8 @@
     crashScoreEl.textContent = score;
     var canContinue = revivesUsed < MAX_REVIVES;
     if (!canContinue) { finalizeRun(); return; }
+    continueBtn.disabled = false;
+    continueBtn.textContent = '▶ WATCH AD & CONTINUE';
     continueHint.textContent = (MAX_REVIVES - revivesUsed) + ' continue(s) left';
     crashMode.classList.remove('hidden');
     finalMode.classList.add('hidden');
@@ -801,7 +850,18 @@
     startCard.classList.remove('hidden');
   });
 
-  continueBtn.addEventListener('click', function(e){ e.preventDefault(); doRevive(); });
+  continueBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    continueBtn.disabled = true;
+    continueBtn.textContent = 'LOADING AD…';
+    showRewardedAd().then(function(){
+      doRevive();
+    }).catch(function(){
+      continueBtn.disabled = false;
+      continueBtn.textContent = '▶ WATCH AD & CONTINUE';
+      continueHint.textContent = 'Ad unavailable — try again';
+    });
+  });
 
   endRunBtn.addEventListener('click', function(e){ e.preventDefault(); finalizeRun(); });
 
