@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
+<script src='//libtl.com/sdk.js' data-zone='11646472' data-sdk='show_11646472'></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -505,27 +505,17 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  // ---------- RichAds rewarded ads ----------
-  var richadsController = (window.TelegramAdsController) ? new window.TelegramAdsController() : null;
-  if (richadsController) {
-    try {
-      richadsController.initialize({
-        pubId: "1021065",
-        appId: "8621",
-        debug: false
-      });
-    } catch(e){
-      richadsController = null;
-    }
-  }
-
+  // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
+  // The SDK script tag in <head> exposes a global function named after
+  // the data-sdk attribute: window.show_11646472()
   function showRewardedAd(){
     return new Promise(function(resolve, reject){
-      if (!richadsController) { reject(new Error('no ad SDK loaded')); return; }
-      richadsController.triggerInterstitialVideo().then(function(result){
-        resolve(result);
+      var fn = window.show_11646472;
+      if (typeof fn !== 'function') { reject(new Error('no ad SDK loaded')); return; }
+      fn().then(function(){
+        resolve();
       }).catch(function(err){
-        reject(err);
+        reject(err || new Error('ad not shown'));
       });
     });
   }
