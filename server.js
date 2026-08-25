@@ -178,6 +178,62 @@ app.post('/api/profile', (req, res) => {
 });
 
 // ---------------------------------------------------------------
+// POST /api/check-subscription
+// Ստուգում է, արդյոք օգտատերը բաժանորդագրված է պահանջվող ալիքներին
+// ---------------------------------------------------------------
+app.post('/api/check-subscription', async (req, res) => {
+  // 1. Ստուգում ենք օգտատիրոջ սկությունը initData-ի միջոցով (անվտանգ)
+  const user = authenticate(req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+
+  const userId = String(user.id);
+
+  // 2. Rate limiting (պաշտպանում է Telegram API-ն սպամից)
+  if (!store.allowRequest('subcheck:' + userId, 10, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many checks, slow down' });
+  }
+
+  // 3. Ստուգում ենք, արդյոք BOT_TOKEN-ը կա
+  if (!BOT_TOKEN) {
+    return res.status(500).json({ error: 'Bot token not configured on server' });
+  }
+
+  try {
+    // Ստուգում ենք @GRMFLAP ալիքը
+    const channelUrl = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=@GRMFLAP&user_id=${userId}`;
+    const channelRes = await fetch(channelUrl);
+    const channelData = await channelRes.json();
+    
+    let isChannelJoined = false;
+    if (channelData.ok) {
+      const status = channelData.result.status;
+      isChannelJoined = ['member', 'administrator', 'creator'].includes(status);
+    }
+
+    // Ստուգում ենք @GRMFLAPCHAT չաթը
+    const chatUrl = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=@GRMFLAPCHAT&user_id=${userId}`;
+    const chatRes = await fetch(chatUrl);
+    const chatData = await chatRes.json();
+
+    let isChatJoined = false;
+    if (chatData.ok) {
+      const status = chatData.result.status;
+      isChatJoined = ['member', 'administrator', 'creator'].includes(status);
+    }
+
+    // Վերադարձնում ենք արդյունքը frontend-ին
+    res.json({
+      channelJoined: isChannelJoined,
+      chatJoined: isChatJoined
+    });
+
+  } catch (error) {
+    console.error('Subscription check error:', error);
+    res.status(500).json({ error: 'Failed to check subscription' });
+  }
+});
+
+// ---------------------------------------------------------------
 // POST /api/withdraw
 // ---------------------------------------------------------------
 const TON_ADDRESS_RE = /^(?:[A-Za-z0-9_-]{48}|-?\d:[0-9a-fA-F]{64})$/;
