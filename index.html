@@ -305,6 +305,72 @@
     box-shadow: 0 4px 14px rgba(0,0,0,0.5);
   }
   .ad-close-btn:active{ transform: scale(0.92); }
+
+  /* ---------- Subscription Check Styles ---------- */
+  .sub-check-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:12px 16px;
+    margin:10px 0;
+    background:rgba(255,255,255,0.05);
+    border-radius:12px;
+    border:1px solid rgba(244,197,66,0.2);
+  }
+  .sub-check-info{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex:1;
+  }
+  .sub-check-icon{
+    width:32px;
+    height:32px;
+    border-radius:50%;
+    background:rgba(244,197,66,0.2);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+  }
+  .sub-check-text{
+    text-align:left;
+    font-size:14px;
+    font-weight:600;
+  }
+  .sub-check-status{
+    font-size:11px;
+    padding:4px 10px;
+    border-radius:20px;
+    font-weight:700;
+  }
+  .sub-check-status.joined{
+    background:rgba(61,220,132,0.2);
+    color:#3ddc84;
+  }
+  .sub-check-status.not-joined{
+    background:rgba(255,93,115,0.2);
+    color:#ff5d73;
+  }
+  .sub-join-btn{
+    margin-top:8px;
+    padding:8px 16px;
+    font-size:13px;
+  }
+  .verify-all-btn{
+    margin-top:16px;
+    background:linear-gradient(180deg, #3ddc84, #2bb86e);
+    color:#1b1033;
+  }
+  .warning-box{
+    background:rgba(255,93,115,0.15);
+    border:1px solid rgba(255,93,115,0.4);
+    border-radius:12px;
+    padding:12px;
+    margin:12px 0;
+    font-size:13px;
+    line-height:1.5;
+  }
 </style>
 </head>
 <body>
@@ -314,6 +380,49 @@
   <div id="hud"><div id="score">0</div></div>
   <div id="grmLive" class="hidden">0.00 GRM</div>
   <div id="syncBadge" class="hidden"></div>
+
+  <!-- Subscription Check Card -->
+  <div class="overlay hidden" id="subCheckCard">
+    <div class="card">
+      <div class="title" style="font-size:28px;">SUBSCRIBE TO PLAY</div>
+      <div class="sub">You must join both channels to start playing</div>
+      
+      <div class="warning-box">
+        ⚠️ Please subscribe to both channels below and click "Verify Subscription" to continue.
+      </div>
+
+      <div class="sub-check-item">
+        <div class="sub-check-info">
+          <div class="sub-check-icon">💬</div>
+          <div class="sub-check-text">
+            <div>GRM FLAP CHAT</div>
+            <div style="font-size:11px;opacity:0.7;">Community & Support</div>
+          </div>
+        </div>
+        <div>
+          <div id="statusChat" class="sub-check-status not-joined">NOT JOINED</div>
+          <button id="joinChatBtn" class="sub-join-btn">JOIN</button>
+        </div>
+      </div>
+
+      <div class="sub-check-item">
+        <div class="sub-check-info">
+          <div class="sub-check-icon">🎮</div>
+          <div class="sub-check-text">
+            <div>GRM FLAP</div>
+            <div style="font-size:11px;opacity:0.7;">Official Channel</div>
+          </div>
+        </div>
+        <div>
+          <div id="statusChannel" class="sub-check-status not-joined">NOT JOINED</div>
+          <button id="joinChannelBtn" class="sub-join-btn">JOIN</button>
+        </div>
+      </div>
+
+      <button id="verifySubBtn" class="verify-all-btn">✓ VERIFY SUBSCRIPTION</button>
+      <div class="hint" id="subHint">After joining, click verify to continue</div>
+    </div>
+  </div>
 
   <div class="overlay" id="startCard">
     <div class="card">
@@ -422,7 +531,7 @@
     <div class="lb-list" id="lbPageList"></div>
     <div class="tiers-box">
       <div><span>🥇 1st place</span><b>5000 GRM</b></div>
-      <div><span>🥈 2nd place</span><b>2500 GRM</b></div>
+      <div><span> 2nd place</span><b>2500 GRM</b></div>
       <div><span>🥉 3rd place</span><b>1000 GRM</b></div>
       <div><span>4th place</span><b>500 GRM</b></div>
       <div><span>5th – 10th place</span><b>200 GRM</b></div>
@@ -501,6 +610,7 @@
   var scoreEl = document.getElementById('score');
   var grmLiveEl = document.getElementById('grmLive');
   var wrap = document.getElementById('wrap');
+  var subCheckCard = document.getElementById('subCheckCard');
   var startCard = document.getElementById('startCard');
   var overCard = document.getElementById('overCard');
   var crashMode = document.getElementById('crashMode');
@@ -519,6 +629,14 @@
   var verifyNote = document.getElementById('verifyNote');
   var syncBadge = document.getElementById('syncBadge');
 
+  // Subscription check elements
+  var joinChatBtn = document.getElementById('joinChatBtn');
+  var joinChannelBtn = document.getElementById('joinChannelBtn');
+  var verifySubBtn = document.getElementById('verifySubBtn');
+  var statusChat = document.getElementById('statusChat');
+  var statusChannel = document.getElementById('statusChannel');
+  var subHint = document.getElementById('subHint');
+
   var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   var initData = tg ? tg.initData : "";
   var tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
@@ -529,12 +647,118 @@
     try { tg.setBackgroundColor('#0d0620'); } catch(e){}
   }
 
+  // Subscription state
+  var subscribedChat = false;
+  var subscribedChannel = false;
+
+  // Channel usernames (without @)
+  var CHAT_USERNAME = 'GRMFLAPCHAT';
+  var CHANNEL_USERNAME = 'GRMFLAP';
+
   function setSyncBadge(text, cls){
     syncBadge.textContent = text;
     syncBadge.className = cls ? cls : "";
     syncBadge.classList.remove('hidden');
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
+
+  // ---------- Subscription Check Functions ----------
+  function openTelegramLink(username){
+    if (tg) {
+      tg.openTelegramLink('https://t.me/' + username);
+    } else {
+      window.open('https://t.me/' + username, '_blank');
+    }
+  }
+
+  function updateSubscriptionUI(){
+    if (subscribedChat) {
+      statusChat.textContent = 'JOINED ✓';
+      statusChat.className = 'sub-check-status joined';
+      joinChatBtn.textContent = 'OPEN';
+    } else {
+      statusChat.textContent = 'NOT JOINED';
+      statusChat.className = 'sub-check-status not-joined';
+      joinChatBtn.textContent = 'JOIN';
+    }
+
+    if (subscribedChannel) {
+      statusChannel.textContent = 'JOINED ✓';
+      statusChannel.className = 'sub-check-status joined';
+      joinChannelBtn.textContent = 'OPEN';
+    } else {
+      statusChannel.textContent = 'NOT JOINED';
+      statusChannel.className = 'sub-check-status not-joined';
+      joinChannelBtn.textContent = 'JOIN';
+    }
+
+    if (subscribedChat && subscribedChannel) {
+      verifySubBtn.textContent = '✓ BOTH JOINED - CONTINUE';
+      verifySubBtn.disabled = false;
+      subHint.textContent = 'Great! Click to start playing';
+    } else {
+      verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
+      verifySubBtn.disabled = true;
+      subHint.textContent = 'Join both channels and click verify';
+    }
+  }
+
+  function checkSubscriptionStatus(){
+    // Note: Client-side subscription checking has limitations.
+    // For production, implement server-side verification using Telegram Bot API.
+    // This is a basic client-side check that can be bypassed.
+    
+    if (tg && tg.initData) {
+      // In a real implementation, you would send initData to your backend
+      // and use getChatMember API to verify membership.
+      // For now, we'll use a simplified approach.
+      
+      // You can add more sophisticated checks here if needed
+      return Promise.resolve({
+        chatJoined: subscribedChat,
+        channelJoined: subscribedChannel
+      });
+    }
+    
+    return Promise.resolve({
+      chatJoined: subscribedChat,
+      channelJoined: subscribedChannel
+    });
+  }
+
+  joinChatBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    openTelegramLink(CHAT_USERNAME);
+    // Mark as joined after a delay (user has time to join)
+    setTimeout(function(){
+      subscribedChat = true;
+      updateSubscriptionUI();
+    }, 3000);
+  });
+
+  joinChannelBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    openTelegramLink(CHANNEL_USERNAME);
+    // Mark as joined after a delay (user has time to join)
+    setTimeout(function(){
+      subscribedChannel = true;
+      updateSubscriptionUI();
+    }, 3000);
+  });
+
+  verifySubBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    if (subscribedChat && subscribedChannel) {
+      subCheckCard.classList.add('hidden');
+      startCard.classList.remove('hidden');
+    } else {
+      subHint.textContent = 'Please join both channels first!';
+      subHint.style.color = '#ff5d73';
+      setTimeout(function(){
+        subHint.style.color = '';
+      }, 2000);
+    }
+  });
 
   // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
   // The SDK script tag in <head> exposes a global function named after
@@ -1305,7 +1529,16 @@
     requestAnimationFrame(loop);
   }
 
+  // Initialize subscription check on load
+  function init(){
+    updateSubscriptionUI();
+    // Show subscription check first
+    subCheckCard.classList.remove('hidden');
+    startCard.classList.add('hidden');
+  }
+
   resetGame();
+  init();
   requestAnimationFrame(loop);
 
 })();
