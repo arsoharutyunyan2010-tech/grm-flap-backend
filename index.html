@@ -6,6 +6,7 @@
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src='//libtl.com/sdk.js' data-zone='11646472' data-sdk='show_11646472'></script>
+<script src="https://w.tads.me/widget.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -508,15 +509,89 @@
   // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
   // The SDK script tag in <head> exposes a global function named after
   // the data-sdk attribute: window.show_11646472()
-  function showRewardedAd(){
+  function showMonetagAd(){
     return new Promise(function(resolve, reject){
       var fn = window.show_11646472;
-      if (typeof fn !== 'function') { reject(new Error('no Monetag SDK loaded')); return; }
+      if (typeof fn !== 'function') {
+        console.error('[GRM FLAP AD DEBUG] window.show_11646472 is not a function — the Monetag SDK script (//libtl.com/sdk.js) did not load or did not register the zone function yet.');
+        reject(new Error('no Monetag SDK loaded'));
+        return;
+      }
+      console.log('[GRM FLAP AD DEBUG] calling show_11646472()...');
       fn().then(function(){
+        console.log('[GRM FLAP AD DEBUG] Monetag ad shown/completed successfully.');
         resolve();
       }).catch(function(err){
+        console.error('[GRM FLAP AD DEBUG] Monetag rejected/failed to show ad:', err);
         reject(err || new Error('Monetag ad not shown'));
       });
+    });
+  }
+
+  // ---------- TADS fullscreen ad (fallback, Widget ID: 11744) ----------
+  var TADS_WIDGET_ID = 11744;
+  var tadsController = null;
+
+  function waitForTadsReady(timeout){
+    timeout = timeout || 4000;
+    return new Promise(function(resolve, reject){
+      if (window.tads && typeof window.tads.init === 'function') { resolve(); return; }
+      var start = performance.now();
+      var iv = setInterval(function(){
+        if (window.tads && typeof window.tads.init === 'function') {
+          clearInterval(iv);
+          resolve();
+        } else if (performance.now() - start > timeout) {
+          clearInterval(iv);
+          reject(new Error('TADS widget script not loaded'));
+        }
+      }, 50);
+    });
+  }
+
+  function showTadsAd(){
+    return waitForTadsReady().then(function(){
+      return new Promise(function(resolve, reject){
+        var onShowRewardCallback = function(result){
+          console.log('[GRM FLAP AD DEBUG] TADS ad shown, reward user:', result);
+        };
+        var onAdsNotFound = function(){
+          console.error('[GRM FLAP AD DEBUG] TADS: no ads found to show.');
+          reject(new Error('no TADS ads found'));
+        };
+
+        if (!tadsController) {
+          tadsController = window.tads.init({
+            widgetId: TADS_WIDGET_ID,
+            type: 'fullscreen',
+            debug: false,
+            onShowReward: onShowRewardCallback,
+            onAdsNotFound: onAdsNotFound
+          });
+        }
+
+        console.log('[GRM FLAP AD DEBUG] calling TADS showAd() (widget #'+TADS_WIDGET_ID+')...');
+        Promise.resolve(tadsController).then(function(controller){
+          return controller.showAd();
+        }).then(function(){
+          console.log('[GRM FLAP AD DEBUG] TADS ad completed successfully.');
+          resolve();
+        }).catch(function(err){
+          console.error('[GRM FLAP AD DEBUG] TADS failed to show ad:', err);
+          reject(err || new Error('TADS ad not shown'));
+        });
+      });
+    });
+  }
+
+  // Tries Monetag first; if Monetag has no fill / fails to load, falls back
+  // to the TADS fullscreen widget. The game is never blocked — callers
+  // still `.catch()` this if both providers are unavailable.
+  function showRewardedAd(){
+    return showMonetagAd().catch(function(monetagErr){
+      console.warn('[GRM FLAP AD DEBUG] Monetag unavailable, falling back to TADS:', monetagErr && monetagErr.message);
+      setSyncBadge('Monetag unavailable — trying TADS…', 'err');
+      return showTadsAd();
     });
   }
 
@@ -730,18 +805,26 @@
     }
   }
 
+  var awaitingPlayAfterAd = false;
+  var awaitingContinueTap = false;
+
+  function actuallyStartGame(){
+    resetGame();
+    rng = P.makeRng(session.seed);
+    state = 'playing';
+    bird.vy = P.FLAP_VELOCITY * 0.7;
+  }
+
   function beginRound(){
-    startCard.classList.add('hidden');
+    startCard.classList.remove('hidden');
     overCard.classList.add('hidden');
     gameStartCount++;
-    var shouldShowAd = (gameStartCount % 4 === 0);
+    var shouldShowAd = (gameStartCount === 1) || (gameStartCount % 4 === 0);
 
     if (!shouldShowAd) {
+      startCard.classList.add('hidden');
       startSession().then(function(){
-        resetGame();
-        rng = P.makeRng(session.seed);
-        state = 'playing';
-        bird.vy = P.FLAP_VELOCITY * 0.7;
+        actuallyStartGame();
       });
       return;
     }
@@ -749,17 +832,16 @@
     startBtn.disabled = true;
     startBtn.textContent = 'LOADING AD…';
 
-    showRewardedAd().catch(function(){
+    showRewardedAd().catch(function(err){
       /* ad unavailable — continue anyway so the game is never blocked */
+      setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
     }).then(function(){
       return startSession();
     }).then(function(){
       startBtn.disabled = false;
-      startBtn.textContent = 'TAP TO START';
-      resetGame();
-      rng = P.makeRng(session.seed);
-      state = 'playing';
-      bird.vy = P.FLAP_VELOCITY * 0.7;
+      startBtn.textContent = 'PLAY';
+      awaitingPlayAfterAd = true;
+      startCard.classList.remove('hidden');
     });
   }
 
@@ -768,6 +850,7 @@
     crashScoreEl.textContent = score;
     var canContinue = revivesUsed < MAX_REVIVES;
     if (!canContinue) { finalizeRun(); return; }
+    awaitingContinueTap = false;
     continueBtn.disabled = false;
     continueBtn.textContent = '▶ WATCH AD & CONTINUE';
     continueHint.textContent = (MAX_REVIVES - revivesUsed) + ' continue(s) left';
@@ -833,24 +916,44 @@
     if(e.code === 'Space' || e.code === 'ArrowUp'){ e.preventDefault(); flap(); }
   });
 
-  startBtn.addEventListener('click', function(e){ e.preventDefault(); beginRound(); });
+  startBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    if (awaitingPlayAfterAd) {
+      awaitingPlayAfterAd = false;
+      startCard.classList.add('hidden');
+      startBtn.textContent = 'TAP TO START';
+      actuallyStartGame();
+      return;
+    }
+    beginRound();
+  });
 
   restartBtn.addEventListener('click', function(e){
     e.preventDefault();
     overCard.classList.add('hidden');
+    startBtn.textContent = 'TAP TO START';
     startCard.classList.remove('hidden');
   });
 
   continueBtn.addEventListener('click', function(e){
     e.preventDefault();
+    if (awaitingContinueTap) {
+      awaitingContinueTap = false;
+      doRevive();
+      return;
+    }
     continueBtn.disabled = true;
     continueBtn.textContent = 'LOADING AD…';
     showRewardedAd().then(function(){
-      doRevive();
-    }).catch(function(){
+      continueBtn.disabled = false;
+      continueBtn.textContent = '▶ TAP TO CONTINUE';
+      continueHint.textContent = 'Tap to continue your run';
+      awaitingContinueTap = true;
+    }).catch(function(err){
       continueBtn.disabled = false;
       continueBtn.textContent = '▶ WATCH AD & CONTINUE';
       continueHint.textContent = 'Ad unavailable — try again';
+      setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
     });
   });
 
