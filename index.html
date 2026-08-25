@@ -730,26 +730,18 @@
     }
   }
 
-  var awaitingPlayAfterAd = false;
-  var awaitingContinueTap = false;
-
-  function actuallyStartGame(){
-    resetGame();
-    rng = P.makeRng(session.seed);
-    state = 'playing';
-    bird.vy = P.FLAP_VELOCITY * 0.7;
-  }
-
   function beginRound(){
-    startCard.classList.remove('hidden');
+    startCard.classList.add('hidden');
     overCard.classList.add('hidden');
     gameStartCount++;
-    var shouldShowAd = (gameStartCount === 1) || (gameStartCount % 4 === 0);
+    var shouldShowAd = (gameStartCount % 4 === 0);
 
     if (!shouldShowAd) {
-      startCard.classList.add('hidden');
       startSession().then(function(){
-        actuallyStartGame();
+        resetGame();
+        rng = P.makeRng(session.seed);
+        state = 'playing';
+        bird.vy = P.FLAP_VELOCITY * 0.7;
       });
       return;
     }
@@ -763,9 +755,11 @@
       return startSession();
     }).then(function(){
       startBtn.disabled = false;
-      startBtn.textContent = 'PLAY';
-      awaitingPlayAfterAd = true;
-      startCard.classList.remove('hidden');
+      startBtn.textContent = 'TAP TO START';
+      resetGame();
+      rng = P.makeRng(session.seed);
+      state = 'playing';
+      bird.vy = P.FLAP_VELOCITY * 0.7;
     });
   }
 
@@ -774,7 +768,6 @@
     crashScoreEl.textContent = score;
     var canContinue = revivesUsed < MAX_REVIVES;
     if (!canContinue) { finalizeRun(); return; }
-    awaitingContinueTap = false;
     continueBtn.disabled = false;
     continueBtn.textContent = '▶ WATCH AD & CONTINUE';
     continueHint.textContent = (MAX_REVIVES - revivesUsed) + ' continue(s) left';
@@ -840,39 +833,20 @@
     if(e.code === 'Space' || e.code === 'ArrowUp'){ e.preventDefault(); flap(); }
   });
 
-  startBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    if (awaitingPlayAfterAd) {
-      awaitingPlayAfterAd = false;
-      startCard.classList.add('hidden');
-      startBtn.textContent = 'TAP TO START';
-      actuallyStartGame();
-      return;
-    }
-    beginRound();
-  });
+  startBtn.addEventListener('click', function(e){ e.preventDefault(); beginRound(); });
 
   restartBtn.addEventListener('click', function(e){
     e.preventDefault();
     overCard.classList.add('hidden');
-    startBtn.textContent = 'TAP TO START';
     startCard.classList.remove('hidden');
   });
 
   continueBtn.addEventListener('click', function(e){
     e.preventDefault();
-    if (awaitingContinueTap) {
-      awaitingContinueTap = false;
-      doRevive();
-      return;
-    }
     continueBtn.disabled = true;
     continueBtn.textContent = 'LOADING AD…';
     showRewardedAd().then(function(){
-      continueBtn.disabled = false;
-      continueBtn.textContent = '▶ TAP TO CONTINUE';
-      continueHint.textContent = 'Tap to continue your run';
-      awaitingContinueTap = true;
+      doRevive();
     }).catch(function(){
       continueBtn.disabled = false;
       continueBtn.textContent = '▶ WATCH AD & CONTINUE';
