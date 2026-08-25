@@ -646,7 +646,7 @@
         // button, so we overlay our own — it appears a couple seconds after
         // the ad starts and lets the player always get back into the game.
         adCloseResolver = finishOk;
-        showAdCloseButtonAfter(2500);
+        showAdCloseButtonAfter(15000);
 
         console.log('[GRM FLAP AD DEBUG] calling TADS showAd() (widget #'+TADS_WIDGET_ID+')...');
         Promise.resolve(tadsController).then(function(controller){
