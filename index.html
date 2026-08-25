@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>GRM FLAP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src='//libtl.com/sdk.js' data-zone='11646472' data-sdk='show_11646472'></script>
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -505,17 +505,15 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
-  // The SDK script tag in <head> exposes a global function named after
-  // the data-sdk attribute: window.show_11646472()
+  // ---------- AdsGram rewarded ads (Block ID: 44485) ----------
+  var AdsGramController = (window.Adsgram && window.Adsgram.init) ? window.Adsgram.init({ blockId: "44485" }) : null;
   function showRewardedAd(){
     return new Promise(function(resolve, reject){
-      var fn = window.show_11646472;
-      if (typeof fn !== 'function') { reject(new Error('no ad SDK loaded')); return; }
-      fn().then(function(){
-        resolve();
-      }).catch(function(err){
-        reject(err || new Error('ad not shown'));
+      if (!AdsGramController) { reject(new Error('no AdsGram SDK loaded')); return; }
+      AdsGramController.show().then(function(result){
+        resolve(result);
+      }).catch(function(result){
+        reject((result && result.description) ? new Error(result.description) : new Error('AdsGram ad not shown'));
       });
     });
   }
