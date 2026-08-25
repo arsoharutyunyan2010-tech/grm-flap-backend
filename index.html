@@ -531,7 +531,7 @@
     <div class="lb-list" id="lbPageList"></div>
     <div class="tiers-box">
       <div><span>🥇 1st place</span><b>5000 GRM</b></div>
-      <div><span> 2nd place</span><b>2500 GRM</b></div>
+      <div><span>🥈 2nd place</span><b>2500 GRM</b></div>
       <div><span>🥉 3rd place</span><b>1000 GRM</b></div>
       <div><span>4th place</span><b>500 GRM</b></div>
       <div><span>5th – 10th place</span><b>200 GRM</b></div>
@@ -696,93 +696,94 @@
       verifySubBtn.textContent = '✓ BOTH JOINED - CONTINUE';
       verifySubBtn.disabled = false;
       subHint.textContent = 'Great! Click to start playing';
+      subHint.style.color = '#3ddc84';
     } else {
       verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
       verifySubBtn.disabled = true;
       subHint.textContent = 'Join both channels and click verify';
+      subHint.style.color = '';
     }
-  }
-
-  function checkSubscriptionStatus(){
-    // Note: Client-side subscription checking has limitations.
-    // For production, implement server-side verification using Telegram Bot API.
-    // This is a basic client-side check that can be bypassed.
-    
-    if (tg && tg.initData) {
-      // In a real implementation, you would send initData to your backend
-      // and use getChatMember API to verify membership.
-      // For now, we'll use a simplified approach.
-      
-      // You can add more sophisticated checks here if needed
-      return Promise.resolve({
-        chatJoined: subscribedChat,
-        channelJoined: subscribedChannel
-      });
-    }
-    
-    return Promise.resolve({
-      chatJoined: subscribedChat,
-      channelJoined: subscribedChannel
-    });
   }
 
   joinChatBtn.addEventListener('click', function(e){
     e.preventDefault();
     openTelegramLink(CHAT_USERNAME);
-    // Mark as joined after a delay (user has time to join)
-    setTimeout(function(){
-      subscribedChat = true;
-      updateSubscriptionUI();
-    }, 3000);
   });
 
   joinChannelBtn.addEventListener('click', function(e){
     e.preventDefault();
     openTelegramLink(CHANNEL_USERNAME);
-    // Mark as joined after a delay (user has time to join)
-    setTimeout(function(){
-      subscribedChannel = true;
-      updateSubscriptionUI();
-    }, 3000);
   });
 
+  // ԻՐԱԿԱՆ և ԱՆՎՏԱՆԳ ստուգում սերվերի միջոցով
   verifySubBtn.addEventListener('click', function(e){
     e.preventDefault();
-    if (subscribedChat && subscribedChannel) {
-      subCheckCard.classList.add('hidden');
-      startCard.classList.remove('hidden');
-    } else {
-      subHint.textContent = 'Please join both channels first!';
+    
+    if (!tg || !initData) {
+      subHint.textContent = 'Telegram environment not found. Please open in Telegram.';
       subHint.style.color = '#ff5d73';
-      setTimeout(function(){
-        subHint.style.color = '';
-      }, 2000);
+      return;
     }
+
+    verifySubBtn.disabled = true;
+    verifySubBtn.textContent = 'VERIFYING...';
+    subHint.textContent = 'Checking with server...';
+
+    fetch(API_BASE_URL + '/api/check-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: initData }) // Ուղարկում ենք initData անվտանգության համար
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      subscribedChat = data.chatJoined;
+      subscribedChannel = data.channelJoined;
+      updateSubscriptionUI();
+
+      if (subscribedChat && subscribedChannel) {
+        // Հաջողված ստուգում. թաքցնել ստուգման էկրանը, ցույց տալ խաղը
+        setTimeout(function(){
+          subCheckCard.classList.add('hidden');
+          startCard.classList.remove('hidden');
+        }, 800);
+      } else {
+        subHint.textContent = 'You must join BOTH channels to continue.';
+        subHint.style.color = '#ff5d73';
+        verifySubBtn.disabled = false;
+        verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
+      }
+    })
+    .catch(function(err) {
+      console.error('Verification failed:', err);
+      subHint.textContent = 'Verification failed. Please try again.';
+      subHint.style.color = '#ff5d73';
+      verifySubBtn.disabled = false;
+      verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
+    });
   });
 
   // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
-  // The SDK script tag in <head> exposes a global function named after
-  // the data-sdk attribute: window.show_11646472()
   function showMonetagAd(){
     return new Promise(function(resolve, reject){
       var fn = window.show_11646472;
       if (typeof fn !== 'function') {
-        console.error('[GRM FLAP AD DEBUG] window.show_11646472 is not a function — the Monetag SDK script (//libtl.com/sdk.js) did not load or did not register the zone function yet.');
+        console.error('[GRM FLAP AD DEBUG] window.show_11646472 is not a function — the Monetag SDK script did not load.');
         reject(new Error('no Monetag SDK loaded'));
         return;
       }
-      console.log('[GRM FLAP AD DEBUG] calling show_11646472()...');
       fn().then(function(){
-        console.log('[GRM FLAP AD DEBUG] Monetag ad shown/completed successfully.');
         resolve();
       }).catch(function(err){
-        console.error('[GRM FLAP AD DEBUG] Monetag rejected/failed to show ad:', err);
         reject(err || new Error('Monetag ad not shown'));
       });
     });
   }
 
-  // ---------- Custom close (X) overlay for ads that lack their own close UI ----------
+  // ---------- Custom close (X) overlay for ads ----------
   var adCloseOverlay = document.getElementById('adCloseOverlay');
   var adCloseBtn = document.getElementById('adCloseBtn');
   var adCloseShowTimer = null;
@@ -866,29 +867,20 @@
           });
         }
 
-        // TADS's fullscreen widget doesn't always render its own close (X)
-        // button, so we overlay our own — it appears a couple seconds after
-        // the ad starts and lets the player always get back into the game.
         adCloseResolver = finishOk;
         showAdCloseButtonAfter(15000);
 
-        console.log('[GRM FLAP AD DEBUG] calling TADS showAd() (widget #'+TADS_WIDGET_ID+')...');
         Promise.resolve(tadsController).then(function(controller){
           return controller.showAd();
         }).then(function(){
-          console.log('[GRM FLAP AD DEBUG] TADS ad completed successfully.');
           finishOk();
         }).catch(function(err){
-          console.error('[GRM FLAP AD DEBUG] TADS failed to show ad:', err);
           finishErr(err || new Error('TADS ad not shown'));
         });
       });
     });
   }
 
-  // Tries Monetag first; if Monetag has no fill / fails to load, falls back
-  // to the TADS fullscreen widget. The game is never blocked — callers
-  // still `.catch()` this if both providers are unavailable.
   function showRewardedAd(){
     return showMonetagAd().catch(function(monetagErr){
       console.warn('[GRM FLAP AD DEBUG] Monetag unavailable, falling back to TADS:', monetagErr && monetagErr.message);
@@ -1135,7 +1127,6 @@
     startBtn.textContent = 'LOADING AD…';
 
     showRewardedAd().catch(function(err){
-      /* ad unavailable — continue anyway so the game is never blocked */
       setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
     }).then(function(){
       return startSession();
@@ -1532,7 +1523,6 @@
   // Initialize subscription check on load
   function init(){
     updateSubscriptionUI();
-    // Show subscription check first
     subCheckCard.classList.remove('hidden');
     startCard.classList.add('hidden');
   }
