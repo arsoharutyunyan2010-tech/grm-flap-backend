@@ -283,6 +283,28 @@
   }
   .tiers-box div{ display:flex; justify-content:space-between; padding:2px 0; opacity:0.85; }
   .tiers-box b{ color: var(--gold); }
+
+  /* ---------- Custom ad close (X) overlay ---------- */
+  .ad-close-overlay{
+    position: fixed;
+    top: max(14px, env(safe-area-inset-top));
+    right: 14px;
+    z-index: 99999;
+  }
+  .ad-close-btn{
+    all: unset;
+    width: 38px; height: 38px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius: 50%;
+    background: rgba(15,8,28,0.85);
+    border: 2px solid var(--gold);
+    color: var(--ink);
+    font-size: 18px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  }
+  .ad-close-btn:active{ transform: scale(0.92); }
 </style>
 </head>
 <body>
@@ -417,6 +439,14 @@
   </div>
 </div>
 
+<!-- ---------- TADS widget container (required by TADS SDK) ---------- -->
+<div id="tads-container-11744" style="position:fixed; left:-9999px; top:-9999px; width:1px; height:1px; overflow:hidden;"></div>
+
+<!-- ---------- Custom close (X) button for fullscreen ads ---------- -->
+<div class="ad-close-overlay hidden" id="adCloseOverlay">
+  <button id="adCloseBtn" class="ad-close-btn" aria-label="Close ad">✕</button>
+</div>
+
 <!-- ---------- Bottom nav ---------- -->
 <div class="navbar" id="navbar">
   <button class="nav-btn" data-page="profile" title="Profile">
@@ -528,6 +558,33 @@
     });
   }
 
+  // ---------- Custom close (X) overlay for ads that lack their own close UI ----------
+  var adCloseOverlay = document.getElementById('adCloseOverlay');
+  var adCloseBtn = document.getElementById('adCloseBtn');
+  var adCloseShowTimer = null;
+  var adCloseResolver = null;
+
+  function showAdCloseButtonAfter(delayMs){
+    clearTimeout(adCloseShowTimer);
+    adCloseShowTimer = setTimeout(function(){
+      adCloseOverlay.classList.remove('hidden');
+    }, delayMs);
+  }
+  function hideAdCloseButton(){
+    clearTimeout(adCloseShowTimer);
+    adCloseOverlay.classList.add('hidden');
+    adCloseResolver = null;
+  }
+  adCloseBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    hideAdCloseButton();
+    if (typeof adCloseResolver === 'function') {
+      var resolve = adCloseResolver;
+      adCloseResolver = null;
+      resolve();
+    }
+  });
+
   // ---------- TADS fullscreen ad (fallback, Widget ID: 11744) ----------
   var TADS_WIDGET_ID = 11744;
   var tadsController = null;
@@ -552,12 +609,27 @@
   function showTadsAd(){
     return waitForTadsReady().then(function(){
       return new Promise(function(resolve, reject){
+        var settled = false;
+
+        function finishOk(){
+          if (settled) return;
+          settled = true;
+          hideAdCloseButton();
+          resolve();
+        }
+        function finishErr(err){
+          if (settled) return;
+          settled = true;
+          hideAdCloseButton();
+          reject(err);
+        }
+
         var onShowRewardCallback = function(result){
           console.log('[GRM FLAP AD DEBUG] TADS ad shown, reward user:', result);
         };
         var onAdsNotFound = function(){
           console.error('[GRM FLAP AD DEBUG] TADS: no ads found to show.');
-          reject(new Error('no TADS ads found'));
+          finishErr(new Error('no TADS ads found'));
         };
 
         if (!tadsController) {
@@ -570,15 +642,21 @@
           });
         }
 
+        // TADS's fullscreen widget doesn't always render its own close (X)
+        // button, so we overlay our own — it appears a couple seconds after
+        // the ad starts and lets the player always get back into the game.
+        adCloseResolver = finishOk;
+        showAdCloseButtonAfter(2500);
+
         console.log('[GRM FLAP AD DEBUG] calling TADS showAd() (widget #'+TADS_WIDGET_ID+')...');
         Promise.resolve(tadsController).then(function(controller){
           return controller.showAd();
         }).then(function(){
           console.log('[GRM FLAP AD DEBUG] TADS ad completed successfully.');
-          resolve();
+          finishOk();
         }).catch(function(err){
           console.error('[GRM FLAP AD DEBUG] TADS failed to show ad:', err);
-          reject(err || new Error('TADS ad not shown'));
+          finishErr(err || new Error('TADS ad not shown'));
         });
       });
     });
