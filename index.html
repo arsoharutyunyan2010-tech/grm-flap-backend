@@ -69,21 +69,13 @@
   }
   #syncBadge.err{ background: rgba(255,93,115,0.25); color:#ffdfe4; opacity:1;}
   #syncBadge.ok{ background: rgba(61,220,132,0.2); color:#d9ffea; opacity:1;}
-  
-  /* Ուղղված z-index հիերարխիա overlay-ների համար */
   .overlay{
     position:absolute; inset:0;
     display:flex; align-items:center; justify-content:center;
-    z-index:100; /* Ավելի բարձր, որպեսզի միշտ վերևում լինի և չխառնվի */
-    background: rgba(13, 6, 32, 0.85); /* Ավելացվել է ֆոն՝ իրար վրա նստելը բացառելու համար */
-    backdrop-filter: blur(4px);
+    z-index:10;
   }
-  .overlay.hidden{
-    display: none !important;
-  }
-
   .card{
-    background: rgba(20,10,40,0.98);
+    background: rgba(20,10,40,0.92);
     border: 2px solid var(--gold);
     border-radius: 20px;
     padding: 28px 30px 24px;
@@ -91,7 +83,7 @@
     width: min(320px, 82vw);
     max-height: 86vh;
     overflow-y: auto;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.7), 0 0 0 6px rgba(244,197,66,0.06);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 6px rgba(244,197,66,0.06);
     color: var(--ink);
   }
   .title{
@@ -168,29 +160,7 @@
     margin: 0 auto 10px;
     display:block;
   }
-
-  /* ---------- Subscribe Overlay Styles ---------- */
-  #subCard .sub-channels {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 15px 0;
-  }
-  .sub-btn {
-    background: rgba(255, 255, 255, 0.08) !important;
-    color: var(--ink) !important;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3) !important;
-    font-size: 14px !important;
-    padding: 10px 16px !important;
-    border-radius: 12px !important;
-    text-decoration: none;
-    display: block;
-    text-align: center;
-    font-weight: 700;
-  }
-  .sub-btn:hover {
-    background: rgba(255, 255, 255, 0.15) !important;
-  }
+  .hidden{ display:none !important; }
 
   /* ---------- Leaderboard rows ---------- */
   .lb-my-card{
@@ -271,7 +241,6 @@
       repeating-linear-gradient(-60deg, rgba(244,197,66,0.035) 0px, rgba(244,197,66,0.035) 1px, transparent 1px, transparent 46px),
       linear-gradient(180deg, #1b1033 0%, #0d0620 60%);
   }
-  .page.hidden{ display: none !important; }
   .page-inner{ max-width: 420px; margin: 0 auto; }
   .page .title{ font-size:24px; margin-bottom: 4px; }
 
@@ -322,7 +291,6 @@
     right: 14px;
     z-index: 99999;
   }
-  .ad-close-overlay.hidden{ display: none !important; }
   .ad-close-btn{
     all: unset;
     width: 38px; height: 38px;
@@ -347,21 +315,7 @@
   <div id="grmLive" class="hidden">0.00 GRM</div>
   <div id="syncBadge" class="hidden"></div>
 
-  <!-- ---------- Subscribe Check Overlay ---------- -->
-  <div class="overlay hidden" id="subCard">
-    <div class="card">
-      <div class="title" style="font-size:24px;">ԲԱԺԱՆՈՐԴԱԳՐՎԵՔ</div>
-      <div class="sub">Խաղալու համար պետք է միանալ մեր ալիքներին</div>
-      <div class="sub-channels">
-        <a href="https://t.me/GRMFLAPCHAT" target="_blank" class="sub-btn">💬 Միանալ Chat-ին</a>
-        <a href="https://t.me/GRMFLAP" target="_blank" class="sub-btn">📢 Միանալ Channel-ին</a>
-      </div>
-      <button id="checkSubBtn">ՍՏՈՒԳԵԼ ԲԱԺԱՆՈՐԴԱԳՐՈՒԹՅՈՒՆԸ</button>
-      <div class="hint" id="subMsg"></div>
-    </div>
-  </div>
-
-  <div class="overlay hidden" id="startCard">
+  <div class="overlay" id="startCard">
     <div class="card">
       <svg class="coin-icon" viewBox="0 0 64 64">
         <circle cx="32" cy="32" r="28" fill="#26262e" stroke="#f4c542" stroke-width="2"/>
@@ -565,10 +519,6 @@
   var verifyNote = document.getElementById('verifyNote');
   var syncBadge = document.getElementById('syncBadge');
 
-  var subCard = document.getElementById('subCard');
-  var checkSubBtn = document.getElementById('checkSubBtn');
-  var subMsg = document.getElementById('subMsg');
-
   var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   var initData = tg ? tg.initData : "";
   var tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
@@ -586,59 +536,29 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  // ---------- Subscription check logic ----------
-  function checkSubscription() {
-    if (DEMO_MODE) {
-      subCard.classList.add('hidden');
-      return Promise.resolve(true);
-    }
-
-    subMsg.textContent = 'Ստուգվում է...';
-    return apiFetch('/api/check-subscription', {
-      method: 'POST',
-      body: JSON.stringify({ initData: initData })
-    }).then(function(res) {
-      if (res.subscribed) {
-        subCard.classList.add('hidden');
-        return true;
-      } else {
-        subCard.classList.remove('hidden');
-        subMsg.textContent = 'Խնդրում ենք բաժանորդագրվել երկու ալիքներին էլ:';
-        return false;
-      }
-    }).catch(function(err) {
-      subCard.classList.remove('hidden');
-      subMsg.textContent = 'Սխալ ստուգման ժամանակ: Փորձեք կրկին:';
-      return false;
-    });
-  }
-
-  checkSubBtn.addEventListener('click', function(e) {
-    e.preventDefault();
-    checkSubscription();
-  });
-
-  if (tg && !DEMO_MODE) {
-    subCard.classList.remove('hidden');
-    checkSubscription();
-  }
-
   // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
+  // The SDK script tag in <head> exposes a global function named after
+  // the data-sdk attribute: window.show_11646472()
   function showMonetagAd(){
     return new Promise(function(resolve, reject){
       var fn = window.show_11646472;
       if (typeof fn !== 'function') {
+        console.error('[GRM FLAP AD DEBUG] window.show_11646472 is not a function — the Monetag SDK script (//libtl.com/sdk.js) did not load or did not register the zone function yet.');
         reject(new Error('no Monetag SDK loaded'));
         return;
       }
+      console.log('[GRM FLAP AD DEBUG] calling show_11646472()...');
       fn().then(function(){
+        console.log('[GRM FLAP AD DEBUG] Monetag ad shown/completed successfully.');
         resolve();
       }).catch(function(err){
+        console.error('[GRM FLAP AD DEBUG] Monetag rejected/failed to show ad:', err);
         reject(err || new Error('Monetag ad not shown'));
       });
     });
   }
 
+  // ---------- Custom close (X) overlay for ads that lack their own close UI ----------
   var adCloseOverlay = document.getElementById('adCloseOverlay');
   var adCloseBtn = document.getElementById('adCloseBtn');
   var adCloseShowTimer = null;
@@ -665,6 +585,7 @@
     }
   });
 
+  // ---------- TADS fullscreen ad (fallback, Widget ID: 11744) ----------
   var TADS_WIDGET_ID = 11744;
   var tadsController = null;
 
@@ -703,8 +624,11 @@
           reject(err);
         }
 
-        var onShowRewardCallback = function(result){};
+        var onShowRewardCallback = function(result){
+          console.log('[GRM FLAP AD DEBUG] TADS ad shown, reward user:', result);
+        };
         var onAdsNotFound = function(){
+          console.error('[GRM FLAP AD DEBUG] TADS: no ads found to show.');
           finishErr(new Error('no TADS ads found'));
         };
 
@@ -718,22 +642,32 @@
           });
         }
 
+        // TADS's fullscreen widget doesn't always render its own close (X)
+        // button, so we overlay our own — it appears a couple seconds after
+        // the ad starts and lets the player always get back into the game.
         adCloseResolver = finishOk;
         showAdCloseButtonAfter(15000);
 
+        console.log('[GRM FLAP AD DEBUG] calling TADS showAd() (widget #'+TADS_WIDGET_ID+')...');
         Promise.resolve(tadsController).then(function(controller){
           return controller.showAd();
         }).then(function(){
+          console.log('[GRM FLAP AD DEBUG] TADS ad completed successfully.');
           finishOk();
         }).catch(function(err){
+          console.error('[GRM FLAP AD DEBUG] TADS failed to show ad:', err);
           finishErr(err || new Error('TADS ad not shown'));
         });
       });
     });
   }
 
+  // Tries Monetag first; if Monetag has no fill / fails to load, falls back
+  // to the TADS fullscreen widget. The game is never blocked — callers
+  // still `.catch()` this if both providers are unavailable.
   function showRewardedAd(){
     return showMonetagAd().catch(function(monetagErr){
+      console.warn('[GRM FLAP AD DEBUG] Monetag unavailable, falling back to TADS:', monetagErr && monetagErr.message);
       setSyncBadge('Monetag unavailable — trying TADS…', 'err');
       return showTadsAd();
     });
@@ -977,6 +911,7 @@
     startBtn.textContent = 'LOADING AD…';
 
     showRewardedAd().catch(function(err){
+      /* ad unavailable — continue anyway so the game is never blocked */
       setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
     }).then(function(){
       return startSession();
