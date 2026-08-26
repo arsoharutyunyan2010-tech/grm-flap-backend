@@ -413,4 +413,32 @@ module.exports = {
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   dataFile: DATA_FILE,
   flush: saveNow,
+  getSnapshot: snapshot,
+  importSnapshot: function(data) {
+    hydrate(data);
+    saveNow();
+    return {
+      players: allTimeBest.size,
+      boards: periodBoards.size,
+      withdrawals: withdrawals.length,
+      deposits: deposits.length,
+    };
+  },
+  persistInfo: function() {
+    let bytes = 0;
+    let exists = false;
+    try {
+      if (fs.existsSync(DATA_FILE)) {
+        exists = true;
+        bytes = fs.statSync(DATA_FILE).size;
+      }
+    } catch (e) {}
+    return {
+      dataFile: DATA_FILE,
+      exists,
+      bytes,
+      players: allTimeBest.size,
+      boards: periodBoards.size,
+    };
+  },
 };
