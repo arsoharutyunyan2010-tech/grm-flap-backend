@@ -50,16 +50,6 @@
     text-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 18px rgba(244,197,66,0.5);
     letter-spacing: 1px;
   }
-  #grmLive{
-    position:absolute; left:0; right:0;
-    top: calc(max(18px, env(safe-area-inset-top)) + 60px);
-    text-align:center;
-    font-size: 14px; font-weight:800; color: var(--gold);
-    letter-spacing: 0.5px;
-    text-shadow: 0 2px 0 rgba(0,0,0,0.35);
-    z-index:5;
-    pointer-events:none;
-  }
   #syncBadge{
     position:absolute; top: max(14px, env(safe-area-inset-top)); right: 14px;
     font-size: 10px; font-weight:700; letter-spacing:0.5px;
@@ -69,12 +59,25 @@
   }
   #syncBadge.err{ background: rgba(255,93,115,0.25); color:#ffdfe4; opacity:1;}
   #syncBadge.ok{ background: rgba(61,220,132,0.2); color:#d9ffea; opacity:1;}
+  .lang-fab{
+    position:absolute; top: max(12px, env(safe-area-inset-top)); left: 12px;
+    z-index:60;
+    all: unset;
+    width: 42px; height: 42px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius: 14px;
+    background: rgba(15,8,28,0.88);
+    border: 1px solid rgba(244,197,66,0.35);
+    font-size: 20px;
+    cursor:pointer;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  }
   .overlay{
     position:absolute; inset:0;
     display:flex; align-items:center; justify-content:center;
     z-index:10;
   }
-  #subCheckCard{ z-index: 30; }
+  #subCheckCard, #langCard{ z-index: 40; }
   .card{
     background: rgba(20,10,40,0.92);
     border: 2px solid var(--gold);
@@ -163,7 +166,6 @@
   }
   .hidden{ display:none !important; }
 
-  /* ---------- Leaderboard rows ---------- */
   .lb-my-card{
     display:flex; justify-content:space-between; align-items:center;
     background: rgba(244,197,66,0.1);
@@ -194,11 +196,32 @@
   .lb-name{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lb-score-row{ display:flex; justify-content:space-between; align-items:center; margin-top:2px; }
   .lb-score{ color: var(--gold); font-weight:800; font-size:13px; }
-  .lb-prize{ font-size:11px; opacity:0.85; background: rgba(244,197,66,0.15); padding:2px 8px; border-radius:20px; color:var(--gold); }
-  .lb-list{ max-height: 60vh; overflow-y:auto; margin: 10px 0; }
+  .lb-list{ max-height: 52vh; overflow-y:auto; margin: 10px 0; }
   .reward-note{ font-size: 11px; opacity:0.6; margin-top: 10px; line-height:1.4; }
 
-  /* ---------- Bottom navigation ---------- */
+  .lb-tabs{
+    display:flex; gap:6px; margin: 12px 0 4px;
+  }
+  .lb-tab{
+    all: unset;
+    flex:1;
+    text-align:center;
+    padding: 9px 4px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    cursor:pointer;
+    background: rgba(255,255,255,0.06);
+    color: var(--ink);
+    opacity: 0.7;
+  }
+  .lb-tab.active{
+    opacity:1;
+    color:#1b1033;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+  }
+
   .navbar{
     position:fixed; left:14px; right:14px; bottom: max(14px, env(safe-area-inset-bottom));
     z-index:50;
@@ -226,7 +249,6 @@
     box-shadow: 0 4px 14px rgba(244,197,66,0.4);
   }
 
-  /* ---------- Full-screen pages (profile / wallet / leaderboard / tasks) ---------- */
   .page{
     position:fixed; inset:0;
     color: var(--ink);
@@ -245,14 +267,13 @@
   .page-inner{ max-width: 420px; margin: 0 auto; }
   .page .title{ font-size:24px; margin-bottom: 4px; }
 
-  /* ---------- Donut-shaped avatar with ONE coin on the bite edge ---------- */
   .avatar-wrap{
     width: 108px; height: 108px;
     margin: 10px auto 14px;
     position: relative;
   }
   .avatar-wrap svg{ width:100%; height:100%; overflow: visible; display:block; }
-  .grm-coin-single{
+  .flap-coin-single{
     transform-box: fill-box;
     transform-origin: center;
     animation: coinSpin 5s linear infinite;
@@ -274,18 +295,6 @@
   }
   .field-input:focus{ border-color: var(--gold); }
 
-  .tiers-box{
-    margin-top: 14px;
-    font-size: 12px;
-    text-align:left;
-    background: rgba(255,255,255,0.04);
-    border-radius: 10px;
-    padding: 10px 14px;
-  }
-  .tiers-box div{ display:flex; justify-content:space-between; padding:2px 0; opacity:0.85; }
-  .tiers-box b{ color: var(--gold); }
-
-  /* ---------- Custom ad close (X) overlay ---------- */
   .ad-close-overlay{
     position: fixed;
     top: max(14px, env(safe-area-inset-top));
@@ -307,7 +316,6 @@
   }
   .ad-close-btn:active{ transform: scale(0.92); }
 
-  /* ---------- Subscription Check Styles ---------- */
   .sub-check-item{
     display:flex;
     align-items:center;
@@ -318,50 +326,27 @@
     border-radius:12px;
     border:1px solid rgba(244,197,66,0.2);
   }
-  .sub-check-info{
-    display:flex;
-    align-items:center;
-    gap:12px;
-    flex:1;
-  }
+  .sub-check-info{ display:flex; align-items:center; gap:12px; flex:1; }
   .sub-check-icon{
-    width:32px;
-    height:32px;
-    border-radius:50%;
+    width:32px; height:32px; border-radius:50%;
     background:rgba(244,197,66,0.2);
-    display:flex;
-    align-items:center;
-    justify-content:center;
+    display:flex; align-items:center; justify-content:center;
     font-size:18px;
   }
-  .sub-check-text{
-    text-align:left;
-    font-size:14px;
-    font-weight:600;
-  }
+  .sub-check-text{ text-align:left; font-size:14px; font-weight:600; }
   .sub-check-status{
-    font-size:11px;
-    padding:4px 10px;
-    border-radius:20px;
-    font-weight:700;
+    font-size:11px; padding:4px 10px; border-radius:20px; font-weight:700;
   }
-  .sub-check-status.joined{
-    background:rgba(61,220,132,0.2);
-    color:#3ddc84;
-  }
-  .sub-check-status.not-joined{
-    background:rgba(255,93,115,0.2);
-    color:#ff5d73;
-  }
+  .sub-check-status.joined{ background:rgba(61,220,132,0.2); color:#3ddc84; }
+  .sub-check-status.not-joined{ background:rgba(255,93,115,0.2); color:#ff5d73; }
   .sub-join-btn{
-    margin-top:8px;
-    padding:8px 16px;
-    font-size:13px;
+    margin-top:0; padding:8px 14px; font-size:12px; width:auto; min-width: 86px;
   }
   .verify-all-btn{
     margin-top:16px;
     background:linear-gradient(180deg, #3ddc84, #2bb86e);
     color:#1b1033;
+    box-shadow: 0 5px 0 #1f8a4d, 0 8px 18px rgba(0,0,0,0.4);
   }
   .warning-box{
     background:rgba(255,93,115,0.15);
@@ -372,26 +357,40 @@
     font-size:13px;
     line-height:1.5;
   }
+  .lang-opt{
+    display:flex; align-items:center; gap:12px;
+    text-align:left;
+    background: rgba(255,255,255,0.06);
+    color: var(--ink);
+    box-shadow: none;
+    margin-top: 8px;
+    padding: 12px 14px;
+  }
+  .lang-opt .flag{ font-size: 22px; line-height:1; }
+  .lang-opt.active{
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+    color:#1b1033;
+  }
+  .rate-note{
+    font-size:12px; opacity:0.75; margin-top:8px;
+    background: rgba(244,197,66,0.12);
+    border-radius:10px; padding:10px 12px;
+  }
 </style>
 </head>
 <body>
+<button id="langBtn" class="lang-fab" aria-label="Language">🌐</button>
 <div id="wrap">
   <canvas id="game"></canvas>
 
   <div id="hud"><div id="score">0</div></div>
-  <div id="grmLive" class="hidden">0.00 GRM</div>
   <div id="syncBadge" class="hidden"></div>
 
-  <!-- Subscription Check Card (shown first; game is locked until server verifies both joins) -->
-  <div class="overlay" id="subCheckCard">
+  <div class="overlay hidden" id="subCheckCard">
     <div class="card">
-      <div class="title" style="font-size:26px;">SUBSCRIBE TO PLAY</div>
-      <div class="sub">Join both, then tap Verify. The server checks Telegram — not the browser.</div>
-
-      <div class="warning-box">
-        You must be subscribed to both channels before you can play.
-      </div>
-
+      <div class="title" style="font-size:26px;" data-i18n="subTitle">SUBSCRIBE TO PLAY</div>
+      <div class="sub" data-i18n="subSub">Join both channels, then tap Verify.</div>
+      <div class="warning-box" data-i18n="subWarn">You must be subscribed to both channels before you can play.</div>
       <div class="sub-check-item">
         <div class="sub-check-info">
           <div class="sub-check-icon">💬</div>
@@ -402,10 +401,9 @@
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <div id="statusChat" class="sub-check-status not-joined">NOT JOINED</div>
-          <button id="joinChatBtn" class="sub-join-btn">JOIN</button>
+          <button id="joinChatBtn" class="sub-join-btn" data-i18n="join">JOIN</button>
         </div>
       </div>
-
       <div class="sub-check-item">
         <div class="sub-check-info">
           <div class="sub-check-icon">📢</div>
@@ -416,56 +414,65 @@
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <div id="statusChannel" class="sub-check-status not-joined">NOT JOINED</div>
-          <button id="joinChannelBtn" class="sub-join-btn">JOIN</button>
+          <button id="joinChannelBtn" class="sub-join-btn" data-i18n="join">JOIN</button>
         </div>
       </div>
-
-      <button id="verifySubBtn" class="verify-all-btn">✓ VERIFY SUBSCRIPTION</button>
-      <div class="hint" id="subHint">Join both, come back here, then tap Verify</div>
+      <button id="verifySubBtn" class="verify-all-btn" data-i18n="verify">✓ VERIFY SUBSCRIPTION</button>
+      <div class="hint" id="subHint" data-i18n="subHint">Join both, come back, then tap Verify</div>
     </div>
   </div>
 
-  <div class="overlay hidden" id="startCard">
+  <div class="overlay hidden" id="langCard">
+    <div class="card">
+      <div class="title" style="font-size:24px;" data-i18n="language">LANGUAGE</div>
+      <div class="sub" data-i18n="languageSub">Choose your language</div>
+      <button class="lang-opt" data-lang="en"><span class="flag">🇺🇸</span><span>English</span></button>
+      <button class="lang-opt" data-lang="ru"><span class="flag">🇷🇺</span><span>Русский</span></button>
+      <button class="lang-opt" data-lang="uk"><span class="flag">🇺🇦</span><span>Українська</span></button>
+      <button class="lang-opt" data-lang="zh"><span class="flag">🇨🇳</span><span>中文</span></button>
+      <button class="lang-opt" data-lang="hi"><span class="flag">🇮🇳</span><span>हिन्दी</span></button>
+      <button id="langCloseBtn" class="secondary" data-i18n="close">CLOSE</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="startCard">
     <div class="card">
       <svg class="coin-icon" viewBox="0 0 64 64">
         <circle cx="32" cy="32" r="28" fill="#26262e" stroke="#f4c542" stroke-width="2"/>
-        <path d="M 13 21 L 51 21 L 32 47 Z" fill="none" stroke="#ffffff" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
-        <line x1="32" y1="21" x2="32" y2="41" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round"/>
+        <text x="32" y="42" text-anchor="middle" font-size="28" font-weight="800" fill="#f4c542" font-family="Segoe UI, Arial, sans-serif">F</text>
       </svg>
       <div class="title">GRM FLAP</div>
-      <div class="sub">Tap to keep the coin flying</div>
-      <button id="startBtn">TAP TO START</button>
-      <div class="hint">Earn 0.05 GRM for every pipe you pass</div>
+      <div class="sub" data-i18n="tagline">Tap to keep the coin flying</div>
+      <button id="startBtn" data-i18n="tapToStart">TAP TO START</button>
+      <div class="hint" data-i18n="scoreHint">Pass pipes to score points and climb the leaderboards</div>
     </div>
   </div>
 
   <div class="overlay hidden" id="overCard">
     <div class="card">
       <div id="crashMode">
-        <div class="title" style="font-size:26px;">OOPS!</div>
-        <div class="stat-row"><span>Score</span><b id="crashScore">0</b></div>
+        <div class="title" style="font-size:26px;" data-i18n="oops">OOPS!</div>
+        <div class="stat-row"><span data-i18n="score">Score</span><b id="crashScore">0</b></div>
         <button id="continueBtn">▶ WATCH AD & CONTINUE</button>
-        <button id="endRunBtn" class="secondary">END RUN</button>
+        <button id="endRunBtn" class="secondary" data-i18n="endRun">END RUN</button>
         <div class="hint" id="continueHint"></div>
       </div>
       <div id="finalMode" class="hidden">
-        <div class="title" style="font-size:26px;">GAME OVER</div>
-        <div class="stat-row"><span>Score</span><b id="finalScore">0</b></div>
-        <div class="stat-row"><span>Best</span><b id="finalBest">0</b></div>
-        <div class="stat-row"><span>Rank</span><b id="finalRank">—</b></div>
-        <div class="stat-row"><span>GRM earned</span><b id="finalGrm">0</b></div>
-        <div id="newBestBadge" class="new-badge hidden">NEW BEST!</div>
+        <div class="title" style="font-size:26px;" data-i18n="gameOver">GAME OVER</div>
+        <div class="stat-row"><span data-i18n="score">Score</span><b id="finalScore">0</b></div>
+        <div class="stat-row"><span data-i18n="best">Best</span><b id="finalBest">0</b></div>
+        <div class="stat-row"><span data-i18n="weekRank">Weekly rank</span><b id="finalRank">—</b></div>
+        <div id="newBestBadge" class="new-badge hidden" data-i18n="newBest">NEW BEST!</div>
         <div id="verifyNote" class="hint">Verifying score with server…</div>
-        <button id="restartBtn">PLAY AGAIN</button>
+        <button id="restartBtn" data-i18n="playAgain">PLAY AGAIN</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ---------- Profile page ---------- -->
 <div class="page hidden" id="page-profile">
   <div class="page-inner">
-    <div class="title">PROFILE</div>
+    <div class="title" data-i18n="profile">PROFILE</div>
     <div class="avatar-wrap" id="profileAvatar">
       <svg viewBox="0 0 100 100">
         <defs>
@@ -487,78 +494,73 @@
           <circle cx="50" cy="50" r="46" fill="none" stroke="#f4c542" stroke-width="4"/>
           <circle cx="50" cy="50" r="19" fill="none" stroke="#f4c542" stroke-width="4"/>
         </g>
-        <g class="grm-coin-single">
+        <g class="flap-coin-single">
           <circle cx="87" cy="6" r="9" fill="#26262e" stroke="#f4c542" stroke-width="1.6"/>
-          <path d="M 82.5 3 L 91.5 3 L 87 10.5 Z" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+          <text x="87" y="10" text-anchor="middle" font-size="9" font-weight="800" fill="#f4c542" font-family="Segoe UI, Arial, sans-serif">F</text>
         </g>
       </svg>
     </div>
     <div class="profile-name" id="profileName">Player</div>
-    <div class="stat-row"><span>Best score</span><b id="profileBest">0</b></div>
-    <div class="stat-row"><span>GRM balance</span><b id="profileBalance">0</b></div>
-    <div class="stat-row"><span>This week's rank</span><b id="profileRank">—</b></div>
+    <div class="stat-row"><span data-i18n="bestScore">Best score</span><b id="profileBest">0</b></div>
+    <div class="stat-row"><span data-i18n="flapBalance">FLAP balance</span><b id="profileBalance">0</b></div>
+    <div class="stat-row"><span data-i18n="dayRank">Today's rank</span><b id="profileRankDay">—</b></div>
+    <div class="stat-row"><span data-i18n="weekRank">Weekly rank</span><b id="profileRank">—</b></div>
+    <div class="stat-row"><span data-i18n="monthRank">Monthly rank</span><b id="profileRankMonth">—</b></div>
     <div class="hint" id="profileHint"></div>
   </div>
 </div>
 
-<!-- ---------- Wallet page ---------- -->
 <div class="page hidden" id="page-wallet">
   <div class="page-inner">
-    <div class="title">WALLET</div>
-    <div class="sub">Request a GRM withdrawal to your TON wallet</div>
-    <div class="stat-row"><span>GRM balance</span><b id="walletBalance">0</b></div>
+    <div class="title" data-i18n="wallet">WALLET</div>
+    <div class="sub" data-i18n="walletSub">Withdraw FLAP to your TON wallet</div>
+    <div class="stat-row"><span data-i18n="flapBalance">FLAP balance</span><b id="walletBalance">0</b></div>
+    <div class="stat-row"><span data-i18n="usdValue">USD value</span><b id="walletUsd">$0.00</b></div>
+    <div class="rate-note" data-i18n="flapRate">100 FLAP = $1.00 · Flying earns points only, not coins.</div>
 
-    <label class="field-label">TON wallet address</label>
+    <label class="field-label" data-i18n="tonAddress">TON wallet address</label>
     <input type="text" id="walletAddress" class="field-input" placeholder="UQ… / EQ…" autocomplete="off">
 
-    <label class="field-label">Amount (GRM)</label>
+    <label class="field-label" data-i18n="amountFlap">Amount (FLAP)</label>
     <input type="number" id="walletAmount" class="field-input" placeholder="0" min="0" step="1">
 
-    <button id="walletSubmitBtn">REQUEST WITHDRAWAL</button>
+    <button id="walletSubmitBtn" data-i18n="requestWithdraw">REQUEST WITHDRAWAL</button>
     <div class="hint" id="walletMsg"></div>
-    <div class="reward-note">Requests are reviewed and paid out manually. This may take a little time.</div>
+    <div class="reward-note" data-i18n="withdrawNote">Requests are reviewed and paid out manually. This may take a little time.</div>
   </div>
 </div>
 
-<!-- ---------- Leaderboard page ---------- -->
 <div class="page hidden" id="page-leaderboard">
   <div class="page-inner">
-    <div class="title">WEEKLY TOP</div>
-    <div class="sub" id="lbPagePeriod">this week's GRM rewards</div>
+    <div class="title" data-i18n="leaderboard">LEADERBOARD</div>
+    <div class="sub" id="lbPagePeriod" data-i18n="lbSub">Best score this period — points only</div>
+    <div class="lb-tabs">
+      <button class="lb-tab active" data-period="day" data-i18n="daily">DAILY</button>
+      <button class="lb-tab" data-period="week" data-i18n="weekly">WEEKLY</button>
+      <button class="lb-tab" data-period="month" data-i18n="monthly">MONTHLY</button>
+    </div>
     <div class="lb-my-card hidden" id="lbMyCard">
-      <span>My rating: <b id="lbMyRank">—</b></span>
+      <span><span data-i18n="myRank">My rating</span>: <b id="lbMyRank">—</b></span>
       <b id="lbMyScore">0</b>
     </div>
     <div class="lb-list" id="lbPageList"></div>
-    <div class="tiers-box">
-      <div><span>🥇 1st place</span><b>5000 GRM</b></div>
-      <div><span>🥈 2nd place</span><b>2500 GRM</b></div>
-      <div><span>🥉 3rd place</span><b>1000 GRM</b></div>
-      <div><span>4th place</span><b>500 GRM</b></div>
-      <div><span>5th – 10th place</span><b>200 GRM</b></div>
-    </div>
-    <div class="reward-note">Top players win GRM every week. Scores are verified server-side and cannot be forged from the browser.</div>
+    <div class="reward-note" data-i18n="lbNote">Scores are verified on the server and cannot be forged from the browser.</div>
   </div>
 </div>
 
-<!-- ---------- Tasks page (placeholder) ---------- -->
 <div class="page hidden" id="page-tasks">
   <div class="page-inner">
-    <div class="title">TASKS</div>
-    <div class="hint">Coming soon.</div>
+    <div class="title" data-i18n="tasks">TASKS</div>
+    <div class="hint" data-i18n="comingSoon">Coming soon.</div>
   </div>
 </div>
 
-<!-- ---------- TADS widget container (required by TADS SDK) ---------- -->
 <div id="tads-container-11744" style="position:fixed; left:-9999px; top:-9999px; width:1px; height:1px; overflow:hidden;"></div>
-
-<!-- ---------- Custom close (X) button for fullscreen ads ---------- -->
 <div class="ad-close-overlay hidden" id="adCloseOverlay">
   <button id="adCloseBtn" class="ad-close-btn" aria-label="Close ad">✕</button>
 </div>
 
-<!-- ---------- Bottom nav (hidden until subscription is verified) ---------- -->
-<div class="navbar hidden" id="navbar">
+<div class="navbar" id="navbar">
   <button class="nav-btn" data-page="profile" title="Profile">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
   </button>
@@ -586,34 +588,216 @@
 
   var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
   var DEMO_MODE = !API_BASE_URL;
+  var FLAP_PER_USD = 100;
+
+  var I18N = {
+    en: {
+      language:"LANGUAGE", languageSub:"Choose your language", close:"CLOSE",
+      tagline:"Tap to keep the coin flying", tapToStart:"TAP TO START",
+      scoreHint:"Pass pipes to score points and climb the leaderboards",
+      oops:"OOPS!", score:"Score", endRun:"END RUN", gameOver:"GAME OVER",
+      best:"Best", weekRank:"Weekly rank", newBest:"NEW BEST!", playAgain:"PLAY AGAIN",
+      watchContinue:"▶ WATCH AD & CONTINUE", tapContinue:"▶ TAP TO CONTINUE",
+      loadingAd:"LOADING AD…", play:"PLAY", continuesLeft:" continue(s) left",
+      adUnavailable:"Ad unavailable — try again", tapToContinueRun:"Tap to continue your run",
+      profile:"PROFILE", bestScore:"Best score", flapBalance:"FLAP balance",
+      dayRank:"Today's rank", monthRank:"Monthly rank",
+      wallet:"WALLET", walletSub:"Withdraw FLAP to your TON wallet", usdValue:"USD value",
+      flapRate:"100 FLAP = $1.00 · Flying earns points only, not coins.",
+      tonAddress:"TON wallet address", amountFlap:"Amount (FLAP)",
+      requestWithdraw:"REQUEST WITHDRAWAL",
+      withdrawNote:"Requests are reviewed and paid out manually. This may take a little time.",
+      leaderboard:"LEADERBOARD", lbSub:"Best score this period — points only",
+      daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating",
+      lbNote:"Scores are verified on the server and cannot be forged from the browser.",
+      tasks:"TASKS", comingSoon:"Coming soon.",
+      subTitle:"SUBSCRIBE TO PLAY", subSub:"Join both channels, then tap Verify.",
+      subWarn:"You must be subscribed to both channels before you can play.",
+      join:"JOIN", open:"OPEN", verify:"✓ VERIFY SUBSCRIPTION",
+      subHint:"Join both, come back, then tap Verify",
+      joined:"JOINED ✓", notJoined:"NOT JOINED",
+      verifying:"VERIFYING…", verified:"✓ VERIFIED",
+      noScores:"No scores yet this period — be the first!",
+      verifyingScore:"Verifying score with server…",
+      scoreVerified:"Score verified by server ✓",
+      demoNoSave:"Demo mode — score not saved to server.",
+      couldNotVerify:"Could not verify — score not saved.",
+      enterTon:"Enter a TON wallet address.", enterAmount:"Enter a valid amount.",
+      submitting:"Submitting…", withdrawOk:"Withdrawal request submitted. Balance: ",
+      pts:" pts", loading:"Loading…"
+    },
+    ru: {
+      language:"ЯЗЫК", languageSub:"Выберите язык", close:"ЗАКРЫТЬ",
+      tagline:"Нажимайте, чтобы монета летала", tapToStart:"НАЖМИТЕ, ЧТОБЫ НАЧАТЬ",
+      scoreHint:"Пролетайте трубы, копите очки и поднимайтесь в таблице лидеров",
+      oops:"УПС!", score:"Счёт", endRun:"ЗАВЕРШИТЬ", gameOver:"ИГРА ОКОНЧЕНА",
+      best:"Рекорд", weekRank:"Место за неделю", newBest:"НОВЫЙ РЕКОРД!", playAgain:"ЕЩЁ РАЗ",
+      watchContinue:"▶ РЕКЛАМА И ПРОДОЛЖИТЬ", tapContinue:"▶ НАЖМИТЕ, ЧТОБЫ ПРОДОЛЖИТЬ",
+      loadingAd:"РЕКЛАМА…", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
+      adUnavailable:"Реклама недоступна — попробуйте ещё", tapToContinueRun:"Нажмите, чтобы продолжить",
+      profile:"ПРОФИЛЬ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAP",
+      dayRank:"Место сегодня", monthRank:"Место за месяц",
+      wallet:"КОШЕЛЁК", walletSub:"Вывод FLAP на TON-кошелёк", usdValue:"В долларах",
+      flapRate:"100 FLAP = $1.00 · За полёт начисляются только очки, не монеты.",
+      tonAddress:"Адрес TON-кошелька", amountFlap:"Сумма (FLAP)",
+      requestWithdraw:"ЗАПРОСИТЬ ВЫВОД",
+      withdrawNote:"Заявки проверяются и выплачиваются вручную. Это может занять время.",
+      leaderboard:"ЛИДЕРЫ", lbSub:"Лучший счёт за период — только очки",
+      daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место",
+      lbNote:"Счёт проверяется сервером и его нельзя подделать в браузере.",
+      tasks:"ЗАДАНИЯ", comingSoon:"Скоро.",
+      subTitle:"ПОДПИШИТЕСЬ, ЧТОБЫ ИГРАТЬ", subSub:"Вступите в оба канала, затем нажмите Проверить.",
+      subWarn:"Нужно быть подписанным на оба канала, чтобы играть.",
+      join:"ВСТУПИТЬ", open:"ОТКРЫТЬ", verify:"✓ ПРОВЕРИТЬ ПОДПИСКУ",
+      subHint:"Вступите в оба, вернитесь и нажмите Проверить",
+      joined:"ВСТУПИЛИ ✓", notJoined:"НЕТ",
+      verifying:"ПРОВЕРКА…", verified:"✓ ПРОВЕРЕНО",
+      noScores:"Пока нет результатов — будьте первым!",
+      verifyingScore:"Проверяем счёт на сервере…",
+      scoreVerified:"Счёт подтверждён сервером ✓",
+      demoNoSave:"Демо — счёт не сохраняется.",
+      couldNotVerify:"Не удалось проверить — счёт не сохранён.",
+      enterTon:"Введите адрес TON-кошелька.", enterAmount:"Введите сумму.",
+      submitting:"Отправка…", withdrawOk:"Заявка отправлена. Баланс: ",
+      pts:" оч.", loading:"Загрузка…"
+    },
+    uk: {
+      language:"МОВА", languageSub:"Оберіть мову", close:"ЗАКРИТИ",
+      tagline:"Натискайте, щоб монета летіла", tapToStart:"НАТИСНІТЬ, ЩОБ ПОЧАТИ",
+      scoreHint:"Пролітайте труби, збирайте очки й піднімайтесь у рейтингу",
+      oops:"ОП!", score:"Рахунок", endRun:"ЗАВЕРШИТИ", gameOver:"ГРУ ЗАВЕРШЕНО",
+      best:"Рекорд", weekRank:"Місце за тиждень", newBest:"НОВИЙ РЕКОРД!", playAgain:"ЩЕ РАЗ",
+      watchContinue:"▶ РЕКЛАМА І ПРОДОВЖИТИ", tapContinue:"▶ НАТИСНІТЬ, ЩОБ ПРОДОВЖИТИ",
+      loadingAd:"РЕКЛАМА…", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
+      adUnavailable:"Реклама недоступна — спробуйте ще", tapToContinueRun:"Натисніть, щоб продовжити",
+      profile:"ПРОФІЛЬ", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAP",
+      dayRank:"Місце сьогодні", monthRank:"Місце за місяць",
+      wallet:"ГАМАНЕЦЬ", walletSub:"Вивід FLAP на TON-гаманець", usdValue:"У доларах",
+      flapRate:"100 FLAP = $1.00 · За політ нараховуються лише очки, не монети.",
+      tonAddress:"Адреса TON-гаманця", amountFlap:"Сума (FLAP)",
+      requestWithdraw:"ЗАПИТАТИ ВИВІД",
+      withdrawNote:"Заявки перевіряються і виплачуються вручну. Це може зайняти час.",
+      leaderboard:"ЛІДЕРИ", lbSub:"Найкращий рахунок за період — лише очки",
+      daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце",
+      lbNote:"Рахунок перевіряється сервером і його не можна підробити в браузері.",
+      tasks:"ЗАВДАННЯ", comingSoon:"Незабаром.",
+      subTitle:"ПІДПИШІТЬСЯ, ЩОБ ГРАТИ", subSub:"Приєднайтесь до обох каналів, потім натисніть Перевірити.",
+      subWarn:"Потрібно бути підписаним на обидва канали, щоб грати.",
+      join:"ПРИЄДНАТИСЬ", open:"ВІДКРИТИ", verify:"✓ ПЕРЕВІРИТИ ПІДПИСКУ",
+      subHint:"Приєднайтесь до обох, поверніться і натисніть Перевірити",
+      joined:"ВИ ВЖЕ ✓", notJoined:"НІ",
+      verifying:"ПЕРЕВІРКА…", verified:"✓ ПЕРЕВІРЕНО",
+      noScores:"Поки немає результатів — будьте першим!",
+      verifyingScore:"Перевіряємо рахунок на сервері…",
+      scoreVerified:"Рахунок підтверджено сервером ✓",
+      demoNoSave:"Демо — рахунок не зберігається.",
+      couldNotVerify:"Не вдалося перевірити — рахунок не збережено.",
+      enterTon:"Введіть адресу TON-гаманця.", enterAmount:"Введіть суму.",
+      submitting:"Надсилання…", withdrawOk:"Заявку надіслано. Баланс: ",
+      pts:" оч.", loading:"Завантаження…"
+    },
+    zh: {
+      language:"语言", languageSub:"选择语言", close:"关闭",
+      tagline:"点击让金币保持飞行", tapToStart:"点击开始",
+      scoreHint:"穿过管道获得分数，冲击排行榜",
+      oops:"哎呀！", score:"分数", endRun:"结束本局", gameOver:"游戏结束",
+      best:"最高分", weekRank:"本周排名", newBest:"新纪录！", playAgain:"再来一局",
+      watchContinue:"▶ 看广告继续", tapContinue:"▶ 点击继续",
+      loadingAd:"广告加载中…", play:"开始", continuesLeft:" 次续命剩余",
+      adUnavailable:"广告不可用，请重试", tapToContinueRun:"点击继续本局",
+      profile:"个人", bestScore:"最高分", flapBalance:"FLAP 余额",
+      dayRank:"今日排名", monthRank:"本月排名",
+      wallet:"钱包", walletSub:"将 FLAP 提现到 TON 钱包", usdValue:"美元价值",
+      flapRate:"100 FLAP = $1.00 · 飞行只获得分数，不获得金币。",
+      tonAddress:"TON 钱包地址", amountFlap:"数量（FLAP）",
+      requestWithdraw:"申请提现",
+      withdrawNote:"申请将人工审核并发放，可能需要一些时间。",
+      leaderboard:"排行榜", lbSub:"本周期最高分 — 仅计分数",
+      daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名",
+      lbNote:"分数由服务器验证，无法在浏览器中伪造。",
+      tasks:"任务", comingSoon:"即将推出。",
+      subTitle:"订阅后即可游戏", subSub:"加入两个频道，然后点击验证。",
+      subWarn:"必须订阅两个频道才能开始游戏。",
+      join:"加入", open:"打开", verify:"✓ 验证订阅",
+      subHint:"加入后返回并点击验证",
+      joined:"已加入 ✓", notJoined:"未加入",
+      verifying:"验证中…", verified:"✓ 已验证",
+      noScores:"本周期还没有分数 — 来当第一名！",
+      verifyingScore:"正在向服务器验证分数…",
+      scoreVerified:"服务器已验证分数 ✓",
+      demoNoSave:"演示模式 — 分数不会保存。",
+      couldNotVerify:"验证失败 — 分数未保存。",
+      enterTon:"请输入 TON 钱包地址。", enterAmount:"请输入有效数量。",
+      submitting:"提交中…", withdrawOk:"提现申请已提交。余额：",
+      pts:" 分", loading:"加载中…"
+    },
+    hi: {
+      language:"भाषा", languageSub:"अपनी भाषा चुनें", close:"बंद करें",
+      tagline:"सिक्के को उड़ाने के लिए टैप करें", tapToStart:"शुरू करने के लिए टैप करें",
+      scoreHint:"पाइप पार कर अंक कमाएँ और लीडरबोर्ड पर चढ़ें",
+      oops:"ओह!", score:"स्कोर", endRun:"रन समाप्त", gameOver:"खेल खत्म",
+      best:"सर्वश्रेष्ठ", weekRank:"साप्ताहिक रैंक", newBest:"नया रिकॉर्ड!", playAgain:"फिर खेलें",
+      watchContinue:"▶ विज्ञापन देखकर जारी रखें", tapContinue:"▶ जारी रखने के लिए टैप करें",
+      loadingAd:"विज्ञापन लोड…", play:"खेलें", continuesLeft:" जारी मौके बाकी",
+      adUnavailable:"विज्ञापन उपलब्ध नहीं — फिर कोशिश करें", tapToContinueRun:"जारी रखने के लिए टैप करें",
+      profile:"प्रोफ़ाइल", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAP बैलेंस",
+      dayRank:"आज की रैंक", monthRank:"मासिक रैंक",
+      wallet:"वॉलेट", walletSub:"FLAP को TON वॉलेट में निकालें", usdValue:"USD मूल्य",
+      flapRate:"100 FLAP = $1.00 · उड़ान से केवल अंक मिलते हैं, सिक्के नहीं।",
+      tonAddress:"TON वॉलेट पता", amountFlap:"राशि (FLAP)",
+      requestWithdraw:"निकासी का अनुरोध",
+      withdrawNote:"अनुरोध मैन्युअल रूप से जाँचे और चुकाए जाते हैं। इसमें समय लग सकता है।",
+      leaderboard:"लीडरबोर्ड", lbSub:"इस अवधि का सर्वश्रेष्ठ स्कोर — केवल अंक",
+      daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक",
+      lbNote:"स्कोर सर्वर पर सत्यापित होते हैं और ब्राउज़र से नकली नहीं किए जा सकते।",
+      tasks:"कार्य", comingSoon:"जल्द आ रहा है।",
+      subTitle:"खेलने के लिए सब्सक्राइब करें", subSub:"दोनों चैनल जॉइन करें, फिर Verify दबाएँ।",
+      subWarn:"खेलने से पहले दोनों चैनलों को जॉइन करना ज़रूरी है।",
+      join:"जॉइन", open:"खोलें", verify:"✓ सब्सक्रिप्शन जाँचें",
+      subHint:"दोनों जॉइन करें, वापस आएँ, फिर Verify दबाएँ",
+      joined:"जॉइन किया ✓", notJoined:"नहीं",
+      verifying:"जाँच हो रही है…", verified:"✓ सत्यापित",
+      noScores:"इस अवधि में अभी स्कोर नहीं — पहले बनें!",
+      verifyingScore:"सर्वर से स्कोर जाँचा जा रहा है…",
+      scoreVerified:"सर्वर ने स्कोर सत्यापित किया ✓",
+      demoNoSave:"डेमो — स्कोर सेव नहीं होगा।",
+      couldNotVerify:"जाँच विफल — स्कोर सेव नहीं हुआ।",
+      enterTon:"TON वॉलेट पता लिखें।", enterAmount:"सही राशि लिखें।",
+      submitting:"भेजा जा रहा है…", withdrawOk:"निकासी अनुरोध भेजा गया। बैलेंस: ",
+      pts:" अंक", loading:"लोड हो रहा है…"
+    }
+  };
+
+  var LANG_FLAGS = { en:"🇺🇸", ru:"🇷🇺", uk:"🇺🇦", zh:"🇨🇳", hi:"🇮🇳" };
+  var lang = "en";
+  try { var savedLang = localStorage.getItem("grmflap_lang"); if (I18N[savedLang]) lang = savedLang; } catch(e){}
+  function t(key){ return (I18N[lang] && I18N[lang][key]) || (I18N.en[key] || key); }
+  function applyI18n(){
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach(function(el){
+      var k = el.getAttribute("data-i18n");
+      if (k) el.textContent = t(k);
+    });
+    document.getElementById("langBtn").textContent = LANG_FLAGS[lang] || "🌐";
+    document.querySelectorAll(".lang-opt").forEach(function(btn){
+      btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
+    });
+    if (startBtn && !startBtn.disabled && startBtn.textContent && !awaitingPlayAfterAd) {
+      /* leave dynamic labels to their own setters */
+    }
+  }
 
   var P = window.GrmFlapPhysics;
   var MAX_REVIVES = P.MAX_REVIVES || 2;
-  var GRM_PER_PIPE = 0.05;
-
-  var PRIZE_TIERS = [
-    { from:1, to:1, grm:5000 },
-    { from:2, to:2, grm:2500 },
-    { from:3, to:3, grm:1000 },
-    { from:4, to:4, grm:500 },
-    { from:5, to:10, grm:200 },
-  ];
-  function prizeForRank(rank){
-    for (var i=0;i<PRIZE_TIERS.length;i++){
-      var t = PRIZE_TIERS[i];
-      if (rank>=t.from && rank<=t.to) return t.grm;
-    }
-    return 0;
-  }
 
   var canvas = document.getElementById('game');
   var ctx = canvas.getContext('2d');
   var scoreEl = document.getElementById('score');
-  var grmLiveEl = document.getElementById('grmLive');
   var wrap = document.getElementById('wrap');
   var subCheckCard = document.getElementById('subCheckCard');
   var startCard = document.getElementById('startCard');
   var overCard = document.getElementById('overCard');
+  var langCard = document.getElementById('langCard');
   var crashMode = document.getElementById('crashMode');
   var finalMode = document.getElementById('finalMode');
   var startBtn = document.getElementById('startBtn');
@@ -625,12 +809,9 @@
   var finalScoreEl = document.getElementById('finalScore');
   var finalBestEl = document.getElementById('finalBest');
   var finalRankEl = document.getElementById('finalRank');
-  var finalGrmEl = document.getElementById('finalGrm');
   var newBestBadge = document.getElementById('newBestBadge');
   var verifyNote = document.getElementById('verifyNote');
   var syncBadge = document.getElementById('syncBadge');
-
-  // Subscription check elements
   var joinChatBtn = document.getElementById('joinChatBtn');
   var joinChannelBtn = document.getElementById('joinChannelBtn');
   var verifySubBtn = document.getElementById('verifySubBtn');
@@ -648,14 +829,16 @@
     try { tg.setBackgroundColor('#0d0620'); } catch(e){}
   }
 
-  // Subscription state — only true after the SERVER confirms both joins
   var subscribedChat = false;
   var subscribedChannel = false;
   var subscriptionOk = false;
   var subscriptionCheckInFlight = false;
-
   var CHAT_USERNAME = 'GRMFLAPCHAT';
   var CHANNEL_USERNAME = 'GRMFLAP';
+  var awaitingPlayAfterAd = false;
+  var awaitingContinueTap = false;
+  var lbPeriod = 'day';
+  var leaderboardCache = { day:null, week:null, month:null };
 
   function setSyncBadge(text, cls){
     syncBadge.textContent = text;
@@ -664,178 +847,127 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  // ---------- Subscription Check Functions ----------
   function openTelegramLink(username){
     var url = 'https://t.me/' + username;
-    if (tg && typeof tg.openTelegramLink === 'function') {
-      tg.openTelegramLink(url);
-    } else {
-      window.open(url, '_blank');
-    }
+    if (tg && typeof tg.openTelegramLink === 'function') tg.openTelegramLink(url);
+    else window.open(url, '_blank');
   }
-
   function showSubGate(){
     subscriptionOk = false;
     startCard.classList.add('hidden');
     overCard.classList.add('hidden');
     subCheckCard.classList.remove('hidden');
+    document.getElementById('navbar').classList.add('hidden');
   }
-
   function unlockGameAfterSubscription(){
     subscriptionOk = true;
     subCheckCard.classList.add('hidden');
-    if (state !== 'playing' && state !== 'crashed') {
-      startCard.classList.remove('hidden');
-    }
+    document.getElementById('navbar').classList.remove('hidden');
+    if (state !== 'playing' && state !== 'crashed') startCard.classList.remove('hidden');
   }
-
   function updateSubscriptionUI(){
-    if (subscribedChat) {
-      statusChat.textContent = 'JOINED ✓';
-      statusChat.className = 'sub-check-status joined';
-      joinChatBtn.textContent = 'OPEN';
-    } else {
-      statusChat.textContent = 'NOT JOINED';
-      statusChat.className = 'sub-check-status not-joined';
-      joinChatBtn.textContent = 'JOIN';
-    }
-
-    if (subscribedChannel) {
-      statusChannel.textContent = 'JOINED ✓';
-      statusChannel.className = 'sub-check-status joined';
-      joinChannelBtn.textContent = 'OPEN';
-    } else {
-      statusChannel.textContent = 'NOT JOINED';
-      statusChannel.className = 'sub-check-status not-joined';
-      joinChannelBtn.textContent = 'JOIN';
-    }
+    statusChat.textContent = subscribedChat ? t('joined') : t('notJoined');
+    statusChat.className = 'sub-check-status ' + (subscribedChat ? 'joined' : 'not-joined');
+    joinChatBtn.textContent = subscribedChat ? t('open') : t('join');
+    statusChannel.textContent = subscribedChannel ? t('joined') : t('notJoined');
+    statusChannel.className = 'sub-check-status ' + (subscribedChannel ? 'joined' : 'not-joined');
+    joinChannelBtn.textContent = subscribedChannel ? t('open') : t('join');
   }
-
   function applySubscriptionResult(data){
     subscribedChat = !!data.chatJoined;
     subscribedChannel = !!data.channelJoined;
     updateSubscriptionUI();
     if (subscribedChat && subscribedChannel) {
-      subHint.textContent = 'Verified — you can play.';
+      subHint.textContent = t('verified');
       subHint.style.color = '#3ddc84';
       unlockGameAfterSubscription();
       return true;
     }
     subscriptionOk = false;
     showSubGate();
-    var missing = [];
-    if (!subscribedChat) missing.push('GRM FLAP CHAT');
-    if (!subscribedChannel) missing.push('GRM FLAP');
-    subHint.textContent = 'Not subscribed yet: ' + missing.join(' + ') + '. Join, then tap Verify.';
+    subHint.textContent = t('subWarn');
     subHint.style.color = '#ff5d73';
     return false;
   }
-
-  function verifySubscription(opts){
+  function verifySubscription(){
     if (DEMO_MODE) {
       subscriptionOk = true;
       subCheckCard.classList.add('hidden');
       startCard.classList.remove('hidden');
+      document.getElementById('navbar').classList.remove('hidden');
       return Promise.resolve(true);
     }
     if (!initData) {
       showSubGate();
-      subHint.textContent = 'Open this Mini App from the Telegram bot to verify.';
+      subHint.textContent = t('subWarn');
       subHint.style.color = '#ff5d73';
       return Promise.resolve(false);
     }
     if (subscriptionCheckInFlight) return Promise.resolve(false);
     subscriptionCheckInFlight = true;
     verifySubBtn.disabled = true;
-    verifySubBtn.textContent = 'VERIFYING…';
-    subHint.textContent = 'Checking Telegram via server…';
-    subHint.style.color = '';
-
+    verifySubBtn.textContent = t('verifying');
     return fetch(API_BASE_URL + '/api/check-subscription', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData: initData, force: !(opts && opts.cached) })
-    })
-    .then(function(response){
+      body: JSON.stringify({ initData: initData, force: true })
+    }).then(function(response){
       return response.json().then(function(body){
         if (!response.ok) throw new Error(body.error || ('HTTP ' + response.status));
         return body;
       });
-    })
-    .then(function(data){
-      return applySubscriptionResult(data);
-    })
+    }).then(function(data){ return applySubscriptionResult(data); })
     .catch(function(err){
-      console.error('Verification failed:', err);
       showSubGate();
-      subHint.textContent = 'Verification failed: ' + (err && err.message ? err.message : 'try again');
+      subHint.textContent = (err && err.message) ? err.message : t('couldNotVerify');
       subHint.style.color = '#ff5d73';
       return false;
-    })
-    .then(function(ok){
+    }).then(function(ok){
       subscriptionCheckInFlight = false;
       verifySubBtn.disabled = false;
-      verifySubBtn.textContent = ok ? '✓ VERIFIED' : '✓ VERIFY SUBSCRIPTION';
+      verifySubBtn.textContent = ok ? t('verified') : t('verify');
       return ok;
     });
   }
+  joinChatBtn.addEventListener('click', function(e){ e.preventDefault(); openTelegramLink(CHAT_USERNAME); });
+  joinChannelBtn.addEventListener('click', function(e){ e.preventDefault(); openTelegramLink(CHANNEL_USERNAME); });
+  verifySubBtn.addEventListener('click', function(e){ e.preventDefault(); verifySubscription(); });
 
-  joinChatBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    openTelegramLink(CHAT_USERNAME);
+
+  document.getElementById('langBtn').addEventListener('click', function(){
+    langCard.classList.toggle('hidden');
+  });
+  document.getElementById('langCloseBtn').addEventListener('click', function(){
+    langCard.classList.add('hidden');
+  });
+  document.querySelectorAll('.lang-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      lang = btn.getAttribute('data-lang') || 'en';
+      try { localStorage.setItem('grmflap_lang', lang); } catch(e){}
+      applyI18n();
+      updateSubscriptionUI();
+      if (!awaitingPlayAfterAd) startBtn.textContent = t('tapToStart');
+      continueBtn.textContent = t('watchContinue');
+      langCard.classList.add('hidden');
+      if (!document.getElementById('page-leaderboard').classList.contains('hidden')) renderLeaderboardFromCache();
+      if (!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache();
+    });
   });
 
-  joinChannelBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    openTelegramLink(CHANNEL_USERNAME);
-  });
-
-  verifySubBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    verifySubscription({ cached: false });
-  });
-
-  document.addEventListener('visibilitychange', function(){
-    if (document.visibilityState === 'visible' && !subscriptionOk && !DEMO_MODE) {
-      verifySubscription({ cached: false });
-    }
-  });
-  if (tg && typeof tg.onEvent === 'function') {
-    try {
-      tg.onEvent('activated', function(){
-        if (!subscriptionOk && !DEMO_MODE) verifySubscription({ cached: false });
-      });
-    } catch (e) {}
-  }
-
-  // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
   function showMonetagAd(){
     return new Promise(function(resolve, reject){
       var fn = window.show_11646472;
-      if (typeof fn !== 'function') {
-        console.error('[GRM FLAP AD DEBUG] window.show_11646472 is not a function — the Monetag SDK script did not load.');
-        reject(new Error('no Monetag SDK loaded'));
-        return;
-      }
-      fn().then(function(){
-        resolve();
-      }).catch(function(err){
-        reject(err || new Error('Monetag ad not shown'));
-      });
+      if (typeof fn !== 'function') { reject(new Error('no Monetag SDK loaded')); return; }
+      fn().then(resolve).catch(function(err){ reject(err || new Error('Monetag ad not shown')); });
     });
   }
-
-  // ---------- Custom close (X) overlay for ads ----------
   var adCloseOverlay = document.getElementById('adCloseOverlay');
   var adCloseBtn = document.getElementById('adCloseBtn');
   var adCloseShowTimer = null;
   var adCloseResolver = null;
-
   function showAdCloseButtonAfter(delayMs){
     clearTimeout(adCloseShowTimer);
-    adCloseShowTimer = setTimeout(function(){
-      adCloseOverlay.classList.remove('hidden');
-    }, delayMs);
+    adCloseShowTimer = setTimeout(function(){ adCloseOverlay.classList.remove('hidden'); }, delayMs);
   }
   function hideAdCloseButton(){
     clearTimeout(adCloseShowTimer);
@@ -845,94 +977,48 @@
   adCloseBtn.addEventListener('click', function(e){
     e.preventDefault();
     hideAdCloseButton();
-    if (typeof adCloseResolver === 'function') {
-      var resolve = adCloseResolver;
-      adCloseResolver = null;
-      resolve();
-    }
+    if (typeof adCloseResolver === 'function') { var resolve = adCloseResolver; adCloseResolver = null; resolve(); }
   });
-
-  // ---------- TADS fullscreen ad (fallback, Widget ID: 11744) ----------
   var TADS_WIDGET_ID = 11744;
   var tadsController = null;
-
   function waitForTadsReady(timeout){
     timeout = timeout || 4000;
     return new Promise(function(resolve, reject){
       if (window.tads && typeof window.tads.init === 'function') { resolve(); return; }
       var start = performance.now();
       var iv = setInterval(function(){
-        if (window.tads && typeof window.tads.init === 'function') {
-          clearInterval(iv);
-          resolve();
-        } else if (performance.now() - start > timeout) {
-          clearInterval(iv);
-          reject(new Error('TADS widget script not loaded'));
-        }
+        if (window.tads && typeof window.tads.init === 'function') { clearInterval(iv); resolve(); }
+        else if (performance.now() - start > timeout) { clearInterval(iv); reject(new Error('TADS widget script not loaded')); }
       }, 50);
     });
   }
-
   function showTadsAd(){
     return waitForTadsReady().then(function(){
       return new Promise(function(resolve, reject){
         var settled = false;
-
-        function finishOk(){
-          if (settled) return;
-          settled = true;
-          hideAdCloseButton();
-          resolve();
-        }
-        function finishErr(err){
-          if (settled) return;
-          settled = true;
-          hideAdCloseButton();
-          reject(err);
-        }
-
-        var onShowRewardCallback = function(result){
-          console.log('[GRM FLAP AD DEBUG] TADS ad shown, reward user:', result);
-        };
-        var onAdsNotFound = function(){
-          console.error('[GRM FLAP AD DEBUG] TADS: no ads found to show.');
-          finishErr(new Error('no TADS ads found'));
-        };
-
+        function finishOk(){ if (settled) return; settled = true; hideAdCloseButton(); resolve(); }
+        function finishErr(err){ if (settled) return; settled = true; hideAdCloseButton(); reject(err); }
         if (!tadsController) {
           tadsController = window.tads.init({
-            widgetId: TADS_WIDGET_ID,
-            type: 'fullscreen',
-            debug: false,
-            onShowReward: onShowRewardCallback,
-            onAdsNotFound: onAdsNotFound
+            widgetId: TADS_WIDGET_ID, type: 'fullscreen', debug: false,
+            onShowReward: function(){}, onAdsNotFound: function(){ finishErr(new Error('no TADS ads found')); }
           });
         }
-
         adCloseResolver = finishOk;
         showAdCloseButtonAfter(15000);
-
-        Promise.resolve(tadsController).then(function(controller){
-          return controller.showAd();
-        }).then(function(){
-          finishOk();
-        }).catch(function(err){
-          finishErr(err || new Error('TADS ad not shown'));
-        });
+        Promise.resolve(tadsController).then(function(controller){ return controller.showAd(); })
+          .then(finishOk).catch(function(err){ finishErr(err || new Error('TADS ad not shown')); });
       });
     });
   }
-
   function showRewardedAd(){
     return showMonetagAd().catch(function(monetagErr){
-      console.warn('[GRM FLAP AD DEBUG] Monetag unavailable, falling back to TADS:', monetagErr && monetagErr.message);
       setSyncBadge('Monetag unavailable — trying TADS…', 'err');
       return showTadsAd();
     });
   }
 
   var gameStartCount = 0;
-
   var LW = P.LOGICAL_W, LH = P.LOGICAL_H;
   var DPR, scale, offX, offY, viewW, viewH;
   function resize(){
@@ -940,9 +1026,8 @@
     viewW = window.innerWidth;
     viewH = window.innerHeight;
     scale = Math.min(viewW / LW, viewH / LH);
-    var dispW = LW * scale, dispH = LH * scale;
-    offX = (viewW - dispW) / 2;
-    offY = (viewH - dispH) / 2;
+    offX = (viewW - LW * scale) / 2;
+    offY = (viewH - LH * scale) / 2;
     canvas.style.width = viewW + 'px';
     canvas.style.height = viewH + 'px';
     canvas.width = Math.floor(viewW * DPR);
@@ -956,9 +1041,7 @@
   var GROUND_HEIGHT = P.GROUND_HEIGHT, PIPE_WIDTH = P.PIPE_WIDTH, COIN_RADIUS = P.COIN_RADIUS;
   var STORAGE_KEY = 'grmflap_best_local';
   var session = null;
-
   function localSeed(){ return (Date.now() ^ Math.floor(Math.random()*1e9)) >>> 0; }
-
   function apiFetch(path, opts){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
     opts = opts || {};
@@ -968,7 +1051,6 @@
       return r.json();
     });
   }
-
   function startSession(){
     if (DEMO_MODE) {
       session = { sessionId: 'demo-'+Date.now(), seed: localSeed(), startedAt: Date.now() };
@@ -979,97 +1061,77 @@
       body: JSON.stringify({ initData: initData })
     }).then(function(res){
       session = { sessionId: res.sessionId, seed: res.seed, startedAt: Date.now() };
-      subscriptionOk = true;
       setSyncBadge('connected', 'ok');
       return session;
     }).catch(function(err){
-      var msg = String(err && err.message ? err.message : err);
-      if (msg.indexOf('subscription_required') !== -1) {
-        subscriptionOk = false;
-        showSubGate();
-        subHint.textContent = 'Subscribe to both channels to play.';
-        subHint.style.color = '#ff5d73';
-        setSyncBadge('subscribe required', 'err');
-        return Promise.reject(err);
-      }
       setSyncBadge('offline — score won\'t be saved', 'err');
       session = { sessionId: null, seed: localSeed(), startedAt: Date.now(), offline: true };
       return session;
     });
   }
-
   function submitScore(flapLog, reviveLog, totalSteps, clientScore){
     if (DEMO_MODE || !session.sessionId) {
-      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false, grmEarned: 0 });
+      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false });
     }
     return apiFetch('/api/submit-score', {
       method: 'POST',
-      body: JSON.stringify({
-        sessionId: session.sessionId,
-        flapLog: flapLog,
-        reviveLog: reviveLog,
-        totalSteps: totalSteps,
-        clientScore: clientScore
-      })
+      body: JSON.stringify({ sessionId: session.sessionId, flapLog: flapLog, reviveLog: reviveLog, totalSteps: totalSteps, clientScore: clientScore })
     }).then(function(res){ res.verified = true; return res; })
       .catch(function(err){
         setSyncBadge('sync failed', 'err');
-        return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, verified: false, grmEarned: 0, error: String(err.message||err) };
+        return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false, error: String(err.message||err) };
       });
   }
-
-  function fetchLeaderboard(){
+  function fetchLeaderboard(period){
+    period = period || lbPeriod;
     if (DEMO_MODE) {
       return Promise.resolve({
-        period: 'demo',
-        entries: [
-          {rank:1, name:'CryptoCoinFly', score:47},
-          {rank:2, name:'PurpleFlapper', score:39},
-          {rank:3, name:'GRMwhale', score:31}
-        ],
+        period: period,
+        entries: [{rank:1, name:'CryptoCoinFly', score:47},{rank:2, name:'PurpleFlapper', score:39},{rank:3, name:'FLAPwhale', score:31}],
         me: null
       });
     }
-    return apiFetch('/api/leaderboard' + (tgUser ? ('?uid='+tgUser.id) : ''), { method:'GET' });
+    return apiFetch('/api/leaderboard?period=' + encodeURIComponent(period) + (tgUser ? ('&uid='+tgUser.id) : ''), { method:'GET' });
   }
-
   function fetchProfile(){
     if (DEMO_MODE) {
       return Promise.resolve({
         name: tgUser ? (tgUser.username ? ('@'+tgUser.username) : tgUser.first_name) : 'Player',
-        best: loadBest(), balance: 0, rank: null, weekKey: 'demo'
+        best: loadBest(), flapBalance: 0, ranks: { day:null, week:null, month:null }
       });
     }
     return apiFetch('/api/profile', { method:'POST', body: JSON.stringify({ initData: initData }) });
   }
-
   function requestWithdrawal(address, amount){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
     return apiFetch('/api/withdraw', { method:'POST', body: JSON.stringify({ initData: initData, address: address, amount: amount }) });
   }
 
   var profileCache = null;
-  var leaderboardCache = null;
-
+  function flapUsd(n){ return '$' + ((Number(n)||0) / FLAP_PER_USD).toFixed(2); }
+  function fmtRank(r){ return r ? ('#'+r) : '—'; }
   function renderProfileFromCache(){
-    if (!profileCache) { document.getElementById('profileHint').textContent = 'Loading…'; return; }
+    if (!profileCache) { document.getElementById('profileHint').textContent = t('loading'); return; }
     document.getElementById('profileBest').textContent = profileCache.best;
-    document.getElementById('profileBalance').textContent = profileCache.balance + ' GRM';
-    document.getElementById('profileRank').textContent = profileCache.rank ? ('#'+profileCache.rank) : '—';
-    document.getElementById('profileHint').textContent = DEMO_MODE ? 'Demo mode — connect a backend to see real stats.' : '';
-    document.getElementById('walletBalance').textContent = profileCache.balance + ' GRM';
+    var bal = profileCache.flapBalance != null ? profileCache.flapBalance : 0;
+    document.getElementById('profileBalance').textContent = bal + ' FLAP';
+    var ranks = profileCache.ranks || {};
+    document.getElementById('profileRankDay').textContent = fmtRank(ranks.day);
+    document.getElementById('profileRank').textContent = fmtRank(ranks.week || profileCache.rank);
+    document.getElementById('profileRankMonth').textContent = fmtRank(ranks.month);
+    document.getElementById('profileHint').textContent = DEMO_MODE ? 'Demo mode' : '';
+    document.getElementById('walletBalance').textContent = bal + ' FLAP';
+    document.getElementById('walletUsd').textContent = flapUsd(bal);
   }
-
   function renderLeaderboardFromCache(){
     var list = document.getElementById('lbPageList');
     var myCard = document.getElementById('lbMyCard');
-    if (!leaderboardCache) { list.innerHTML = '<div class="hint">Loading…</div>'; return; }
-    var data = leaderboardCache;
+    var data = leaderboardCache[lbPeriod];
+    if (!data) { list.innerHTML = '<div class="hint">'+t('loading')+'</div>'; return; }
     list.innerHTML = '';
     var entries = data.entries || [];
-    if (entries.length === 0) list.innerHTML = '<div class="hint">No scores yet this week — be the first!</div>';
+    if (entries.length === 0) list.innerHTML = '<div class="hint">'+t('noScores')+'</div>';
     entries.forEach(function(e){
-      var prize = prizeForRank(e.rank);
       var cls = e.rank===1?'top1':e.rank===2?'top2':e.rank===3?'top3':'';
       var row = document.createElement('div');
       row.className = 'lb-row' + (data.me && data.me.rank === e.rank ? ' me' : '');
@@ -1077,37 +1139,29 @@
         '<div class="lb-rank-circle '+cls+'">'+e.rank+'</div>' +
         '<div class="lb-body">' +
           '<div class="lb-name">'+ (e.name||'Player').replace(/</g,'&lt;') +'</div>' +
-          '<div class="lb-score-row">' +
-            '<span class="lb-score">'+e.score+' pts</span>' +
-            (prize ? '<span class="lb-prize">🏆 '+prize+' GRM</span>' : '') +
-          '</div>' +
+          '<div class="lb-score-row"><span class="lb-score">'+e.score+t('pts')+'</span></div>' +
         '</div>';
       list.appendChild(row);
     });
     if (data.me) {
       myCard.classList.remove('hidden');
       document.getElementById('lbMyRank').textContent = data.me.rank ? ('#'+data.me.rank) : '—';
-      document.getElementById('lbMyScore').textContent = data.me.score + ' pts';
-    } else {
-      myCard.classList.add('hidden');
-    }
+      document.getElementById('lbMyScore').textContent = data.me.score + t('pts');
+    } else myCard.classList.add('hidden');
   }
-
   function refreshStatsAfterRun(profileResult){
     if (profileCache) {
       profileCache.best = Math.max(profileCache.best||0, profileResult.allTimeBest||0);
-      profileCache.balance = profileResult.balance != null ? profileResult.balance : profileCache.balance;
+      if (profileResult.flapBalance != null) profileCache.flapBalance = profileResult.flapBalance;
+      if (profileResult.ranks) profileCache.ranks = profileResult.ranks;
       profileCache.rank = profileResult.rank != null ? profileResult.rank : profileCache.rank;
-    } else if (!DEMO_MODE) {
-      fetchProfile().then(function(p){ profileCache = p; if(!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache(); });
     }
-    fetchLeaderboard().then(function(d){ leaderboardCache = d; if(!document.getElementById('page-leaderboard').classList.contains('hidden')) renderLeaderboardFromCache(); }).catch(function(){});
+    leaderboardCache = { day:null, week:null, month:null };
     if(!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache();
+    if(!document.getElementById('page-leaderboard').classList.contains('hidden')) loadLeaderboardPage(true);
   }
 
-  function loadBest(){
-    try{ var v = localStorage.getItem(STORAGE_KEY); return v?parseInt(v,10):0; }catch(e){ return 0; }
-  }
+  function loadBest(){ try{ var v = localStorage.getItem(STORAGE_KEY); return v?parseInt(v,10):0; }catch(e){ return 0; } }
   function saveBest(v){ try{ localStorage.setItem(STORAGE_KEY, String(v)); }catch(e){} }
   var best = loadBest();
 
@@ -1121,24 +1175,13 @@
 
   function resetGame(){
     bird = { x: P.BIRD_X, y: P.BIRD_START_Y, r: COIN_RADIUS, vy: 0, rot: 0 };
-    pipes = [];
-    particles = [];
-    score = 0;
-    stepIndex = 0;
-    pipeTimer = 0;
-    flapLog = [];
-    reviveLog = [];
-    revivesUsed = 0;
-    pendingFlap = false;
-    lastFlapStep = -Infinity;
-    groundOffset = 0;
-    elapsedMs = 0;
-    lastPipeTop = null;
+    pipes = []; particles = [];
+    score = 0; stepIndex = 0; pipeTimer = 0;
+    flapLog = []; reviveLog = []; revivesUsed = 0;
+    pendingFlap = false; lastFlapStep = -Infinity;
+    groundOffset = 0; elapsedMs = 0; lastPipeTop = null;
     scoreEl.textContent = '0';
-    grmLiveEl.textContent = '0.00 GRM';
-    grmLiveEl.classList.remove('hidden');
   }
-
   function flap(){
     if(state === 'ready' || state === 'crashed' || state === 'over') return;
     pendingFlap = true;
@@ -1150,112 +1193,88 @@
       });
     }
   }
-
-  var awaitingPlayAfterAd = false;
-  var awaitingContinueTap = false;
-
   function actuallyStartGame(){
     resetGame();
     rng = P.makeRng(session.seed);
     state = 'playing';
     bird.vy = P.FLAP_VELOCITY * 0.7;
   }
-
   function beginRound(){
     startCard.classList.remove('hidden');
     overCard.classList.add('hidden');
     gameStartCount++;
     var shouldShowAd = (gameStartCount === 1) || (gameStartCount % 4 === 0);
-
     if (!shouldShowAd) {
       startCard.classList.add('hidden');
-      startSession().then(function(){
-        actuallyStartGame();
-      }).catch(function(){
-        startBtn.disabled = false;
-        startBtn.textContent = 'TAP TO START';
+      startSession().then(function(){ actuallyStartGame(); }).catch(function(){
+        startBtn.disabled = false; startBtn.textContent = t('tapToStart');
       });
       return;
     }
-
     startBtn.disabled = true;
-    startBtn.textContent = 'LOADING AD…';
-
+    startBtn.textContent = t('loadingAd');
     showRewardedAd().catch(function(err){
       setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
-    }).then(function(){
-      return startSession();
-    }).then(function(){
+    }).then(function(){ return startSession(); }).then(function(){
       startBtn.disabled = false;
-      startBtn.textContent = 'PLAY';
+      startBtn.textContent = t('play');
       awaitingPlayAfterAd = true;
       startCard.classList.remove('hidden');
     }).catch(function(){
-      startBtn.disabled = false;
-      startBtn.textContent = 'TAP TO START';
+      startBtn.disabled = false; startBtn.textContent = t('tapToStart');
     });
   }
-
   function handleCrash(){
     state = 'crashed';
     crashScoreEl.textContent = score;
-    var canContinue = revivesUsed < MAX_REVIVES;
-    if (!canContinue) { finalizeRun(); return; }
+    if (revivesUsed >= MAX_REVIVES) { finalizeRun(); return; }
     awaitingContinueTap = false;
     continueBtn.disabled = false;
-    continueBtn.textContent = '▶ WATCH AD & CONTINUE';
-    continueHint.textContent = (MAX_REVIVES - revivesUsed) + ' continue(s) left';
+    continueBtn.textContent = t('watchContinue');
+    continueHint.textContent = (MAX_REVIVES - revivesUsed) + t('continuesLeft');
     crashMode.classList.remove('hidden');
     finalMode.classList.add('hidden');
     overCard.classList.remove('hidden');
   }
-
   function doRevive(){
     reviveLog.push(stepIndex - 1);
     revivesUsed++;
     bird.y = P.BIRD_START_Y;
     bird.vy = P.FLAP_VELOCITY * 0.7;
-    pipes = [];
-    pipeTimer = 0;
-    lastPipeTop = null;
+    pipes = []; pipeTimer = 0; lastPipeTop = null;
     overCard.classList.add('hidden');
     state = 'playing';
   }
-
   function finalizeRun(){
     state = 'over';
     var totalSteps = stepIndex;
     var clientScore = score;
-
     finalScoreEl.textContent = clientScore;
     finalBestEl.textContent = Math.max(best, clientScore);
     finalRankEl.textContent = '—';
-    finalGrmEl.textContent = '0';
-    verifyNote.textContent = DEMO_MODE ? 'Demo mode — score not saved to server.' : 'Verifying score with server…';
+    verifyNote.textContent = DEMO_MODE ? t('demoNoSave') : t('verifyingScore');
     verifyNote.classList.remove('hidden');
     newBestBadge.classList.add('hidden');
     crashMode.classList.add('hidden');
     finalMode.classList.remove('hidden');
     overCard.classList.remove('hidden');
-    grmLiveEl.classList.add('hidden');
-
     submitScore(flapLog, reviveLog, totalSteps, clientScore).then(function(res){
       var verifiedScore = res.verified ? res.score : clientScore;
       finalScoreEl.textContent = verifiedScore;
       if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
       finalBestEl.textContent = Math.max(best, res.best||0);
-      finalRankEl.textContent = res.rank ? ('#'+res.rank) : '—';
-      finalGrmEl.textContent = (res.grmEarned || 0) + ' GRM';
+      var weekRank = (res.ranks && res.ranks.week) || res.rank;
+      finalRankEl.textContent = weekRank ? ('#'+weekRank) : '—';
       if (res.verified) {
         verifyNote.textContent = (res.score === clientScore)
-          ? 'Score verified by server ✓'
-          : 'Server-verified score: ' + res.score + ' (client reported ' + clientScore + ')';
+          ? t('scoreVerified')
+          : t('scoreVerified') + ' ' + res.score;
         setSyncBadge('connected', 'ok');
         refreshStatsAfterRun(res);
       } else if (DEMO_MODE) {
-        verifyNote.textContent = 'Demo mode — connect a backend to save real scores.';
+        verifyNote.textContent = t('demoNoSave');
       } else {
-        verifyNote.textContent = 'Could not verify — score not saved. ' + (res.error||'');
+        verifyNote.textContent = t('couldNotVerify') + ' ' + (res.error||'');
       }
     });
   }
@@ -1269,52 +1288,39 @@
 
   startBtn.addEventListener('click', function(e){
     e.preventDefault();
-    if (!DEMO_MODE && !subscriptionOk) {
-      showSubGate();
-      verifySubscription({ cached: false });
-      return;
-    }
     if (awaitingPlayAfterAd) {
       awaitingPlayAfterAd = false;
       startCard.classList.add('hidden');
-      startBtn.textContent = 'TAP TO START';
+      startBtn.textContent = t('tapToStart');
       actuallyStartGame();
       return;
     }
     beginRound();
   });
-
   restartBtn.addEventListener('click', function(e){
     e.preventDefault();
     overCard.classList.add('hidden');
-    startBtn.textContent = 'TAP TO START';
+    startBtn.textContent = t('tapToStart');
     startCard.classList.remove('hidden');
   });
-
   continueBtn.addEventListener('click', function(e){
     e.preventDefault();
-    if (awaitingContinueTap) {
-      awaitingContinueTap = false;
-      doRevive();
-      return;
-    }
+    if (awaitingContinueTap) { awaitingContinueTap = false; doRevive(); return; }
     continueBtn.disabled = true;
-    continueBtn.textContent = 'LOADING AD…';
+    continueBtn.textContent = t('loadingAd');
     showRewardedAd().then(function(){
       continueBtn.disabled = false;
-      continueBtn.textContent = '▶ TAP TO CONTINUE';
-      continueHint.textContent = 'Tap to continue your run';
+      continueBtn.textContent = t('tapContinue');
+      continueHint.textContent = t('tapToContinueRun');
       awaitingContinueTap = true;
     }).catch(function(err){
       continueBtn.disabled = false;
-      continueBtn.textContent = '▶ WATCH AD & CONTINUE';
-      continueHint.textContent = 'Ad unavailable — try again';
+      continueBtn.textContent = t('watchContinue');
+      continueHint.textContent = t('adUnavailable');
       setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
     });
   });
-
   endRunBtn.addEventListener('click', function(e){ e.preventDefault(); finalizeRun(); });
-
   document.body.addEventListener('touchmove', function(e){ e.preventDefault(); }, {passive:false});
 
   function loadProfilePage(){
@@ -1332,45 +1338,64 @@
       initialEl.textContent = base.charAt(0).toUpperCase();
     }
     document.getElementById('profileName').textContent = tgUser ? (tgUser.username ? '@'+tgUser.username : (tgUser.first_name||'Player')) : 'Player';
-
     if (profileCache) { renderProfileFromCache(); return; }
-    document.getElementById('profileHint').textContent = 'Loading…';
+    document.getElementById('profileHint').textContent = t('loading');
     fetchProfile().then(function(p){ profileCache = p; renderProfileFromCache(); })
-      .catch(function(){ document.getElementById('profileHint').textContent = 'Could not load profile.'; });
+      .catch(function(){ document.getElementById('profileHint').textContent = t('couldNotVerify'); });
   }
-
   function loadWalletPage(){
     var msg = document.getElementById('walletMsg');
-    msg.textContent = DEMO_MODE ? 'Demo mode — connect a backend to withdraw.' : '';
-    if (profileCache) { document.getElementById('walletBalance').textContent = profileCache.balance + ' GRM'; return; }
-    fetchProfile().then(function(p){ profileCache = p; document.getElementById('walletBalance').textContent = p.balance + ' GRM'; }).catch(function(){});
+    msg.textContent = DEMO_MODE ? 'Demo mode' : '';
+    if (profileCache) {
+      var bal = profileCache.flapBalance || 0;
+      document.getElementById('walletBalance').textContent = bal + ' FLAP';
+      document.getElementById('walletUsd').textContent = flapUsd(bal);
+      return;
+    }
+    fetchProfile().then(function(p){
+      profileCache = p;
+      document.getElementById('walletBalance').textContent = (p.flapBalance||0) + ' FLAP';
+      document.getElementById('walletUsd').textContent = flapUsd(p.flapBalance||0);
+    }).catch(function(){});
   }
   document.getElementById('walletSubmitBtn').addEventListener('click', function(e){
     e.preventDefault();
     var addr = document.getElementById('walletAddress').value.trim();
     var amt = parseFloat(document.getElementById('walletAmount').value);
     var msg = document.getElementById('walletMsg');
-    if (!addr) { msg.textContent = 'Enter a TON wallet address.'; return; }
-    if (!(amt > 0)) { msg.textContent = 'Enter a valid amount.'; return; }
-    msg.textContent = 'Submitting…';
+    if (!addr) { msg.textContent = t('enterTon'); return; }
+    if (!(amt > 0)) { msg.textContent = t('enterAmount'); return; }
+    msg.textContent = t('submitting');
     requestWithdrawal(addr, amt).then(function(res){
-      msg.textContent = 'Withdrawal request submitted. Balance: ' + res.balance + ' GRM';
-      document.getElementById('walletBalance').textContent = res.balance + ' GRM';
-      if (profileCache) profileCache.balance = res.balance;
+      var bal = res.flapBalance != null ? res.flapBalance : res.balance;
+      msg.textContent = t('withdrawOk') + bal + ' FLAP (' + flapUsd(bal) + ')';
+      document.getElementById('walletBalance').textContent = bal + ' FLAP';
+      document.getElementById('walletUsd').textContent = flapUsd(bal);
+      if (profileCache) profileCache.flapBalance = bal;
       document.getElementById('walletAddress').value = '';
       document.getElementById('walletAmount').value = '';
-    }).catch(function(err){
-      msg.textContent = 'Error: ' + (err.message || err);
-    });
+    }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
   });
 
-  function loadLeaderboardPage(){
-    if (leaderboardCache) { renderLeaderboardFromCache(); return; }
-    document.getElementById('lbPageList').innerHTML = '<div class="hint">Loading…</div>';
-    fetchLeaderboard().then(function(data){ leaderboardCache = data; renderLeaderboardFromCache(); }).catch(function(){
-      document.getElementById('lbPageList').innerHTML = '<div class="hint">Could not load leaderboard.</div>';
+  function loadLeaderboardPage(force){
+    if (!force && leaderboardCache[lbPeriod]) { renderLeaderboardFromCache(); return; }
+    document.getElementById('lbPageList').innerHTML = '<div class="hint">'+t('loading')+'</div>';
+    fetchLeaderboard(lbPeriod).then(function(data){
+      leaderboardCache[lbPeriod] = data;
+      renderLeaderboardFromCache();
+    }).catch(function(){
+      document.getElementById('lbPageList').innerHTML = '<div class="hint">'+t('couldNotVerify')+'</div>';
     });
   }
+  document.querySelectorAll('.lb-tab').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      lbPeriod = tab.getAttribute('data-period') || 'day';
+      document.querySelectorAll('.lb-tab').forEach(function(x){
+        x.classList.toggle('active', x.getAttribute('data-period') === lbPeriod);
+      });
+      loadLeaderboardPage(false);
+    });
+  });
 
   document.querySelectorAll('.nav-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
@@ -1384,51 +1409,34 @@
       });
       if (page === 'profile') loadProfilePage();
       if (page === 'wallet') loadWalletPage();
-      if (page === 'leaderboard') loadLeaderboardPage();
+      if (page === 'leaderboard') loadLeaderboardPage(false);
     });
   });
 
   function drawBackground(){
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = '#ffe9a8';
-    ctx.beginPath();
-    ctx.arc(LW*0.82, LH*0.16, 30, 0, Math.PI*2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath(); ctx.arc(LW*0.82, LH*0.16, 30, 0, Math.PI*2); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.08)';
     for(var i=0;i<3;i++){
       var cx = ((elapsedMs*0.02 + i*160) % (LW+120)) - 60;
       var cy = LH*0.2 + i*70;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, 40, 16, 0, 0, Math.PI*2);
-      ctx.fill();
+      ctx.beginPath(); ctx.ellipse(cx, cy, 40, 16, 0, 0, Math.PI*2); ctx.fill();
     }
     ctx.restore();
   }
-
   function drawGround(){
     var y = LH - GROUND_HEIGHT;
     ctx.save();
     var grad = ctx.createLinearGradient(0,y,0,LH);
-    grad.addColorStop(0,'#6b3fa0');
-    grad.addColorStop(1,'#3a1656');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0,y,LW,GROUND_HEIGHT);
-    ctx.fillStyle = 'rgba(244,197,66,0.5)';
-    ctx.fillRect(0,y,LW,4);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 4;
+    grad.addColorStop(0,'#6b3fa0'); grad.addColorStop(1,'#3a1656');
+    ctx.fillStyle = grad; ctx.fillRect(0,y,LW,GROUND_HEIGHT);
+    ctx.fillStyle = 'rgba(244,197,66,0.5)'; ctx.fillRect(0,y,LW,4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 4;
     ctx.beginPath();
-    var dashW = 26, gap = 18;
-    var offset = groundOffset % (dashW+gap);
+    var dashW = 26, gap = 18, offset = groundOffset % (dashW+gap);
     for(var x = -offset; x < LW; x += dashW+gap){ ctx.moveTo(x, y+16); ctx.lineTo(x+dashW, y+16); }
-    ctx.stroke();
-    ctx.restore();
+    ctx.stroke(); ctx.restore();
   }
-
   function drawPipe(p){
     var y = LH - GROUND_HEIGHT;
     var bottomY = p.top + p.gap;
@@ -1440,13 +1448,11 @@
     ctx.fillRect(p.x-4, p.top-22, PIPE_WIDTH+8, 22);
     ctx.fillRect(p.x, bottomY, PIPE_WIDTH, y - bottomY);
     ctx.fillRect(p.x-4, bottomY, PIPE_WIDTH+8, 22);
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
     ctx.strokeRect(p.x, 0, PIPE_WIDTH, p.top);
     ctx.strokeRect(p.x, bottomY, PIPE_WIDTH, y - bottomY);
     ctx.restore();
   }
-
   function drawBird(){
     ctx.save();
     ctx.translate(bird.x, bird.y);
@@ -1463,20 +1469,12 @@
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(244,197,66,0.7)'; ctx.stroke();
-    drawGrmMark(bird.r);
+    ctx.fillStyle = '#f4c542';
+    ctx.font = 'bold ' + Math.round(bird.r*1.35) + 'px Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('F', 0, 1);
     ctx.restore();
   }
-
-  function drawGrmMark(r){
-    var s = r * 0.9;
-    ctx.save();
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s * 0.24; ctx.lineJoin='round'; ctx.lineCap='round';
-    ctx.beginPath();
-    ctx.moveTo(-s*0.6, -s*0.48); ctx.lineTo(s*0.6, -s*0.48); ctx.lineTo(0, s*0.62); ctx.closePath(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, -s*0.48); ctx.lineTo(0, s*0.3); ctx.lineWidth = s * 0.2; ctx.stroke();
-    ctx.restore();
-  }
-
   function drawParticles(dt){
     ctx.save();
     for(var i=particles.length-1;i>=0;i--){
@@ -1501,16 +1499,13 @@
       }
       pendingFlap = false;
     }
-
     bird.vy += P.GRAVITY * STEP;
     if (bird.vy > P.MAX_FALL_SPEED) bird.vy = P.MAX_FALL_SPEED;
     bird.y += bird.vy * STEP;
     bird.rot = Math.max(-0.5, Math.min(1.2, bird.vy/500));
-
     pipeTimer++;
     var groundY = LH - GROUND_HEIGHT;
     var crashed = false;
-
     if (pipeTimer >= Math.round(1.1/STEP)) {
       pipeTimer = 0;
       var gap = P.currentGap(score), playH = LH - GROUND_HEIGHT;
@@ -1518,11 +1513,9 @@
       lastPipeTop = top;
       pipes.push({ x: LW + PIPE_WIDTH, top: top, gap: gap, passed: false });
     }
-
     var speed = P.currentSpeed(score);
     if (bird.y + bird.r >= groundY) crashed = true;
     if (bird.y - bird.r <= 0) { bird.y = bird.r; bird.vy = 0; }
-
     for (var i = pipes.length-1; i>=0; i--){
       var p = pipes[i];
       p.x -= speed*STEP;
@@ -1530,7 +1523,6 @@
         p.passed = true;
         score++;
         scoreEl.textContent = score;
-        grmLiveEl.textContent = (score * GRM_PER_PIPE).toFixed(2) + ' GRM';
       }
       if(p.x < -PIPE_WIDTH-10){ pipes.splice(i,1); continue; }
       if(!crashed && bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_WIDTH){
@@ -1539,9 +1531,8 @@
         if (circleRectCollideLocal(bird.x,bird.y,bird.r*0.85, p.x,bottomY,PIPE_WIDTH,groundY-bottomY)) crashed = true;
       }
     }
-
     stepIndex++;
-    if (crashed) { handleCrash(); }
+    if (crashed) handleCrash();
   }
   function circleRectCollideLocal(cx,cy,cr,rx,ry,rw,rh){
     var closestX = Math.max(rx, Math.min(cx, rx+rw));
@@ -1549,8 +1540,6 @@
     var dx = cx-closestX, dy = cy-closestY;
     return (dx*dx+dy*dy) < (cr*cr);
   }
-
-  var lastTime, accumulator = 0;
   function render(){
     ctx.clearRect(0,0,viewW,viewH);
     ctx.fillStyle = '#05030c';
@@ -1565,14 +1554,13 @@
     drawBird();
     ctx.restore();
   }
-
+  var lastTime, accumulator = 0;
   function loop(ts){
     if(!lastTime) lastTime = ts;
     var dt = Math.min((ts-lastTime)/1000, 0.05);
     lastTime = ts;
     elapsedMs += dt*1000;
     groundOffset += P.currentSpeed(score)*dt;
-
     if (state === 'playing') {
       accumulator += dt;
       while (accumulator >= STEP) { simStep(); accumulator -= STEP; if(state!=='playing') { accumulator=0; break; } }
@@ -1584,6 +1572,7 @@
   }
 
   function init(){
+    applyI18n();
     updateSubscriptionUI();
     if (DEMO_MODE) {
       subscriptionOk = true;
@@ -1593,20 +1582,12 @@
       return;
     }
     showSubGate();
-    verifySubscription({ cached: false });
+    verifySubscription();
   }
-
   resetGame();
   init();
   requestAnimationFrame(loop);
-
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a30ef33a797e52e9',t:'MTc4NzcwNjU1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
-</html>
-equestAnimationFrame(loop);
-
-})();
-</script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a312ed6f3a30f9bb',t:'MTc4Nzc0ODI2Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
