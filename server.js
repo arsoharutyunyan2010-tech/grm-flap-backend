@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
+const { checkSubscriptions } = require('./subscription.js');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -56,12 +57,29 @@ function displayName(user) {
 // ---------------------------------------------------------------
 // POST /api/start-session
 // ---------------------------------------------------------------
-app.post('/api/start-session', (req, res) => {
+app.post('/api/start-session', async (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
 
   if (!store.allowRequest('start:' + user.id, 12, 60 * 1000)) {
     return res.status(429).json({ error: 'too many session starts, slow down' });
+  }
+
+  if (!ALLOW_INSECURE_DEV) {
+    try {
+      const sub = await checkSubscriptions(BOT_TOKEN, user.id);
+      if (!sub.subscribed) {
+        return res.status(403).json({
+          error: 'subscription_required',
+          channelJoined: sub.channelJoined,
+          chatJoined: sub.chatJoined,
+          channels: sub.channels,
+        });
+      }
+    } catch (err) {
+      console.error('start-session subscription check failed:', err);
+      return res.status(503).json({ error: 'subscription check failed' });
+    }
   }
 
   store.trackUser(String(user.id));
@@ -179,54 +197,30 @@ app.post('/api/profile', (req, res) => {
 
 // ---------------------------------------------------------------
 // POST /api/check-subscription
-// Ստուգում է, արդյոք օգտատերը բաժանորդագրված է պահանջվող ալիքներին
+// Verifies via Telegram Bot API that the user joined both required
+// chats. The Mini App never gets to decide this itself.
 // ---------------------------------------------------------------
 app.post('/api/check-subscription', async (req, res) => {
-  // 1. Ստուգում ենք օգտատիրոջ սկությունը initData-ի միջոցով (անվտանգ)
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
 
   const userId = String(user.id);
-
-  // 2. Rate limiting (պաշտպանում է Telegram API-ն սպամից)
-  if (!store.allowRequest('subcheck:' + userId, 10, 60 * 1000)) {
+  if (!store.allowRequest('subcheck:' + userId, 20, 60 * 1000)) {
     return res.status(429).json({ error: 'too many checks, slow down' });
   }
 
-  // 3. Ստուգում ենք, արդյոք BOT_TOKEN-ը կա
   if (!BOT_TOKEN) {
     return res.status(500).json({ error: 'Bot token not configured on server' });
   }
 
   try {
-    // Ստուգում ենք @GRMFLAP ալիքը
-    const channelUrl = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=@GRMFLAP&user_id=${userId}`;
-    const channelRes = await fetch(channelUrl);
-    const channelData = await channelRes.json();
-    
-    let isChannelJoined = false;
-    if (channelData.ok) {
-      const status = channelData.result.status;
-      isChannelJoined = ['member', 'administrator', 'creator'].includes(status);
-    }
-
-    // Ստուգում ենք @GRMFLAPCHAT չաթը
-    const chatUrl = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=@GRMFLAPCHAT&user_id=${userId}`;
-    const chatRes = await fetch(chatUrl);
-    const chatData = await chatRes.json();
-
-    let isChatJoined = false;
-    if (chatData.ok) {
-      const status = chatData.result.status;
-      isChatJoined = ['member', 'administrator', 'creator'].includes(status);
-    }
-
-    // Վերադարձնում ենք արդյունքը frontend-ին
+    const result = await checkSubscriptions(BOT_TOKEN, user.id, { force: !!req.body.force });
     res.json({
-      channelJoined: isChannelJoined,
-      chatJoined: isChatJoined
+      subscribed: result.subscribed,
+      channelJoined: result.channelJoined,
+      chatJoined: result.chatJoined,
+      channels: result.channels,
     });
-
   } catch (error) {
     console.error('Subscription check error:', error);
     res.status(500).json({ error: 'Failed to check subscription' });
