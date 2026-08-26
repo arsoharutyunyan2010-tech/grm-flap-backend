@@ -267,11 +267,28 @@ app.post('/internal/deposits/:id/reject', (req, res) => {
 app.get('/internal/stats', (req, res) => {
   if (!requireAdmin(req, res)) return;
   const runStats = store.getRunStats();
-  res.json({
+  res.json(Object.assign({
     totalUsers: store.getTotalUsers(),
     activePlayers: store.getActivePlayers(),
     totalRuns: runStats.totalRuns,
-  });
+  }, store.persistInfo()));
+});
+
+app.get('/internal/backup', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const snap = store.getSnapshot();
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="flapy-backup.json"');
+  res.send(JSON.stringify(snap, null, 2));
+});
+
+app.post('/internal/backup', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  if (!req.body || typeof req.body !== 'object' || !req.body.periodBoards) {
+    return res.status(400).json({ error: 'invalid backup file' });
+  }
+  const info = store.importSnapshot(req.body);
+  res.json({ ok: true, restored: info });
 });
 
 const { runWeeklyRewardJob } = require('./rewards.js');
