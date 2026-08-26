@@ -1218,7 +1218,12 @@
   }
   function showMonetagAd(){
     return waitForMonetag().then(function(fn){
-      return fn(monetagOpts());
+      var ymid = tgUser && tgUser.id ? String(tgUser.id) : 'anon';
+      return fn({ type: 'end', ymid: ymid }).catch(function(){
+        return fn({ type: 'pop', ymid: ymid });
+      }).catch(function(){
+        return fn();
+      });
     });
   }
   waitForMonetag(8000).then(function(fn){
@@ -1283,8 +1288,7 @@
   }
   function showRewardedAd(){
     AudioFX.pauseMusic();
-    return showMonetagAd().catch(function(monetagErr){
-      setSyncBadge('Monetag unavailable — trying TADS…', 'err');
+    return showMonetagAd().catch(function(){
       return showTadsAd();
     }).then(function(res){
       AudioFX.resumeMusic();
