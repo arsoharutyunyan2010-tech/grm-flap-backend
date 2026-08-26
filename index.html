@@ -16,6 +16,7 @@
     --accent: #ff5d73;
     --ink: #fff7e6;
     --green: #3ddc84;
+    --app-safe-top: 76px;
   }
   *{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body{
@@ -39,7 +40,7 @@
     position:absolute; top:0; left:0; right:0;
     display:flex; justify-content:center; align-items:center;
     pointer-events:none;
-    padding-top: max(18px, env(safe-area-inset-top));
+    padding-top: calc(var(--app-safe-top) + 6px);
     z-index:5;
     gap: 10px;
   }
@@ -51,7 +52,7 @@
     letter-spacing: 1px;
   }
   #syncBadge{
-    position:absolute; top: max(14px, env(safe-area-inset-top)); right: 14px;
+    position:absolute; top: calc(var(--app-safe-top) + 4px); right: 14px;
     font-size: 10px; font-weight:700; letter-spacing:0.5px;
     padding: 4px 8px; border-radius: 8px;
     background: rgba(255,255,255,0.08); color: var(--ink); opacity:0.7;
@@ -62,7 +63,7 @@
   .lang-fab{
     all: unset;
     position:absolute;
-    top: max(18px, env(safe-area-inset-top));
+    top: calc(var(--app-safe-top) + 4px);
     right: 16px;
     z-index: 25;
     width: 44px; height: 44px;
@@ -77,7 +78,7 @@
   .sound-fab{
     all: unset;
     position:absolute;
-    top: calc(max(18px, env(safe-area-inset-top)) + 52px);
+    top: calc(var(--app-safe-top) + 56px);
     right: 16px;
     z-index: 25;
     width: 44px; height: 44px;
@@ -301,7 +302,7 @@
     color: var(--ink);
     overflow-y:auto;
     z-index:20;
-    padding: max(24px, env(safe-area-inset-top)) 20px 120px;
+    padding: calc(var(--app-safe-top) + 14px) 20px 120px;
     background-color: #0d0620;
     background-image:
       radial-gradient(circle at 15% 8%, rgba(244,197,66,0.10) 0%, transparent 45%),
@@ -881,7 +882,7 @@
       oops:"OOPS!", score:"Score", endRun:"END RUN", gameOver:"GAME OVER",
       best:"Best", weekRank:"Weekly rank", newBest:"NEW BEST!", playAgain:"PLAY AGAIN",
       watchContinue:"▶ WATCH AD & CONTINUE", tapContinue:"▶ TAP TO CONTINUE",
-      loadingAd:"LOADING AD…", watchAd2:"WATCH 2ND AD", play:"PLAY", continuesLeft:" continue(s) left",
+      loadingAd:"LOADING AD…", watchAd2:"1/2", play:"PLAY", continuesLeft:" continue(s) left",
       adUnavailable:"Ad unavailable — try again", tapToContinueRun:"Tap to continue your run",
       profile:"PROFILE", bestScore:"Best score", flapBalance:"FLAP balance",
       dayRank:"Today's rank", monthRank:"Monthly rank",
@@ -922,7 +923,7 @@
       oops:"УПС!", score:"Счёт", endRun:"ЗАВЕРШИТЬ", gameOver:"ИГРА ОКОНЧЕНА",
       best:"Рекорд", weekRank:"Место за неделю", newBest:"НОВЫЙ РЕКОРД!", playAgain:"ЕЩЁ РАЗ",
       watchContinue:"▶ РЕКЛАМА И ПРОДОЛЖИТЬ", tapContinue:"▶ НАЖМИТЕ, ЧТОБЫ ПРОДОЛЖИТЬ",
-      loadingAd:"РЕКЛАМА…", watchAd2:"2-Я РЕКЛАМА", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
+      loadingAd:"РЕКЛАМА…", watchAd2:"1/2", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
       adUnavailable:"Реклама недоступна — попробуйте ещё", tapToContinueRun:"Нажмите, чтобы продолжить",
       profile:"ПРОФИЛЬ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAP",
       dayRank:"Место сегодня", monthRank:"Место за месяц",
@@ -963,7 +964,7 @@
       oops:"ОП!", score:"Рахунок", endRun:"ЗАВЕРШИТИ", gameOver:"ГРУ ЗАВЕРШЕНО",
       best:"Рекорд", weekRank:"Місце за тиждень", newBest:"НОВИЙ РЕКОРД!", playAgain:"ЩЕ РАЗ",
       watchContinue:"▶ РЕКЛАМА І ПРОДОВЖИТИ", tapContinue:"▶ НАТИСНІТЬ, ЩОБ ПРОДОВЖИТИ",
-      loadingAd:"РЕКЛАМА…", watchAd2:"2-ГА РЕКЛАМА", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
+      loadingAd:"РЕКЛАМА…", watchAd2:"1/2", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
       adUnavailable:"Реклама недоступна — спробуйте ще", tapToContinueRun:"Натисніть, щоб продовжити",
       profile:"ПРОФІЛЬ", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAP",
       dayRank:"Місце сьогодні", monthRank:"Місце за місяць",
@@ -1004,7 +1005,7 @@
       oops:"哎呀！", score:"分数", endRun:"结束本局", gameOver:"游戏结束",
       best:"最高分", weekRank:"本周排名", newBest:"新纪录！", playAgain:"再来一局",
       watchContinue:"▶ 看广告继续", tapContinue:"▶ 点击继续",
-      loadingAd:"广告加载中…", watchAd2:"观看第2个广告", play:"开始", continuesLeft:" 次续命剩余",
+      loadingAd:"广告加载中…", watchAd2:"1/2", play:"开始", continuesLeft:" 次续命剩余",
       adUnavailable:"广告不可用，请重试", tapToContinueRun:"点击继续本局",
       profile:"个人", bestScore:"最高分", flapBalance:"FLAP 余额",
       dayRank:"今日排名", monthRank:"本月排名",
@@ -1045,7 +1046,7 @@
       oops:"ओह!", score:"स्कोर", endRun:"रन समाप्त", gameOver:"खेल खत्म",
       best:"सर्वश्रेष्ठ", weekRank:"साप्ताहिक रैंक", newBest:"नया रिकॉर्ड!", playAgain:"फिर खेलें",
       watchContinue:"▶ विज्ञापन देखकर जारी रखें", tapContinue:"▶ जारी रखने के लिए टैप करें",
-      loadingAd:"विज्ञापन लोड…", watchAd2:"दूसरा विज्ञापन देखें", play:"खेलें", continuesLeft:" जारी मौके बाकी",
+      loadingAd:"विज्ञापन लोड…", watchAd2:"1/2", play:"खेलें", continuesLeft:" जारी मौके बाकी",
       adUnavailable:"विज्ञापन उपलब्ध नहीं — फिर कोशिश करें", tapToContinueRun:"जारी रखने के लिए टैप करें",
       profile:"प्रोफ़ाइल", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAP बैलेंस",
       dayRank:"आज की रैंक", monthRank:"मासिक रैंक",
@@ -1128,12 +1129,36 @@
   var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   var initData = tg ? tg.initData : "";
   var tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
+  function applySafeTop(){
+    var top = 0;
+    if (tg) {
+      try {
+        var s = tg.safeAreaInset || {};
+        var c = tg.contentSafeAreaInset || {};
+        top = (Number(s.top) || 0) + (Number(c.top) || 0);
+      } catch(e){}
+    }
+    try {
+      var st = getComputedStyle(document.documentElement);
+      var a = parseFloat(st.getPropertyValue('--tg-safe-area-inset-top')) || 0;
+      var b = parseFloat(st.getPropertyValue('--tg-content-safe-area-inset-top')) || 0;
+      if (a + b > top) top = a + b;
+    } catch(e){}
+    if (top < 78) top = 78;
+    document.documentElement.style.setProperty('--app-safe-top', top + 'px');
+  }
   if (tg) {
     tg.ready();
     tg.expand();
     try { tg.setHeaderColor('#1b1033'); } catch(e){}
     try { tg.setBackgroundColor('#0d0620'); } catch(e){}
+    try { tg.onEvent('safeAreaChanged', applySafeTop); } catch(e){}
+    try { tg.onEvent('contentSafeAreaChanged', applySafeTop); } catch(e){}
+    try { tg.onEvent('fullscreenChanged', applySafeTop); } catch(e){}
+    try { tg.onEvent('viewportChanged', applySafeTop); } catch(e){}
   }
+  applySafeTop();
+  window.addEventListener('resize', applySafeTop);
 
   var awaitingPlayAfterAd = false;
   var startAdStep = 0;
@@ -1501,7 +1526,7 @@
       if (n === 1) {
         startAdStep = 1;
         awaitingPlayAfterAd = false;
-        startBtn.textContent = t('watchAd2');
+        startBtn.textContent = '1/2';
       } else {
         startAdStep = 2;
         awaitingPlayAfterAd = true;
@@ -1509,7 +1534,7 @@
       }
     }).catch(function(){
       startBtn.disabled = false;
-      startBtn.textContent = n === 1 ? t('tapToStart') : t('watchAd2');
+      startBtn.textContent = n === 1 ? t('tapToStart') : '1/2';
     });
   }
   function beginRound(){
@@ -1952,5 +1977,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a315b96948176e48',t:'MTc4Nzc3NzU4OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
