@@ -9,8 +9,18 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
-const UPSTASH_URL = String(process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const FALLBACK_FILE = path.join(__dirname, 'data', 'store.json');
+const UPSTASH_URL = String(
+  process.env.UPSTASH_REDIS_REST_URL ||
+  process.env.KV_REST_API_URL ||
+  process.env.UPSTASH_REDIS_KV_REST_URL ||
+  ''
+).replace(/\/$/, '');
+const UPSTASH_TOKEN =
+  process.env.UPSTASH_REDIS_REST_TOKEN ||
+  process.env.KV_REST_API_TOKEN ||
+  process.env.UPSTASH_REDIS_KV_REST_TOKEN ||
+  '';
 const REDIS_KEY = process.env.STORE_REDIS_KEY || 'flapy:store';
 const useRedis = !!(UPSTASH_URL && UPSTASH_TOKEN);
 
@@ -139,6 +149,7 @@ function hydrate(data) {
   if (Array.isArray(data.knownUsers)) {
     for (const uid of data.knownUsers) knownUsers.add(String(uid));
   }
+  for (const uid of allTimeBest.keys()) knownUsers.add(String(uid));
 
   totalRuns = Number(data.totalRuns) || 0;
 
@@ -148,15 +159,23 @@ function hydrate(data) {
   }
 }
 
+function writeJsonFile(filePath, data) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = filePath + '.tmp';
+  fs.writeFileSync(tmp, data, 'utf8');
+  fs.renameSync(tmp, filePath);
+}
+
 function saveFile() {
+  const json = JSON.stringify(snapshot());
   try {
-    const dir = path.dirname(DATA_FILE);
-    fs.mkdirSync(dir, { recursive: true });
-    const tmp = DATA_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(snapshot()), 'utf8');
-    fs.renameSync(tmp, DATA_FILE);
+    writeJsonFile(DATA_FILE, json);
   } catch (err) {
     console.error('store file save failed:', err.message || err);
+  }
+  if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) {
+    try { writeJsonFile(FALLBACK_FILE, json); } catch (e) {}
   }
 }
 
@@ -174,8 +193,39 @@ async function redisCmd(cmd) {
   return data.result;
 }
 
+function snapshotHasPlayers(snap) {
+  return !!(
+    (snap.knownUsers && snap.knownUsers.length) ||
+    (snap.allTimeBest && Object.keys(snap.allTimeBest).length) ||
+    snap.totalRuns
+  );
+}
+
 async function saveRedis() {
-  await redisCmd(['SET', REDIS_KEY, JSON.stringify(snapshot())]);
+  const snap = snapshot();
+  if (!snapshotHasPlayers(snap)) {
+    try {
+      const existing = await redisCmd(['GET', REDIS_KEY]);
+      if (existing) {
+        console.warn('store: skip empty Redis overwrite (keeping previous scores)');
+        return;
+      }
+    } catch (err) {
+      console.warn('store: skip empty Redis save', err.message || err);
+      return;
+    }
+  }
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    try {
+      await redisCmd(['SET', REDIS_KEY, JSON.stringify(snap)]);
+      return;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 function saveNow() {
@@ -195,24 +245,26 @@ function scheduleSave() {
 }
 
 function loadFromDisk() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) {
-      console.log('store: no data file yet at', DATA_FILE);
-      return false;
+  const files = [DATA_FILE];
+  if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) files.push(FALLBACK_FILE);
+  for (const filePath of files) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const raw = fs.readFileSync(filePath, 'utf8');
+      hydrate(JSON.parse(raw));
+      console.log(
+        'store: loaded',
+        allTimeBest.size, 'players,',
+        periodBoards.size, 'boards from',
+        filePath
+      );
+      return true;
+    } catch (err) {
+      console.error('store file load failed:', filePath, err.message || err);
     }
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    hydrate(JSON.parse(raw));
-    console.log(
-      'store: loaded',
-      allTimeBest.size, 'players,',
-      periodBoards.size, 'boards from',
-      DATA_FILE
-    );
-    return true;
-  } catch (err) {
-    console.error('store file load failed:', err.message || err);
-    return false;
   }
+  console.log('store: no data file yet at', DATA_FILE);
+  return false;
 }
 
 async function loadAll() {
@@ -440,7 +492,7 @@ function trackUser(userId) {
   if (wasNew) scheduleSave();
 }
 function getTotalUsers() {
-  return knownUsers.size;
+  return Math.max(knownUsers.size, allTimeBest.size);
 }
 function getActivePlayers(windowMs = 5 * 60 * 1000) {
   const now = Date.now();
