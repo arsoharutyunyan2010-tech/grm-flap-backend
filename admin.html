@@ -87,14 +87,17 @@
         document.getElementById('statFile').textContent = d.dataFile || '—';
         document.getElementById('statExists').textContent = d.exists ? ('yes · ' + (d.bytes||0) + ' B') : 'NO';
         var hint = document.getElementById('persistHint');
-        if (!d.dataFile || d.dataFile.indexOf('/data/') !== 0) {
-          hint.textContent = 'WARNING: DATA_FILE is not on a Railway Volume (/data/store.json). Every GitHub deploy will erase leaderboard, profile and FLAP.';
+        if (d.redis || d.backend === 'upstash-redis') {
+          hint.textContent = 'Redis save is ON. Leaderboard and FLAP will survive GitHub deploys.';
+          hint.style.color = '#3ddc84';
+        } else if (!d.dataFile || d.dataFile.indexOf('/data/') !== 0) {
+          hint.textContent = 'WARNING: no Redis and DATA_FILE is not on a Volume. Every GitHub deploy will erase scores.';
           hint.style.color = '#ff5d73';
         } else if (!d.exists) {
           hint.textContent = 'Volume path is set. File will appear after the first saved score.';
           hint.style.color = '#f4c542';
         } else {
-          hint.textContent = 'Persistent save is ON. Deploys will keep scores if the Volume stays mounted.';
+          hint.textContent = 'File save is ON. Deploys keep scores only if the Volume stays mounted.';
           hint.style.color = '#3ddc84';
         }
       })
@@ -190,5 +193,5 @@
     if (saved) document.getElementById('adminKey').value = saved;
   } catch(e){}
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31421f3eb07850d',t:'MTc4Nzc2MDg5OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31430fee941dd2f',t:'MTc4Nzc2MTUxNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
