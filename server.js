@@ -299,9 +299,16 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`GRM FLAP backend listening on :${PORT}`);
-  console.log('Persistent data file:', store.dataFile);
+const start = store.ready || Promise.resolve();
+start.then(() => {
+  app.listen(PORT, () => {
+    const info = store.persistInfo();
+    console.log(`GRM FLAP backend listening on :${PORT}`);
+    console.log('Persist backend:', info.backend, info.redis ? '(Upstash Redis)' : store.dataFile);
+  });
+}).catch((err) => {
+  console.error('Failed to load store:', err);
+  process.exit(1);
 });
 
 module.exports = app;
