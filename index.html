@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>FLAPY</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src='//libtl.com/sdk.js' data-zone='11662362' data-sdk='show_11662362'></script>
 <script src='//libtl.com/sdk.js' data-zone='11646472' data-sdk='show_11646472'></script>
 <script src="https://w.tads.me/widget.js"></script>
 <style>
@@ -560,6 +561,7 @@
   </div>
 </div>
 
+<div id="tads-container-11768" style="position:fixed; left:-9999px; top:-9999px; width:1px; height:1px; overflow:hidden;"></div>
 <div id="tads-container-11744" style="position:fixed; left:-9999px; top:-9999px; width:1px; height:1px; overflow:hidden;"></div>
 <div class="ad-close-overlay hidden" id="adCloseOverlay">
   <button id="adCloseBtn" class="ad-close-btn" aria-label="Close ad">✕</button>
@@ -1198,12 +1200,15 @@
     });
   });
 
+  var MONETAG_FNS = ['show_11662362', 'show_11646472'];
   function showMonetagAd(){
-    return new Promise(function(resolve, reject){
-      var fn = window.show_11646472;
-      if (typeof fn !== 'function') { reject(new Error('no Monetag SDK loaded')); return; }
-      fn().then(resolve).catch(function(err){ reject(err || new Error('Monetag ad not shown')); });
-    });
+    function tryAt(i){
+      if (i >= MONETAG_FNS.length) return Promise.reject(new Error('no Monetag SDK loaded'));
+      var fn = window[MONETAG_FNS[i]];
+      if (typeof fn !== 'function') return tryAt(i + 1);
+      return fn().catch(function(){ return tryAt(i + 1); });
+    }
+    return tryAt(0);
   }
   var adCloseOverlay = document.getElementById('adCloseOverlay');
   var adCloseBtn = document.getElementById('adCloseBtn');
@@ -1223,8 +1228,8 @@
     hideAdCloseButton();
     if (typeof adCloseResolver === 'function') { var resolve = adCloseResolver; adCloseResolver = null; resolve(); }
   });
-  var TADS_WIDGET_ID = 11744;
-  var tadsController = null;
+  var TADS_WIDGET_IDS = [11768, 11744];
+  var tadsControllers = {};
   function waitForTadsReady(timeout){
     timeout = timeout || 4000;
     return new Promise(function(resolve, reject){
@@ -1236,24 +1241,31 @@
       }, 50);
     });
   }
-  function showTadsAd(){
+  function showOneTads(widgetId){
     return waitForTadsReady().then(function(){
       return new Promise(function(resolve, reject){
         var settled = false;
         function finishOk(){ if (settled) return; settled = true; hideAdCloseButton(); resolve(); }
         function finishErr(err){ if (settled) return; settled = true; hideAdCloseButton(); reject(err); }
-        if (!tadsController) {
-          tadsController = window.tads.init({
-            widgetId: TADS_WIDGET_ID, type: 'fullscreen', debug: false,
+        if (!tadsControllers[widgetId]) {
+          tadsControllers[widgetId] = window.tads.init({
+            widgetId: widgetId, type: 'fullscreen', debug: false,
             onShowReward: function(){}, onAdsNotFound: function(){ finishErr(new Error('no TADS ads found')); }
           });
         }
         adCloseResolver = finishOk;
         showAdCloseButtonAfter(15000);
-        Promise.resolve(tadsController).then(function(controller){ return controller.showAd(); })
+        Promise.resolve(tadsControllers[widgetId]).then(function(controller){ return controller.showAd(); })
           .then(finishOk).catch(function(err){ finishErr(err || new Error('TADS ad not shown')); });
       });
     });
+  }
+  function showTadsAd(){
+    function tryAt(i){
+      if (i >= TADS_WIDGET_IDS.length) return Promise.reject(new Error('no TADS ads found'));
+      return showOneTads(TADS_WIDGET_IDS[i]).catch(function(){ return tryAt(i + 1); });
+    }
+    return tryAt(0);
   }
   function showRewardedAd(){
     AudioFX.pauseMusic();
@@ -1916,5 +1928,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3141a932a38d0fd',t:'MTc4Nzc2MDU5Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3157f7b3fb95a3c',t:'MTc4Nzc3NTIxNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
