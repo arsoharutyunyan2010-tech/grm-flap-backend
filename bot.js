@@ -23,10 +23,10 @@ if (!BOT_TOKEN) {
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Welcome to GRM FLAP! Tap to keep the coin flying and climb the daily, weekly and monthly leaderboards. 🪙', {
+  bot.sendMessage(msg.chat.id, 'Welcome to FLAPY! Tap to keep the coin flying and climb the daily, weekly and monthly leaderboards. 🪙', {
     reply_markup: {
       inline_keyboard: [[
-        { text: '▶ Play GRM FLAP', web_app: { url: MINI_APP_URL } }
+        { text: '▶ Play FLAPY', web_app: { url: MINI_APP_URL } }
       ]]
     }
   });
