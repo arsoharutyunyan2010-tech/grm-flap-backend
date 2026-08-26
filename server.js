@@ -158,6 +158,7 @@ app.post('/api/profile', (req, res) => {
     name: displayName(user),
     best: store.getAllTimeBest(userId),
     flapBalance: store.getBalance(userId),
+    depositAddress: process.env.DEPOSIT_TON_ADDRESS || '',
     rank: ranks.week,
     ranks,
     dayKey: store.currentDayKey(),
@@ -193,6 +194,37 @@ app.post('/api/withdraw', (req, res) => {
   res.json({ ok: true, requestId: result.request.id, flapBalance: result.balance, balance: result.balance });
 });
 
+app.post('/api/deposit', (req, res) => {
+  const user = authenticate(req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+
+  const userId = String(user.id);
+  if (!store.allowRequest('deposit:' + userId, 8, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many top-up requests, try again later' });
+  }
+
+  const amount = Number(req.body.amount);
+  const txHash = String(req.body.txHash || '').trim();
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'invalid amount' });
+  }
+  if (txHash.length < 8 || txHash.length > 128) {
+    return res.status(400).json({ error: 'invalid transaction hash' });
+  }
+
+  const result = store.requestDeposit(userId, displayName(user), amount, txHash);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+
+  res.json({
+    ok: true,
+    requestId: result.request.id,
+    status: result.request.status,
+    amount,
+    usd: amount / 100,
+    flapBalance: store.getBalance(userId),
+  });
+});
+
 function requireAdmin(req, res) {
   if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) {
     res.status(403).json({ error: 'forbidden' });
@@ -211,6 +243,25 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
   const w = store.markWithdrawalPaid(Number(req.params.id));
   if (!w) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, withdrawal: w });
+});
+
+app.get('/internal/deposits', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ deposits: store.listDeposits(req.query.status) });
+});
+
+app.post('/internal/deposits/:id/approve', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const result = store.approveDeposit(Number(req.params.id));
+  if (!result) return res.status(404).json({ error: 'not found or already handled' });
+  res.json({ ok: true, deposit: result.deposit, flapBalance: result.balance });
+});
+
+app.post('/internal/deposits/:id/reject', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const d = store.rejectDeposit(Number(req.params.id));
+  if (!d) return res.status(404).json({ error: 'not found or already handled' });
+  res.json({ ok: true, deposit: d });
 });
 
 app.get('/internal/stats', (req, res) => {
