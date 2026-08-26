@@ -60,8 +60,11 @@
   #syncBadge.err{ background: rgba(255,93,115,0.25); color:#ffdfe4; opacity:1;}
   #syncBadge.ok{ background: rgba(61,220,132,0.2); color:#d9ffea; opacity:1;}
   .lang-fab{
-    position:fixed; top: max(54px, calc(env(safe-area-inset-top) + 44px)); left: 12px;
-    z-index:60;
+    all: unset;
+    position:absolute;
+    top: max(18px, env(safe-area-inset-top));
+    right: 16px;
+    z-index: 25;
     width: 44px; height: 44px;
     display:flex; align-items:center; justify-content:center;
     border: 1px solid rgba(244,197,66,0.35);
@@ -70,33 +73,16 @@
     font-size: 22px;
     cursor:pointer;
     box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-    padding: 0;
-    margin: 0;
-  }
-  .lang-row{
-    display:flex; justify-content:center; gap:8px;
-    margin: 4px 0 10px;
-  }
-  .lang-flag{
-    all: unset;
-    width: 42px; height: 42px;
-    display:flex; align-items:center; justify-content:center;
-    border-radius: 12px;
-    background: rgba(255,255,255,0.08);
-    font-size: 22px;
-    cursor:pointer;
-    box-shadow: none;
-    margin: 0;
-  }
-  .lang-flag.active{
-    background: linear-gradient(180deg, #ffe9a8, var(--gold));
   }
   .overlay{
     position:absolute; inset:0;
     display:flex; align-items:center; justify-content:center;
     z-index:10;
   }
-  #langCard{ z-index: 40; }
+  #langCard{
+    position:fixed; inset:0; z-index: 80;
+    display:flex; align-items:center; justify-content:center;
+  }
   .card{
     background: rgba(20,10,40,0.92);
     border: 2px solid var(--gold);
@@ -357,25 +343,11 @@
 </style>
 </head>
 <body>
-<button id="langBtn" class="lang-fab" aria-label="Language">🌐</button>
 <div id="wrap">
   <canvas id="game"></canvas>
 
   <div id="hud"><div id="score">0</div></div>
   <div id="syncBadge" class="hidden"></div>
-
-  <div class="overlay hidden" id="langCard">
-    <div class="card">
-      <div class="title" style="font-size:24px;" data-i18n="language">LANGUAGE</div>
-      <div class="sub" data-i18n="languageSub">Choose your language</div>
-      <button class="lang-opt" data-lang="en"><span class="flag">🇺🇸</span><span>English</span></button>
-      <button class="lang-opt" data-lang="ru"><span class="flag">🇷🇺</span><span>Русский</span></button>
-      <button class="lang-opt" data-lang="uk"><span class="flag">🇺🇦</span><span>Українська</span></button>
-      <button class="lang-opt" data-lang="zh"><span class="flag">🇨🇳</span><span>中文</span></button>
-      <button class="lang-opt" data-lang="hi"><span class="flag">🇮🇳</span><span>हिन्दी</span></button>
-      <button id="langCloseBtn" class="secondary" data-i18n="close">CLOSE</button>
-    </div>
-  </div>
 
   <div class="overlay" id="startCard">
     <div class="card">
@@ -385,13 +357,6 @@
       </svg>
       <div class="title">FLAPY</div>
       <div class="sub" data-i18n="tagline">Tap to keep the coin flying</div>
-      <div class="lang-row" id="startLangRow">
-        <button type="button" class="lang-flag" data-lang="en" title="English">🇺🇸</button>
-        <button type="button" class="lang-flag" data-lang="ru" title="Русский">🇷🇺</button>
-        <button type="button" class="lang-flag" data-lang="uk" title="Українська">🇺🇦</button>
-        <button type="button" class="lang-flag" data-lang="zh" title="中文">🇨🇳</button>
-        <button type="button" class="lang-flag" data-lang="hi" title="हिन्दी">🇮🇳</button>
-      </div>
       <button id="startBtn" data-i18n="tapToStart">TAP TO START</button>
       <div class="hint" data-i18n="scoreHint">Pass pipes to score points and climb the leaderboards</div>
     </div>
@@ -420,6 +385,7 @@
 </div>
 
 <div class="page hidden" id="page-profile">
+  <button id="langBtn" class="lang-fab" aria-label="Language">🌐</button>
   <div class="page-inner">
     <div class="title" data-i18n="profile">PROFILE</div>
     <div class="avatar-wrap" id="profileAvatar">
@@ -507,6 +473,20 @@
 <div id="tads-container-11744" style="position:fixed; left:-9999px; top:-9999px; width:1px; height:1px; overflow:hidden;"></div>
 <div class="ad-close-overlay hidden" id="adCloseOverlay">
   <button id="adCloseBtn" class="ad-close-btn" aria-label="Close ad">✕</button>
+</div>
+
+
+<div class="overlay hidden" id="langCard">
+  <div class="card">
+    <div class="title" style="font-size:24px;" data-i18n="language">LANGUAGE</div>
+    <div class="sub" data-i18n="languageSub">Choose your language</div>
+    <button class="lang-opt" data-lang="en"><span class="flag">🇺🇸</span><span>English</span></button>
+    <button class="lang-opt" data-lang="ru"><span class="flag">🇷🇺</span><span>Русский</span></button>
+    <button class="lang-opt" data-lang="uk"><span class="flag">🇺🇦</span><span>Українська</span></button>
+    <button class="lang-opt" data-lang="zh"><span class="flag">🇨🇳</span><span>中文</span></button>
+    <button class="lang-opt" data-lang="hi"><span class="flag">🇮🇳</span><span>हिन्दी</span></button>
+    <button id="langCloseBtn" class="secondary" data-i18n="close">CLOSE</button>
+  </div>
 </div>
 
 <div class="navbar" id="navbar">
@@ -728,7 +708,7 @@
       if (k) el.textContent = t(k);
     });
     document.getElementById("langBtn").textContent = LANG_FLAGS[lang] || "🌐";
-    document.querySelectorAll(".lang-opt, .lang-flag").forEach(function(btn){
+    document.querySelectorAll(".lang-opt").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
     });
     if (startBtn && !startBtn.disabled && startBtn.textContent && !awaitingPlayAfterAd) {
@@ -1429,5 +1409,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3131933ab051bd4',t:'MTc4Nzc1MDA1NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
