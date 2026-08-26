@@ -1,19 +1,18 @@
 /**
- * Player data store with JSON file persistence.
+ * Player data store.
  *
- * Scores, ranks, FLAP balances and withdrawals survive process restarts
- * as long as DATA_FILE points at a durable disk (Railway Volume).
- *
- * On Railway: create a Volume mounted at /data and set
- *   DATA_FILE=/data/store.json
- * Without a volume, every GitHub deploy starts a fresh container and
- * in-memory + local-disk data is lost.
+ * Prefers Upstash Redis when UPSTASH_REDIS_REST_URL + TOKEN are set
+ * (survives every GitHub / Railway deploy). Falls back to DATA_FILE.
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
+const UPSTASH_URL = String(process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const REDIS_KEY = process.env.STORE_REDIS_KEY || 'flapy:store';
+const useRedis = !!(UPSTASH_URL && UPSTASH_TOKEN);
 
 const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used }
 const periodBoards = new Map();   // periodKey -> Map(userId -> { name, score, updatedAt })
@@ -149,7 +148,7 @@ function hydrate(data) {
   }
 }
 
-function saveNow() {
+function saveFile() {
   try {
     const dir = path.dirname(DATA_FILE);
     fs.mkdirSync(dir, { recursive: true });
@@ -157,7 +156,32 @@ function saveNow() {
     fs.writeFileSync(tmp, JSON.stringify(snapshot()), 'utf8');
     fs.renameSync(tmp, DATA_FILE);
   } catch (err) {
-    console.error('store save failed:', err.message || err);
+    console.error('store file save failed:', err.message || err);
+  }
+}
+
+async function redisCmd(cmd) {
+  const res = await fetch(UPSTASH_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + UPSTASH_TOKEN,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(cmd),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('upstash HTTP ' + res.status));
+  return data.result;
+}
+
+async function saveRedis() {
+  await redisCmd(['SET', REDIS_KEY, JSON.stringify(snapshot())]);
+}
+
+function saveNow() {
+  saveFile();
+  if (useRedis) {
+    saveRedis().catch((err) => console.error('store redis save failed:', err.message || err));
   }
 }
 
@@ -174,7 +198,7 @@ function loadFromDisk() {
   try {
     if (!fs.existsSync(DATA_FILE)) {
       console.log('store: no data file yet at', DATA_FILE);
-      return;
+      return false;
     }
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
     hydrate(JSON.parse(raw));
@@ -184,20 +208,53 @@ function loadFromDisk() {
       periodBoards.size, 'boards from',
       DATA_FILE
     );
+    return true;
   } catch (err) {
-    console.error('store load failed:', err.message || err);
+    console.error('store file load failed:', err.message || err);
+    return false;
   }
 }
 
-loadFromDisk();
+async function loadAll() {
+  if (useRedis) {
+    try {
+      const raw = await redisCmd(['GET', REDIS_KEY]);
+      if (raw) {
+        hydrate(typeof raw === 'string' ? JSON.parse(raw) : raw);
+        console.log(
+          'store: loaded',
+          allTimeBest.size, 'players,',
+          periodBoards.size, 'boards from Upstash Redis'
+        );
+        return;
+      }
+      console.log('store: Redis key empty, trying local file');
+    } catch (err) {
+      console.error('store redis load failed:', err.message || err);
+    }
+  }
+  const fromFile = loadFromDisk();
+  if (useRedis && fromFile) {
+    try {
+      await saveRedis();
+      console.log('store: copied file snapshot into Redis');
+    } catch (err) {
+      console.error('store redis seed failed:', err.message || err);
+    }
+  }
+}
+
+const ready = loadAll();
 
 function flushAndExit(code) {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  saveNow();
-  process.exit(code);
+  saveFile();
+  const done = useRedis ? saveRedis() : Promise.resolve();
+  done.catch((err) => console.error('store flush failed:', err.message || err))
+    .then(() => process.exit(code));
 }
 process.on('SIGTERM', () => flushAndExit(0));
 process.on('SIGINT', () => flushAndExit(0));
@@ -412,6 +469,7 @@ module.exports = {
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   dataFile: DATA_FILE,
+  ready,
   flush: saveNow,
   getSnapshot: snapshot,
   importSnapshot: function(data) {
@@ -437,6 +495,8 @@ module.exports = {
       dataFile: DATA_FILE,
       exists,
       bytes,
+      redis: useRedis,
+      backend: useRedis ? 'upstash-redis' : 'file',
       players: allTimeBest.size,
       boards: periodBoards.size,
     };
