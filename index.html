@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>FLAPY</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://libtl.com/sdk.js" data-zone="11662362" data-sdk="show_11662362"></script>
+<script src="https://yoszi.com/sdk.js" data-zone="11662362" data-sdk="show_11662362"></script>
 <script src="https://w.tads.me/widget.js"></script>
 <style>
   :root{
@@ -1200,32 +1200,41 @@
 
   var MONETAG_ZONE = 11662362;
   var MONETAG_FN = 'show_' + MONETAG_ZONE;
+  var monetagTriedLibtl = false;
+  function injectMonetagScript(src){
+    var s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.dataset.zone = String(MONETAG_ZONE);
+    s.dataset.sdk = MONETAG_FN;
+    (document.body || document.documentElement).appendChild(s);
+  }
   function waitForMonetag(timeout){
-    timeout = timeout || 6000;
+    timeout = timeout || 5000;
     return new Promise(function(resolve, reject){
       if (typeof window[MONETAG_FN] === 'function') { resolve(window[MONETAG_FN]); return; }
       var start = performance.now();
       var iv = setInterval(function(){
         if (typeof window[MONETAG_FN] === 'function') { clearInterval(iv); resolve(window[MONETAG_FN]); }
         else if (performance.now() - start > timeout) { clearInterval(iv); reject(new Error('Monetag SDK not loaded')); }
-      }, 50);
+      }, 40);
     });
   }
-  function monetagOpts(){
-    var opts = { type: 'end' };
-    if (tgUser && tgUser.id) opts.ymid = String(tgUser.id);
-    return opts;
+  function loadMonetagSdk(){
+    if (typeof window[MONETAG_FN] === 'function') return Promise.resolve(window[MONETAG_FN]);
+    return waitForMonetag(4000).catch(function(){
+      if (!monetagTriedLibtl) {
+        monetagTriedLibtl = true;
+        injectMonetagScript('https://libtl.com/sdk.js');
+      }
+      return waitForMonetag(4000);
+    });
   }
   function showMonetagAd(){
-    return waitForMonetag().then(function(fn){
-      return fn().catch(function(){
-        return fn('pop');
-      });
+    return loadMonetagSdk().then(function(fn){
+      return fn().catch(function(){ return fn('pop'); });
     });
   }
-  waitForMonetag(8000).then(function(fn){
-    try { fn({ type: 'preload', timeout: 8, ymid: tgUser ? String(tgUser.id) : 'anon' }); } catch(e){}
-  }).catch(function(){});
   var adCloseOverlay = document.getElementById('adCloseOverlay');
   var adCloseBtn = document.getElementById('adCloseBtn');
   var adCloseShowTimer = null;
@@ -1943,5 +1952,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a315a9ca5d67d0d2',t:'MTc4Nzc3Njk0OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a315b96948176e48',t:'MTc4Nzc3NzU4OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
