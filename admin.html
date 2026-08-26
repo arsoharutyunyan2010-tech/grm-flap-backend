@@ -36,7 +36,7 @@
     <div class="stat-card"><span>Total users</span><b id="statUsers">—</b></div>
     <div class="stat-card"><span>Playing now</span><b id="statActive">—</b></div>
     <div class="stat-card"><span>Total runs</span><b id="statRuns">—</b></div>
-    <div class="stat-card"><span>Avg GRM / run</span><b id="statAvg">—</b></div>
+    <div class="stat-card"><span>FLAP rate</span><b>100 = $1</b></div>
   </div>
 
   <h2>Withdrawal requests</h2>
@@ -66,7 +66,6 @@
         document.getElementById('statUsers').textContent = d.totalUsers;
         document.getElementById('statActive').textContent = d.activePlayers;
         document.getElementById('statRuns').textContent = d.totalRuns;
-        document.getElementById('statAvg').textContent = d.avgGrmPerRun + ' GRM';
       })
       .catch(function(e){ document.getElementById('err').textContent = 'Stats error: ' + e.message; });
   }
@@ -94,7 +93,7 @@
         '<td>#'+w.id+'</td>' +
         '<td>'+ (w.name||'').replace(/</g,'&lt;') +'</td>' +
         '<td style="word-break:break-all;max-width:160px;">'+ w.address +'</td>' +
-        '<td>'+ w.amount +' GRM</td>' +
+        '<td>'+ w.amount +' FLAP</td>' +
         '<td class="status-'+w.status+'">'+ w.status +'</td>' +
         '<td>'+ payCell +'</td>';
       tbody.appendChild(tr);
@@ -115,5 +114,5 @@
     if (saved) document.getElementById('adminKey').value = saved;
   } catch(e){}
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a312f8d50e69e1b8',t:'MTc4Nzc0ODcyOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
