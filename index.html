@@ -208,10 +208,27 @@
   }
   #startCard .title{ font-size: 40px; }
   .coin-icon{
-    width: 56px; height:56px;
-    margin: 0 auto 10px;
+    width: 88px; height:88px;
+    margin: 0 auto 6px;
     display:block;
+    object-fit: contain;
   }
+  .logo-img{
+    width: min(240px, 72vw);
+    height: auto;
+    margin: 0 auto 8px;
+    display:block;
+    object-fit: contain;
+  }
+  .ui-coin{
+    width: 28px; height: 28px;
+    vertical-align: middle;
+    object-fit: contain;
+    margin-right: 6px;
+  }
+  .page-title-row{ display:flex; align-items:center; gap:10px; }
+  .page-title-row .title{ margin:0; }
+  .page-title-row img{ width:40px; height:40px; object-fit:contain; }
   .hidden{ display:none !important; }
 
   .lb-my-card{
@@ -291,6 +308,7 @@
     transition: color 0.15s ease, background 0.15s ease;
   }
   .nav-btn svg{ width:22px; height:22px; }
+  .nav-btn img{ width:30px; height:30px; object-fit: contain; display:block; }
   .nav-btn.active{
     color:#1b1033;
     background: linear-gradient(180deg, #ffe9a8, var(--gold));
@@ -414,11 +432,9 @@
 
   <div class="overlay" id="startCard">
     <div class="card">
-      <svg class="coin-icon" viewBox="0 0 64 64">
-        <circle cx="32" cy="32" r="28" fill="#26262e" stroke="#f4c542" stroke-width="2"/>
-        <text x="32" y="42" text-anchor="middle" font-size="28" font-weight="800" fill="#f4c542" font-family="Segoe UI, Arial, sans-serif">F</text>
-      </svg>
-      <div class="title">FLAPY</div>
+      <img class="coin-icon" src="img/start-mascot.png" alt="">
+      <img class="logo-img" src="img/logo.png" alt="FLAPY">
+      <div class="title" style="position:absolute;left:-9999px">FLAPY</div>
       <div class="sub" data-i18n="tagline">Tap to keep the coin flying</div>
       <button id="startBtn" data-i18n="tapToStart">TAP TO START</button>
       <div class="hint" data-i18n="scoreHint">Pass pipes to score points and climb the leaderboards</div>
@@ -451,7 +467,7 @@
   <button id="langBtn" class="lang-fab" aria-label="Language">🌐</button>
   <button id="soundBtn" class="sound-fab" aria-label="Sound">🔊</button>
   <div class="page-inner">
-    <div class="title" data-i18n="profile">PROFILE</div>
+    <div class="page-title-row"><img src="img/character.png" alt=""><div class="title" data-i18n="profile">PROFILE</div></div>
     <div class="avatar-wrap" id="profileAvatar">
       <svg viewBox="0 0 100 100">
         <defs>
@@ -491,7 +507,7 @@
 
 <div class="page hidden" id="page-wallet">
   <div class="page-inner">
-    <div class="title" data-i18n="wallet">WALLET</div>
+    <div class="page-title-row"><img src="img/wallet.png" alt=""><div class="title" data-i18n="wallet">WALLET</div></div>
     <div class="sub" data-i18n="walletSub">Top up or withdraw FLAP</div>
     <div class="stat-row"><span data-i18n="flapBalance">FLAP balance</span><b id="walletBalance">0</b></div>
     <div class="stat-row"><span data-i18n="usdValue">USD value</span><b id="walletUsd">$0.00</b></div>
@@ -538,7 +554,7 @@
 
 <div class="page hidden" id="page-leaderboard">
   <div class="page-inner">
-    <div class="title" data-i18n="leaderboard">LEADERBOARD</div>
+    <div class="page-title-row"><img src="img/coin.png" alt=""><div class="title" data-i18n="leaderboard">LEADERBOARD</div></div>
     <div class="sub" id="lbPagePeriod" data-i18n="lbSub">Best score this period — points only</div>
     <div class="lb-tabs">
       <button class="lb-tab active" data-period="day" data-i18n="daily">DAILY</button>
@@ -556,7 +572,7 @@
 
 <div class="page hidden" id="page-tasks">
   <div class="page-inner">
-    <div class="title" data-i18n="tasks">TASKS</div>
+    <div class="page-title-row"><img src="img/app-icon.png" alt=""><div class="title" data-i18n="tasks">TASKS</div></div>
     <div class="hint" data-i18n="comingSoon">Coming soon.</div>
   </div>
 </div>
@@ -602,19 +618,19 @@
 
 <div class="navbar" id="navbar">
   <button class="nav-btn" data-page="profile" title="Profile">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
+    <img src="img/character.png" alt="">
   </button>
   <button class="nav-btn" data-page="wallet" title="Wallet">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M7 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><circle cx="16" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg>
+    <img src="img/wallet.png" alt="">
   </button>
   <button class="nav-btn active" data-page="home" title="Home">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+    <img src="img/app-icon.png" alt="">
   </button>
   <button class="nav-btn" data-page="leaderboard" title="Leaderboard">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="4" height="8"/><rect x="10" y="9" width="4" height="12"/><rect x="17" y="5" width="4" height="16"/></svg>
+    <img src="img/coin.png" alt="">
   </button>
   <button class="nav-btn" data-page="tasks" title="Tasks">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9z"/><path d="M9 12l2 2 4-4"/></svg>
+    <img src="img/start-mascot.png" alt="">
   </button>
 </div>
 
@@ -625,6 +641,16 @@
 <script>
 (function(){
   "use strict";
+  function loadArt(src){ var im = new Image(); im.src = src; return im; }
+  var ART = {
+    bird: loadArt('img/bird.png'),
+    character: loadArt('img/character.png'),
+    pipe: loadArt('img/pipe.png'),
+    bg: loadArt('img/bg.jpg'),
+    ground: loadArt('img/ground.jpg'),
+    coin: loadArt('img/coin.png')
+  };
+  function artReady(im){ return !!(im && im.complete && im.naturalWidth > 0); }
 
   var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
   var DEMO_MODE = !API_BASE_URL;
@@ -1810,6 +1836,10 @@
   });
 
   function drawBackground(){
+    if (artReady(ART.bg)) {
+      ctx.drawImage(ART.bg, 0, 0, LW, LH);
+      return;
+    }
     ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#ffe9a8';
     ctx.beginPath(); ctx.arc(LW*0.82, LH*0.16, 30, 0, Math.PI*2); ctx.fill(); ctx.restore();
     ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.08)';
@@ -1823,6 +1853,12 @@
   function drawGround(){
     var y = LH - GROUND_HEIGHT;
     ctx.save();
+    if (artReady(ART.ground)) {
+      ctx.drawImage(ART.ground, 0, y, LW, GROUND_HEIGHT);
+      ctx.fillStyle = 'rgba(244,197,66,0.55)'; ctx.fillRect(0,y,LW,3);
+      ctx.restore();
+      return;
+    }
     var grad = ctx.createLinearGradient(0,y,0,LH);
     grad.addColorStop(0,'#6b3fa0'); grad.addColorStop(1,'#3a1656');
     ctx.fillStyle = grad; ctx.fillRect(0,y,LW,GROUND_HEIGHT);
@@ -1836,7 +1872,19 @@
   function drawPipe(p){
     var y = LH - GROUND_HEIGHT;
     var bottomY = p.top + p.gap;
+    var w = PIPE_WIDTH + 10;
+    var x = p.x - 5;
     ctx.save();
+    if (artReady(ART.pipe)) {
+      ctx.save();
+      ctx.translate(x + w/2, p.top);
+      ctx.scale(1, -1);
+      ctx.drawImage(ART.pipe, -w/2, 0, w, Math.max(8, p.top));
+      ctx.restore();
+      ctx.drawImage(ART.pipe, x, bottomY, w, Math.max(8, y - bottomY));
+      ctx.restore();
+      return;
+    }
     var bodyGrad = ctx.createLinearGradient(p.x,0,p.x+PIPE_WIDTH,0);
     bodyGrad.addColorStop(0,'#ff8a9b'); bodyGrad.addColorStop(0.5,'#ff5d73'); bodyGrad.addColorStop(1,'#d43f58');
     ctx.fillStyle = bodyGrad;
@@ -1860,6 +1908,12 @@
     ctx.fillStyle = 'rgba(244,197,66,0.001)';
     ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
     ctx.restore();
+    if (artReady(ART.bird)) {
+      var s = bird.r * 3.1;
+      ctx.drawImage(ART.bird, -s*0.42, -s/2, s, s);
+      ctx.restore();
+      return;
+    }
     var grad = ctx.createRadialGradient(-bird.r*0.3,-bird.r*0.35,bird.r*0.2,0,0,bird.r);
     grad.addColorStop(0,'#4a4a52'); grad.addColorStop(0.55,'#2b2b33'); grad.addColorStop(1,'#17171d');
     ctx.fillStyle = grad;
@@ -1879,8 +1933,8 @@
       if(p.age > p.life){ particles.splice(i,1); continue; }
       p.x += p.vx*dt; p.y += p.vy*dt;
       ctx.globalAlpha = 1 - (p.age/p.life);
-      ctx.fillStyle = '#f4c542';
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      if (artReady(ART.coin)) ctx.drawImage(ART.coin, p.x-p.r, p.y-p.r, p.r*2, p.r*2);
+      else { ctx.fillStyle = '#f4c542'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
     }
     ctx.restore();
   }
@@ -1977,5 +2031,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a315ebc4cf5dd0d2',t:'MTc4Nzc3OTY1MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
