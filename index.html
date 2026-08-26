@@ -382,6 +382,26 @@
     background: rgba(244,197,66,0.12);
     border-radius:10px; padding:10px 12px;
   }
+  .wallet-tabs{ display:flex; gap:6px; margin: 14px 0 8px; }
+  .addr-row{ display:flex; gap:8px; align-items:stretch; }
+  .addr-row .field-input{ flex:1; }
+  .copy-btn{
+    all: unset;
+    flex-shrink:0;
+    margin-top:0;
+    width:auto;
+    padding: 0 14px;
+    border-radius: 12px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:800; letter-spacing:0.4px;
+    color:#1b1033;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+    cursor:pointer;
+  }
+  .section-title{
+    font-size:13px; font-weight:800; letter-spacing:0.8px;
+    opacity:0.8; margin: 16px 0 4px;
+  }
 </style>
 </head>
 <body>
@@ -471,20 +491,47 @@
 <div class="page hidden" id="page-wallet">
   <div class="page-inner">
     <div class="title" data-i18n="wallet">WALLET</div>
-    <div class="sub" data-i18n="walletSub">Withdraw FLAP to your TON wallet</div>
+    <div class="sub" data-i18n="walletSub">Top up or withdraw FLAP</div>
     <div class="stat-row"><span data-i18n="flapBalance">FLAP balance</span><b id="walletBalance">0</b></div>
     <div class="stat-row"><span data-i18n="usdValue">USD value</span><b id="walletUsd">$0.00</b></div>
     <div class="rate-note" data-i18n="flapRate">100 FLAP = $1.00 · Flying earns points only, not coins.</div>
 
-    <label class="field-label" data-i18n="tonAddress">TON wallet address</label>
-    <input type="text" id="walletAddress" class="field-input" placeholder="UQ… / EQ…" autocomplete="off">
+    <div class="wallet-tabs lb-tabs">
+      <button class="lb-tab active" data-wallet-tab="topup" data-i18n="topup">TOP UP</button>
+      <button class="lb-tab" data-wallet-tab="withdraw" data-i18n="withdrawTab">WITHDRAW</button>
+    </div>
 
-    <label class="field-label" data-i18n="amountFlap">Amount (FLAP)</label>
-    <input type="number" id="walletAmount" class="field-input" placeholder="0" min="0" step="1">
+    <div id="walletTopup">
+      <div class="section-title" data-i18n="topup">TOP UP</div>
+      <label class="field-label" data-i18n="amountFlap">Amount (FLAP)</label>
+      <input type="number" id="depositAmount" class="field-input" placeholder="100" min="1" step="1">
+      <div class="stat-row"><span data-i18n="youPay">You pay</span><b id="depositUsd">$0.00</b></div>
+      <div id="depositAddrWrap">
+        <label class="field-label" data-i18n="payToAddress">Send TON to this address</label>
+        <div class="addr-row">
+          <input type="text" id="depositPayTo" class="field-input" readonly placeholder="—" autocomplete="off">
+          <button type="button" id="depositCopyBtn" class="copy-btn" data-i18n="copy">COPY</button>
+        </div>
+      </div>
+      <label class="field-label" data-i18n="txHash">Transaction hash</label>
+      <input type="text" id="depositTx" class="field-input" placeholder="…" autocomplete="off">
+      <button id="depositSubmitBtn" data-i18n="requestTopup">REQUEST TOP-UP</button>
+      <div class="hint" id="depositMsg"></div>
+      <div class="reward-note" data-i18n="topupNote">Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit FLAP after checking.</div>
+    </div>
 
-    <button id="walletSubmitBtn" data-i18n="requestWithdraw">REQUEST WITHDRAWAL</button>
-    <div class="hint" id="walletMsg"></div>
-    <div class="reward-note" data-i18n="withdrawNote">Requests are reviewed and paid out manually. This may take a little time.</div>
+    <div id="walletWithdraw" class="hidden">
+      <div class="section-title" data-i18n="withdrawTab">WITHDRAW</div>
+      <label class="field-label" data-i18n="tonAddress">TON wallet address</label>
+      <input type="text" id="walletAddress" class="field-input" placeholder="UQ… / EQ…" autocomplete="off">
+
+      <label class="field-label" data-i18n="amountFlap">Amount (FLAP)</label>
+      <input type="number" id="walletAmount" class="field-input" placeholder="0" min="0" step="1">
+
+      <button id="walletSubmitBtn" data-i18n="requestWithdraw">REQUEST WITHDRAWAL</button>
+      <div class="hint" id="walletMsg"></div>
+      <div class="reward-note" data-i18n="withdrawNote">Requests are reviewed and paid out manually. This may take a little time.</div>
+    </div>
   </div>
 </div>
 
@@ -838,11 +885,16 @@
       adUnavailable:"Ad unavailable — try again", tapToContinueRun:"Tap to continue your run",
       profile:"PROFILE", bestScore:"Best score", flapBalance:"FLAP balance",
       dayRank:"Today's rank", monthRank:"Monthly rank",
-      wallet:"WALLET", walletSub:"Withdraw FLAP to your TON wallet", usdValue:"USD value",
+      wallet:"WALLET", walletSub:"Top up or withdraw FLAP", usdValue:"USD value",
       flapRate:"100 FLAP = $1.00 · Flying earns points only, not coins.",
       tonAddress:"TON wallet address", amountFlap:"Amount (FLAP)",
       requestWithdraw:"REQUEST WITHDRAWAL",
       withdrawNote:"Requests are reviewed and paid out manually. This may take a little time.",
+      topup:"TOP UP", withdrawTab:"WITHDRAW", youPay:"You pay", payToAddress:"Send TON to this address",
+      txHash:"Transaction hash", requestTopup:"REQUEST TOP-UP", copy:"COPY", copied:"COPIED",
+      enterTx:"Paste the TON transaction hash.",
+      topupOk:"Top-up request submitted. We will credit FLAP after review.",
+      topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit FLAP after checking.",
       leaderboard:"LEADERBOARD", lbSub:"Best score this period — points only",
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating",
       lbNote:"Scores are verified on the server and cannot be forged from the browser.",
@@ -874,11 +926,16 @@
       adUnavailable:"Реклама недоступна — попробуйте ещё", tapToContinueRun:"Нажмите, чтобы продолжить",
       profile:"ПРОФИЛЬ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAP",
       dayRank:"Место сегодня", monthRank:"Место за месяц",
-      wallet:"КОШЕЛЁК", walletSub:"Вывод FLAP на TON-кошелёк", usdValue:"В долларах",
+      wallet:"КОШЕЛЁК", walletSub:"Пополнение или вывод FLAP", usdValue:"В долларах",
       flapRate:"100 FLAP = $1.00 · За полёт начисляются только очки, не монеты.",
       tonAddress:"Адрес TON-кошелька", amountFlap:"Сумма (FLAP)",
       requestWithdraw:"ЗАПРОСИТЬ ВЫВОД",
       withdrawNote:"Заявки проверяются и выплачиваются вручную. Это может занять время.",
+      topup:"ПОПОЛНИТЬ", withdrawTab:"ВЫВОД", youPay:"К оплате", payToAddress:"Отправьте TON на этот адрес",
+      txHash:"Хэш транзакции", requestTopup:"ЗАПРОСИТЬ ПОПОЛНЕНИЕ", copy:"КОПИР.", copied:"СКОПИРОВАНО",
+      enterTx:"Вставьте хэш TON-транзакции.",
+      topupOk:"Заявка на пополнение отправлена. FLAP начислим после проверки.",
+      topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции. Админ начислит FLAP после проверки.",
       leaderboard:"ЛИДЕРЫ", lbSub:"Лучший счёт за период — только очки",
       daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место",
       lbNote:"Счёт проверяется сервером и его нельзя подделать в браузере.",
@@ -910,11 +967,16 @@
       adUnavailable:"Реклама недоступна — спробуйте ще", tapToContinueRun:"Натисніть, щоб продовжити",
       profile:"ПРОФІЛЬ", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAP",
       dayRank:"Місце сьогодні", monthRank:"Місце за місяць",
-      wallet:"ГАМАНЕЦЬ", walletSub:"Вивід FLAP на TON-гаманець", usdValue:"У доларах",
+      wallet:"ГАМАНЕЦЬ", walletSub:"Поповнення або вивід FLAP", usdValue:"У доларах",
       flapRate:"100 FLAP = $1.00 · За політ нараховуються лише очки, не монети.",
       tonAddress:"Адреса TON-гаманця", amountFlap:"Сума (FLAP)",
       requestWithdraw:"ЗАПИТАТИ ВИВІД",
       withdrawNote:"Заявки перевіряються і виплачуються вручну. Це може зайняти час.",
+      topup:"ПОПОВНИТИ", withdrawTab:"ВИВІД", youPay:"До сплати", payToAddress:"Надішліть TON на цю адресу",
+      txHash:"Хеш транзакції", requestTopup:"ЗАПИТАТИ ПОПОВНЕННЯ", copy:"КОПІЯ", copied:"СКОПІЙОВАНО",
+      enterTx:"Вставте хеш TON-транзакції.",
+      topupOk:"Заявку на поповнення надіслано. FLAP нарахуємо після перевірки.",
+      topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції. Адмін нарахує FLAP після перевірки.",
       leaderboard:"ЛІДЕРИ", lbSub:"Найкращий рахунок за період — лише очки",
       daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце",
       lbNote:"Рахунок перевіряється сервером і його не можна підробити в браузері.",
@@ -946,11 +1008,16 @@
       adUnavailable:"广告不可用，请重试", tapToContinueRun:"点击继续本局",
       profile:"个人", bestScore:"最高分", flapBalance:"FLAP 余额",
       dayRank:"今日排名", monthRank:"本月排名",
-      wallet:"钱包", walletSub:"将 FLAP 提现到 TON 钱包", usdValue:"美元价值",
+      wallet:"钱包", walletSub:"充值或提现 FLAP", usdValue:"美元价值",
       flapRate:"100 FLAP = $1.00 · 飞行只获得分数，不获得金币。",
       tonAddress:"TON 钱包地址", amountFlap:"数量（FLAP）",
       requestWithdraw:"申请提现",
       withdrawNote:"申请将人工审核并发放，可能需要一些时间。",
+      topup:"充值", withdrawTab:"提现", youPay:"需支付", payToAddress:"向此地址发送 TON",
+      txHash:"交易哈希", requestTopup:"申请充值", copy:"复制", copied:"已复制",
+      enterTx:"请粘贴 TON 交易哈希。",
+      topupOk:"充值申请已提交，审核后将到账 FLAP。",
+      topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希。管理员核对后会充值 FLAP。",
       leaderboard:"排行榜", lbSub:"本周期最高分 — 仅计分数",
       daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名",
       lbNote:"分数由服务器验证，无法在浏览器中伪造。",
@@ -982,11 +1049,16 @@
       adUnavailable:"विज्ञापन उपलब्ध नहीं — फिर कोशिश करें", tapToContinueRun:"जारी रखने के लिए टैप करें",
       profile:"प्रोफ़ाइल", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAP बैलेंस",
       dayRank:"आज की रैंक", monthRank:"मासिक रैंक",
-      wallet:"वॉलेट", walletSub:"FLAP को TON वॉलेट में निकालें", usdValue:"USD मूल्य",
+      wallet:"वॉलेट", walletSub:"FLAP जमा करें या निकालें", usdValue:"USD मूल्य",
       flapRate:"100 FLAP = $1.00 · उड़ान से केवल अंक मिलते हैं, सिक्के नहीं।",
       tonAddress:"TON वॉलेट पता", amountFlap:"राशि (FLAP)",
       requestWithdraw:"निकासी का अनुरोध",
       withdrawNote:"अनुरोध मैन्युअल रूप से जाँचे और चुकाए जाते हैं। इसमें समय लग सकता है।",
+      topup:"जमा", withdrawTab:"निकासी", youPay:"भुगतान", payToAddress:"इस पते पर TON भेजें",
+      txHash:"लेनदेन हैश", requestTopup:"जमा का अनुरोध", copy:"कॉपी", copied:"कॉपी हो गया",
+      enterTx:"TON लेनदेन हैश चिपकाएँ।",
+      topupOk:"जमा अनुरोध भेज दिया गया। जाँच के बाद FLAP जुड़ जाएगा।",
+      topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ। एडमिन जाँचकर FLAP जोड़ देगा।",
       leaderboard:"लीडरबोर्ड", lbSub:"इस अवधि का सर्वश्रेष्ठ स्कोर — केवल अंक",
       daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक",
       lbNote:"स्कोर सर्वर पर सत्यापित होते हैं और ब्राउज़र से नकली नहीं किए जा सकते।",
@@ -1284,6 +1356,10 @@
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
     return apiFetch('/api/withdraw', { method:'POST', body: JSON.stringify({ initData: initData, address: address, amount: amount }) });
   }
+  function requestDeposit(amount, txHash){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    return apiFetch('/api/deposit', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, txHash: txHash }) });
+  }
 
   var profileCache = null;
   function flapUsd(n){ return '$' + ((Number(n)||0) / FLAP_PER_USD).toFixed(2); }
@@ -1382,23 +1458,24 @@
     startCard.classList.remove('hidden');
     overCard.classList.add('hidden');
     gameStartCount++;
-    var shouldShowAd = (gameStartCount === 1) || (gameStartCount % 4 === 0);
-    if (!shouldShowAd) {
-      startCard.classList.add('hidden');
-      startSession().then(function(){ actuallyStartGame(); }).catch(function(){
-        startBtn.disabled = false; startBtn.textContent = t('tapToStart');
-      });
-      return;
-    }
+    awaitingPlayAfterAd = false;
     startBtn.disabled = true;
-    startBtn.textContent = t('loadingAd');
-    showRewardedAd().catch(function(err){
-      setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
-    }).then(function(){ return startSession(); }).then(function(){
+    var adsNeeded = 2;
+    var shown = 0;
+    function nextAd(){
+      shown++;
+      startBtn.textContent = t('loadingAd') + ' ' + shown + '/' + adsNeeded;
+      return showRewardedAd().catch(function(err){
+        setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
+      }).then(function(){
+        if (shown < adsNeeded) return nextAd();
+      });
+    }
+    nextAd().then(function(){ return startSession(); }).then(function(){
+      startCard.classList.add('hidden');
       startBtn.disabled = false;
-      startBtn.textContent = t('play');
-      awaitingPlayAfterAd = true;
-      startCard.classList.remove('hidden');
+      startBtn.textContent = t('tapToStart');
+      actuallyStartGame();
     }).catch(function(){
       startBtn.disabled = false; startBtn.textContent = t('tapToStart');
     });
@@ -1530,19 +1607,28 @@
     fetchProfile().then(function(p){ profileCache = p; renderProfileFromCache(); })
       .catch(function(){ document.getElementById('profileHint').textContent = t('couldNotVerify'); });
   }
+  function fillWalletFromProfile(p){
+    var bal = (p && p.flapBalance) || 0;
+    document.getElementById('walletBalance').textContent = bal + ' FLAP';
+    document.getElementById('walletUsd').textContent = flapUsd(bal);
+    var addr = (p && p.depositAddress) || '';
+    var payTo = document.getElementById('depositPayTo');
+    if (payTo) payTo.value = addr;
+  }
+  function updateDepositUsd(){
+    var amt = parseFloat(document.getElementById('depositAmount').value);
+    document.getElementById('depositUsd').textContent = flapUsd(amt > 0 ? amt : 0);
+  }
   function loadWalletPage(){
     var msg = document.getElementById('walletMsg');
-    msg.textContent = DEMO_MODE ? 'Demo mode' : '';
-    if (profileCache) {
-      var bal = profileCache.flapBalance || 0;
-      document.getElementById('walletBalance').textContent = bal + ' FLAP';
-      document.getElementById('walletUsd').textContent = flapUsd(bal);
-      return;
-    }
+    var dmsg = document.getElementById('depositMsg');
+    if (msg) msg.textContent = DEMO_MODE ? 'Demo mode' : '';
+    if (dmsg && DEMO_MODE) dmsg.textContent = 'Demo mode';
+    updateDepositUsd();
+    if (profileCache) { fillWalletFromProfile(profileCache); return; }
     fetchProfile().then(function(p){
       profileCache = p;
-      document.getElementById('walletBalance').textContent = (p.flapBalance||0) + ' FLAP';
-      document.getElementById('walletUsd').textContent = flapUsd(p.flapBalance||0);
+      fillWalletFromProfile(p);
     }).catch(function(){});
   }
   document.getElementById('walletSubmitBtn').addEventListener('click', function(e){
@@ -1562,6 +1648,44 @@
       document.getElementById('walletAddress').value = '';
       document.getElementById('walletAmount').value = '';
     }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
+  });
+
+  document.getElementById('depositAmount').addEventListener('input', updateDepositUsd);
+  document.getElementById('depositCopyBtn').addEventListener('click', function(e){
+    e.preventDefault();
+    var addr = document.getElementById('depositPayTo').value.trim();
+    if (!addr) return;
+    var btn = document.getElementById('depositCopyBtn');
+    function ok(){ btn.textContent = t('copied'); setTimeout(function(){ btn.textContent = t('copy'); }, 1200); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(addr).then(ok).catch(function(){});
+    } else {
+      document.getElementById('depositPayTo').select();
+      try { document.execCommand('copy'); ok(); } catch(err){}
+    }
+  });
+  document.getElementById('depositSubmitBtn').addEventListener('click', function(e){
+    e.preventDefault();
+    var amt = parseFloat(document.getElementById('depositAmount').value);
+    var tx = document.getElementById('depositTx').value.trim();
+    var msg = document.getElementById('depositMsg');
+    if (!(amt > 0)) { msg.textContent = t('enterAmount'); return; }
+    if (!tx) { msg.textContent = t('enterTx'); return; }
+    msg.textContent = t('submitting');
+    requestDeposit(amt, tx).then(function(){
+      msg.textContent = t('topupOk');
+      document.getElementById('depositTx').value = '';
+    }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
+  });
+  document.querySelectorAll('[data-wallet-tab]').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      var which = tab.getAttribute('data-wallet-tab');
+      document.querySelectorAll('[data-wallet-tab]').forEach(function(x){
+        x.classList.toggle('active', x.getAttribute('data-wallet-tab') === which);
+      });
+      document.getElementById('walletTopup').classList.toggle('hidden', which !== 'topup');
+      document.getElementById('walletWithdraw').classList.toggle('hidden', which !== 'withdraw');
+    });
   });
 
   function loadLeaderboardPage(force){
@@ -1769,5 +1893,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31383857cbdbc1a',t:'MTc4Nzc1NDQwOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
