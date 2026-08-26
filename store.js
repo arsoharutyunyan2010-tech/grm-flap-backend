@@ -9,27 +9,40 @@
  */
 
 const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used }
-const weeklyScores = new Map();   // weekKey -> Map(userId -> { name, score, updatedAt })
+const periodBoards = new Map();   // periodKey -> Map(userId -> { name, score, updatedAt })
 const rewardHistory = [];         // archived weekly results
 const rateBuckets = new Map();    // userId -> [timestamps]
 const allTimeBest = new Map();    // userId -> { name, score }
-const balances = new Map();       // userId -> number (GRM)
+const balances = new Map();       // userId -> number (FLAP coins; 100 FLAP = $1)
 const withdrawals = [];           // { id, userId, name, address, amount, status, requestedAt, paidAt? }
 let withdrawalSeq = 1;
 
-const knownUsers = new Set();     // every userId ever seen (for "total users in bot")
-const recentActivity = new Map(); // userId -> last start-session timestamp (for "playing now")
-let totalRuns = 0;                // completed submit-score calls
-let totalGrmPaid = 0;             // sum of GRM credited from runs
+const knownUsers = new Set();
+const recentActivity = new Map();
+let totalRuns = 0;
+
+function currentDayKey(d = new Date()) {
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD UTC
+}
 
 function currentWeekKey(d = new Date()) {
-  // ISO week key, e.g. "2026-W34" — ties the leaderboard to a Mon–Sun week (UTC).
+  // ISO week key, e.g. "2026-W34" — Mon–Sun week (UTC).
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const dayNum = (date.getUTCDay() + 6) % 7; // Mon=0..Sun=6
   date.setUTCDate(date.getUTCDate() - dayNum + 3);
   const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
   const week = 1 + Math.round(((date - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
   return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function currentMonthKey(d = new Date()) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function periodKey(period, d = new Date()) {
+  if (period === 'day') return 'd:' + currentDayKey(d);
+  if (period === 'month') return 'm:' + currentMonthKey(d);
+  return 'w:' + currentWeekKey(d);
 }
 
 function createSession(sessionId, userId, seed) {
@@ -42,17 +55,16 @@ function consumeSession(sessionId) {
   const s = sessions.get(sessionId);
   if (s) s.used = true;
 }
-// Periodically forget old sessions so memory doesn't grow unbounded.
 setInterval(() => {
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000; // 2h
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
   for (const [id, s] of sessions) if (s.startedAt < cutoff) sessions.delete(id);
-  const actCutoff = Date.now() - 10 * 60 * 1000; // 10min
+  const actCutoff = Date.now() - 10 * 60 * 1000;
   for (const [uid, ts] of recentActivity) if (ts < actCutoff) recentActivity.delete(uid);
 }, 10 * 60 * 1000).unref();
 
-function submitWeeklyScore(userId, name, score, weekKey = currentWeekKey()) {
-  if (!weeklyScores.has(weekKey)) weeklyScores.set(weekKey, new Map());
-  const board = weeklyScores.get(weekKey);
+function upsertBoardScore(key, userId, name, score) {
+  if (!periodBoards.has(key)) periodBoards.set(key, new Map());
+  const board = periodBoards.get(key);
   const existing = board.get(userId);
   if (!existing || score > existing.score) {
     board.set(userId, { name, score, updatedAt: Date.now() });
@@ -60,21 +72,46 @@ function submitWeeklyScore(userId, name, score, weekKey = currentWeekKey()) {
   return board.get(userId).score;
 }
 
-function getLeaderboard(weekKey = currentWeekKey(), limit = 20) {
-  const board = weeklyScores.get(weekKey) || new Map();
+function submitPeriodScores(userId, name, score) {
+  return {
+    day: upsertBoardScore(periodKey('day'), userId, name, score),
+    week: upsertBoardScore(periodKey('week'), userId, name, score),
+    month: upsertBoardScore(periodKey('month'), userId, name, score),
+  };
+}
+
+function submitWeeklyScore(userId, name, score, weekKey = currentWeekKey()) {
+  return upsertBoardScore('w:' + weekKey, userId, name, score);
+}
+
+function getLeaderboard(periodOrWeekKey = 'week', limit = 20) {
+  let key;
+  let period = periodOrWeekKey;
+  if (periodOrWeekKey === 'day' || periodOrWeekKey === 'week' || periodOrWeekKey === 'month') {
+    key = periodKey(periodOrWeekKey);
+  } else if (typeof periodOrWeekKey === 'string' && periodOrWeekKey.indexOf('w:') === 0) {
+    key = periodOrWeekKey;
+    period = 'week';
+  } else if (typeof periodOrWeekKey === 'string' && /^\d{4}-W\d{2}$/.test(periodOrWeekKey)) {
+    key = 'w:' + periodOrWeekKey;
+    period = 'week';
+  } else {
+    key = periodKey('week');
+    period = 'week';
+  }
+  const board = periodBoards.get(key) || new Map();
   const entries = Array.from(board.entries())
     .map(([userId, v]) => ({ userId, name: v.name, score: v.score }))
     .sort((a, b) => b.score - a.score);
   const ranked = entries.map((e, i) => Object.assign({ rank: i + 1 }, e));
-  return { weekKey, ranked };
+  return { period, periodKey: key, ranked: ranked.slice(0, limit === Infinity ? ranked.length : limit), allRanked: ranked };
 }
 
-function getUserRank(userId, weekKey = currentWeekKey()) {
-  const { ranked } = getLeaderboard(weekKey, Infinity);
-  return ranked.find(e => e.userId === userId) || null;
+function getUserRank(userId, periodOrWeekKey = 'week') {
+  const { allRanked } = getLeaderboard(periodOrWeekKey, Infinity);
+  return allRanked.find(e => e.userId === userId) || null;
 }
 
-// Simple sliding-window rate limiter: `limit` calls per `windowMs`.
 function allowRequest(userId, limit, windowMs) {
   const now = Date.now();
   const bucket = (rateBuckets.get(userId) || []).filter(t => now - t < windowMs);
@@ -86,13 +123,9 @@ function allowRequest(userId, limit, windowMs) {
 
 function archiveWeek(weekKey, payouts) {
   rewardHistory.push({ weekKey, payouts, archivedAt: Date.now() });
-  weeklyScores.delete(weekKey);
+  periodBoards.delete('w:' + weekKey);
 }
 
-// ---------------------------------------------------------------
-// All-time best score (independent of the weekly leaderboard, which
-// resets). Shown on the player's profile.
-// ---------------------------------------------------------------
 function updateAllTimeBest(userId, name, score) {
   const existing = allTimeBest.get(userId);
   if (!existing || score > existing.score) {
@@ -105,10 +138,6 @@ function getAllTimeBest(userId) {
   return e ? e.score : 0;
 }
 
-// ---------------------------------------------------------------
-// GRM balance — credited by the weekly reward job (see rewards.js) and
-// by per-pipe run earnings, debited when a withdrawal request is made.
-// ---------------------------------------------------------------
 function getBalance(userId) {
   return balances.get(userId) || 0;
 }
@@ -118,12 +147,6 @@ function creditBalance(userId, amount) {
   return bal;
 }
 
-// ---------------------------------------------------------------
-// Withdrawal requests — the player enters a TON address + amount,
-// the amount is deducted from their balance immediately (so it can't
-// be double-spent), and the request sits as "pending" until the admin
-// manually sends the TON and marks it paid.
-// ---------------------------------------------------------------
 function requestWithdrawal(userId, name, address, amount) {
   const bal = getBalance(userId);
   if (!(amount > 0)) return { ok: false, error: 'invalid amount' };
@@ -149,9 +172,6 @@ function markWithdrawalPaid(id) {
   return w;
 }
 
-// ---------------------------------------------------------------
-// Bot-wide stats, for the admin panel.
-// ---------------------------------------------------------------
 function trackUser(userId) {
   knownUsers.add(userId);
   recentActivity.set(userId, Date.now());
@@ -165,21 +185,17 @@ function getActivePlayers(windowMs = 5 * 60 * 1000) {
   for (const ts of recentActivity.values()) if (now - ts < windowMs) count++;
   return count;
 }
-function recordRun(grmEarned) {
+function recordRun() {
   totalRuns++;
-  totalGrmPaid += grmEarned || 0;
 }
 function getRunStats() {
-  return {
-    totalRuns,
-    avgGrmPerRun: totalRuns ? Math.round((totalGrmPaid / totalRuns) * 100) / 100 : 0,
-  };
+  return { totalRuns };
 }
 
 module.exports = {
-  currentWeekKey,
+  currentDayKey, currentWeekKey, currentMonthKey, periodKey,
   createSession, getSession, consumeSession,
-  submitWeeklyScore, getLeaderboard, getUserRank,
+  submitPeriodScores, submitWeeklyScore, getLeaderboard, getUserRank,
   allowRequest,
   archiveWeek,
   rewardHistory,
