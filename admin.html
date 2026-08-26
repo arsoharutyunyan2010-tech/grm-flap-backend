@@ -17,8 +17,10 @@
   table{ width:100%; border-collapse:collapse; font-size:13px; }
   th,td{ text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); }
   th{ opacity:0.6; font-weight:600; }
-  .status-pending{ color:#f4c542; }
-  .status-paid{ color:#3ddc84; }
+    .status-pending{ color:#f4c542; }
+    .status-paid{ color:#3ddc84; }
+    .status-approved{ color:#3ddc84; }
+    .status-rejected{ color:#ff5d73; }
   .pay-btn{ padding:4px 10px; font-size:12px; }
   .err{ color:#ff5d73; }
 </style>
@@ -38,6 +40,12 @@
     <div class="stat-card"><span>Total runs</span><b id="statRuns">—</b></div>
     <div class="stat-card"><span>FLAP rate</span><b>100 = $1</b></div>
   </div>
+
+  <h2>Top-up requests</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Player</th><th>TX hash</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+    <tbody id="dRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
+  </table>
 
   <h2>Withdrawal requests</h2>
   <table>
@@ -69,6 +77,51 @@
       })
       .catch(function(e){ document.getElementById('err').textContent = 'Stats error: ' + e.message; });
   }
+
+  function loadDeposits(key){
+    fetch(API_BASE + '/internal/deposits', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ renderDeposits(d.deposits || [], key); })
+      .catch(function(e){ document.getElementById('err').textContent = 'Deposits error: ' + e.message; });
+  }
+
+  function renderDeposits(list, key){
+    var tbody = document.getElementById('dRows');
+    tbody.innerHTML = '';
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6">No top-up requests yet.</td></tr>';
+      return;
+    }
+    list.slice().reverse().forEach(function(d){
+      var tr = document.createElement('tr');
+      var actions = d.status === 'pending'
+        ? '<button class="pay-btn" onclick="approveDeposit('+d.id+')">Approve</button> <button class="pay-btn" onclick="rejectDeposit('+d.id+')">Reject</button>'
+        : '';
+      tr.innerHTML =
+        '<td>#'+d.id+'</td>' +
+        '<td>'+ (d.name||'').replace(/</g,'&lt;') +'</td>' +
+        '<td style="word-break:break-all;max-width:180px;">'+ (d.txHash||'').replace(/</g,'&lt;') +'</td>' +
+        '<td>'+ d.amount +' FLAP ($'+(d.amount/100).toFixed(2)+')</td>' +
+        '<td class="status-'+d.status+'">'+ d.status +'</td>' +
+        '<td>'+ actions +'</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  window.approveDeposit = function(id){
+    var key = getKey();
+    fetch(API_BASE + '/internal/deposits/' + id + '/approve', {
+      method: 'POST',
+      headers: { 'x-admin-key': key }
+    }).then(function(){ loadDeposits(key); });
+  };
+  window.rejectDeposit = function(id){
+    var key = getKey();
+    fetch(API_BASE + '/internal/deposits/' + id + '/reject', {
+      method: 'POST',
+      headers: { 'x-admin-key': key }
+    }).then(function(){ loadDeposits(key); });
+  };
 
   function loadWithdrawals(key){
     fetch(API_BASE + '/internal/withdrawals', { headers: { 'x-admin-key': key } })
@@ -114,5 +167,5 @@
     if (saved) document.getElementById('adminKey').value = saved;
   } catch(e){}
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a312f8d50e69e1b8',t:'MTc4Nzc0ODcyOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31405d14ad1fea5',t:'MTc4Nzc1OTc0Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
