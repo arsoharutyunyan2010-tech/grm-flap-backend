@@ -74,6 +74,7 @@
     display:flex; align-items:center; justify-content:center;
     z-index:10;
   }
+  #subCheckCard{ z-index: 30; }
   .card{
     background: rgba(20,10,40,0.92);
     border: 2px solid var(--gold);
@@ -381,14 +382,14 @@
   <div id="grmLive" class="hidden">0.00 GRM</div>
   <div id="syncBadge" class="hidden"></div>
 
-  <!-- Subscription Check Card -->
-  <div class="overlay hidden" id="subCheckCard">
+  <!-- Subscription Check Card (shown first; game is locked until server verifies both joins) -->
+  <div class="overlay" id="subCheckCard">
     <div class="card">
-      <div class="title" style="font-size:28px;">SUBSCRIBE TO PLAY</div>
-      <div class="sub">You must join both channels to start playing</div>
-      
+      <div class="title" style="font-size:26px;">SUBSCRIBE TO PLAY</div>
+      <div class="sub">Join both, then tap Verify. The server checks Telegram — not the browser.</div>
+
       <div class="warning-box">
-        ⚠️ Please subscribe to both channels below and click "Verify Subscription" to continue.
+        You must be subscribed to both channels before you can play.
       </div>
 
       <div class="sub-check-item">
@@ -396,10 +397,10 @@
           <div class="sub-check-icon">💬</div>
           <div class="sub-check-text">
             <div>GRM FLAP CHAT</div>
-            <div style="font-size:11px;opacity:0.7;">Community & Support</div>
+            <div style="font-size:11px;opacity:0.7;">t.me/GRMFLAPCHAT</div>
           </div>
         </div>
-        <div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <div id="statusChat" class="sub-check-status not-joined">NOT JOINED</div>
           <button id="joinChatBtn" class="sub-join-btn">JOIN</button>
         </div>
@@ -407,24 +408,24 @@
 
       <div class="sub-check-item">
         <div class="sub-check-info">
-          <div class="sub-check-icon">🎮</div>
+          <div class="sub-check-icon">📢</div>
           <div class="sub-check-text">
             <div>GRM FLAP</div>
-            <div style="font-size:11px;opacity:0.7;">Official Channel</div>
+            <div style="font-size:11px;opacity:0.7;">t.me/GRMFLAP</div>
           </div>
         </div>
-        <div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <div id="statusChannel" class="sub-check-status not-joined">NOT JOINED</div>
           <button id="joinChannelBtn" class="sub-join-btn">JOIN</button>
         </div>
       </div>
 
       <button id="verifySubBtn" class="verify-all-btn">✓ VERIFY SUBSCRIPTION</button>
-      <div class="hint" id="subHint">After joining, click verify to continue</div>
+      <div class="hint" id="subHint">Join both, come back here, then tap Verify</div>
     </div>
   </div>
 
-  <div class="overlay" id="startCard">
+  <div class="overlay hidden" id="startCard">
     <div class="card">
       <svg class="coin-icon" viewBox="0 0 64 64">
         <circle cx="32" cy="32" r="28" fill="#26262e" stroke="#f4c542" stroke-width="2"/>
@@ -556,8 +557,8 @@
   <button id="adCloseBtn" class="ad-close-btn" aria-label="Close ad">✕</button>
 </div>
 
-<!-- ---------- Bottom nav ---------- -->
-<div class="navbar" id="navbar">
+<!-- ---------- Bottom nav (hidden until subscription is verified) ---------- -->
+<div class="navbar hidden" id="navbar">
   <button class="nav-btn" data-page="profile" title="Profile">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
   </button>
@@ -647,11 +648,12 @@
     try { tg.setBackgroundColor('#0d0620'); } catch(e){}
   }
 
-  // Subscription state
+  // Subscription state — only true after the SERVER confirms both joins
   var subscribedChat = false;
   var subscribedChannel = false;
+  var subscriptionOk = false;
+  var subscriptionCheckInFlight = false;
 
-  // Channel usernames (without @)
   var CHAT_USERNAME = 'GRMFLAPCHAT';
   var CHANNEL_USERNAME = 'GRMFLAP';
 
@@ -664,10 +666,26 @@
 
   // ---------- Subscription Check Functions ----------
   function openTelegramLink(username){
-    if (tg) {
-      tg.openTelegramLink('https://t.me/' + username);
+    var url = 'https://t.me/' + username;
+    if (tg && typeof tg.openTelegramLink === 'function') {
+      tg.openTelegramLink(url);
     } else {
-      window.open('https://t.me/' + username, '_blank');
+      window.open(url, '_blank');
+    }
+  }
+
+  function showSubGate(){
+    subscriptionOk = false;
+    startCard.classList.add('hidden');
+    overCard.classList.add('hidden');
+    subCheckCard.classList.remove('hidden');
+  }
+
+  function unlockGameAfterSubscription(){
+    subscriptionOk = true;
+    subCheckCard.classList.add('hidden');
+    if (state !== 'playing' && state !== 'crashed') {
+      startCard.classList.remove('hidden');
     }
   }
 
@@ -691,18 +709,75 @@
       statusChannel.className = 'sub-check-status not-joined';
       joinChannelBtn.textContent = 'JOIN';
     }
+  }
 
+  function applySubscriptionResult(data){
+    subscribedChat = !!data.chatJoined;
+    subscribedChannel = !!data.channelJoined;
+    updateSubscriptionUI();
     if (subscribedChat && subscribedChannel) {
-      verifySubBtn.textContent = '✓ BOTH JOINED - CONTINUE';
-      verifySubBtn.disabled = false;
-      subHint.textContent = 'Great! Click to start playing';
+      subHint.textContent = 'Verified — you can play.';
       subHint.style.color = '#3ddc84';
-    } else {
-      verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
-      verifySubBtn.disabled = true;
-      subHint.textContent = 'Join both channels and click verify';
-      subHint.style.color = '';
+      unlockGameAfterSubscription();
+      return true;
     }
+    subscriptionOk = false;
+    showSubGate();
+    var missing = [];
+    if (!subscribedChat) missing.push('GRM FLAP CHAT');
+    if (!subscribedChannel) missing.push('GRM FLAP');
+    subHint.textContent = 'Not subscribed yet: ' + missing.join(' + ') + '. Join, then tap Verify.';
+    subHint.style.color = '#ff5d73';
+    return false;
+  }
+
+  function verifySubscription(opts){
+    if (DEMO_MODE) {
+      subscriptionOk = true;
+      subCheckCard.classList.add('hidden');
+      startCard.classList.remove('hidden');
+      return Promise.resolve(true);
+    }
+    if (!initData) {
+      showSubGate();
+      subHint.textContent = 'Open this Mini App from the Telegram bot to verify.';
+      subHint.style.color = '#ff5d73';
+      return Promise.resolve(false);
+    }
+    if (subscriptionCheckInFlight) return Promise.resolve(false);
+    subscriptionCheckInFlight = true;
+    verifySubBtn.disabled = true;
+    verifySubBtn.textContent = 'VERIFYING…';
+    subHint.textContent = 'Checking Telegram via server…';
+    subHint.style.color = '';
+
+    return fetch(API_BASE_URL + '/api/check-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: initData, force: !(opts && opts.cached) })
+    })
+    .then(function(response){
+      return response.json().then(function(body){
+        if (!response.ok) throw new Error(body.error || ('HTTP ' + response.status));
+        return body;
+      });
+    })
+    .then(function(data){
+      return applySubscriptionResult(data);
+    })
+    .catch(function(err){
+      console.error('Verification failed:', err);
+      showSubGate();
+      subHint.textContent = 'Verification failed: ' + (err && err.message ? err.message : 'try again');
+      subHint.style.color = '#ff5d73';
+      return false;
+    })
+    .then(function(ok){
+      subscriptionCheckInFlight = false;
+      verifySubBtn.disabled = false;
+      verifySubBtn.textContent = ok ? '✓ VERIFIED' : '✓ VERIFY SUBSCRIPTION';
+      return ok;
+    });
   }
 
   joinChatBtn.addEventListener('click', function(e){
@@ -715,56 +790,23 @@
     openTelegramLink(CHANNEL_USERNAME);
   });
 
-  // ԻՐԱԿԱՆ և ԱՆՎՏԱՆԳ ստուգում սերվերի միջոցով
   verifySubBtn.addEventListener('click', function(e){
     e.preventDefault();
-    
-    if (!tg || !initData) {
-      subHint.textContent = 'Telegram environment not found. Please open in Telegram.';
-      subHint.style.color = '#ff5d73';
-      return;
-    }
-
-    verifySubBtn.disabled = true;
-    verifySubBtn.textContent = 'VERIFYING...';
-    subHint.textContent = 'Checking with server...';
-
-    fetch(API_BASE_URL + '/api/check-subscription', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData: initData }) // Ուղարկում ենք initData անվտանգության համար
-    })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      
-      subscribedChat = data.chatJoined;
-      subscribedChannel = data.channelJoined;
-      updateSubscriptionUI();
-
-      if (subscribedChat && subscribedChannel) {
-        // Հաջողված ստուգում. թաքցնել ստուգման էկրանը, ցույց տալ խաղը
-        setTimeout(function(){
-          subCheckCard.classList.add('hidden');
-          startCard.classList.remove('hidden');
-        }, 800);
-      } else {
-        subHint.textContent = 'You must join BOTH channels to continue.';
-        subHint.style.color = '#ff5d73';
-        verifySubBtn.disabled = false;
-        verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
-      }
-    })
-    .catch(function(err) {
-      console.error('Verification failed:', err);
-      subHint.textContent = 'Verification failed. Please try again.';
-      subHint.style.color = '#ff5d73';
-      verifySubBtn.disabled = false;
-      verifySubBtn.textContent = '✓ VERIFY SUBSCRIPTION';
-    });
+    verifySubscription({ cached: false });
   });
+
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible' && !subscriptionOk && !DEMO_MODE) {
+      verifySubscription({ cached: false });
+    }
+  });
+  if (tg && typeof tg.onEvent === 'function') {
+    try {
+      tg.onEvent('activated', function(){
+        if (!subscriptionOk && !DEMO_MODE) verifySubscription({ cached: false });
+      });
+    } catch (e) {}
+  }
 
   // ---------- Monetag rewarded ads (Zone ID: 11646472) ----------
   function showMonetagAd(){
@@ -937,9 +979,19 @@
       body: JSON.stringify({ initData: initData })
     }).then(function(res){
       session = { sessionId: res.sessionId, seed: res.seed, startedAt: Date.now() };
+      subscriptionOk = true;
       setSyncBadge('connected', 'ok');
       return session;
     }).catch(function(err){
+      var msg = String(err && err.message ? err.message : err);
+      if (msg.indexOf('subscription_required') !== -1) {
+        subscriptionOk = false;
+        showSubGate();
+        subHint.textContent = 'Subscribe to both channels to play.';
+        subHint.style.color = '#ff5d73';
+        setSyncBadge('subscribe required', 'err');
+        return Promise.reject(err);
+      }
       setSyncBadge('offline — score won\'t be saved', 'err');
       session = { sessionId: null, seed: localSeed(), startedAt: Date.now(), offline: true };
       return session;
@@ -1119,6 +1171,9 @@
       startCard.classList.add('hidden');
       startSession().then(function(){
         actuallyStartGame();
+      }).catch(function(){
+        startBtn.disabled = false;
+        startBtn.textContent = 'TAP TO START';
       });
       return;
     }
@@ -1135,6 +1190,9 @@
       startBtn.textContent = 'PLAY';
       awaitingPlayAfterAd = true;
       startCard.classList.remove('hidden');
+    }).catch(function(){
+      startBtn.disabled = false;
+      startBtn.textContent = 'TAP TO START';
     });
   }
 
@@ -1211,6 +1269,11 @@
 
   startBtn.addEventListener('click', function(e){
     e.preventDefault();
+    if (!DEMO_MODE && !subscriptionOk) {
+      showSubGate();
+      verifySubscription({ cached: false });
+      return;
+    }
     if (awaitingPlayAfterAd) {
       awaitingPlayAfterAd = false;
       startCard.classList.add('hidden');
@@ -1520,16 +1583,28 @@
     requestAnimationFrame(loop);
   }
 
-  // Initialize subscription check on load
   function init(){
     updateSubscriptionUI();
-    subCheckCard.classList.remove('hidden');
-    startCard.classList.add('hidden');
+    if (DEMO_MODE) {
+      subscriptionOk = true;
+      subCheckCard.classList.add('hidden');
+      startCard.classList.remove('hidden');
+      document.getElementById('navbar').classList.remove('hidden');
+      return;
+    }
+    showSubGate();
+    verifySubscription({ cached: false });
   }
 
   resetGame();
   init();
   requestAnimationFrame(loop);
+
+})();
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a30ef33a797e52e9',t:'MTc4NzcwNjU1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
+equestAnimationFrame(loop);
 
 })();
 </script>
