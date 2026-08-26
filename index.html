@@ -881,7 +881,7 @@
       oops:"OOPS!", score:"Score", endRun:"END RUN", gameOver:"GAME OVER",
       best:"Best", weekRank:"Weekly rank", newBest:"NEW BEST!", playAgain:"PLAY AGAIN",
       watchContinue:"▶ WATCH AD & CONTINUE", tapContinue:"▶ TAP TO CONTINUE",
-      loadingAd:"LOADING AD…", play:"PLAY", continuesLeft:" continue(s) left",
+      loadingAd:"LOADING AD…", watchAd2:"WATCH 2ND AD", play:"PLAY", continuesLeft:" continue(s) left",
       adUnavailable:"Ad unavailable — try again", tapToContinueRun:"Tap to continue your run",
       profile:"PROFILE", bestScore:"Best score", flapBalance:"FLAP balance",
       dayRank:"Today's rank", monthRank:"Monthly rank",
@@ -922,7 +922,7 @@
       oops:"УПС!", score:"Счёт", endRun:"ЗАВЕРШИТЬ", gameOver:"ИГРА ОКОНЧЕНА",
       best:"Рекорд", weekRank:"Место за неделю", newBest:"НОВЫЙ РЕКОРД!", playAgain:"ЕЩЁ РАЗ",
       watchContinue:"▶ РЕКЛАМА И ПРОДОЛЖИТЬ", tapContinue:"▶ НАЖМИТЕ, ЧТОБЫ ПРОДОЛЖИТЬ",
-      loadingAd:"РЕКЛАМА…", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
+      loadingAd:"РЕКЛАМА…", watchAd2:"2-Я РЕКЛАМА", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
       adUnavailable:"Реклама недоступна — попробуйте ещё", tapToContinueRun:"Нажмите, чтобы продолжить",
       profile:"ПРОФИЛЬ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAP",
       dayRank:"Место сегодня", monthRank:"Место за месяц",
@@ -963,7 +963,7 @@
       oops:"ОП!", score:"Рахунок", endRun:"ЗАВЕРШИТИ", gameOver:"ГРУ ЗАВЕРШЕНО",
       best:"Рекорд", weekRank:"Місце за тиждень", newBest:"НОВИЙ РЕКОРД!", playAgain:"ЩЕ РАЗ",
       watchContinue:"▶ РЕКЛАМА І ПРОДОВЖИТИ", tapContinue:"▶ НАТИСНІТЬ, ЩОБ ПРОДОВЖИТИ",
-      loadingAd:"РЕКЛАМА…", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
+      loadingAd:"РЕКЛАМА…", watchAd2:"2-ГА РЕКЛАМА", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
       adUnavailable:"Реклама недоступна — спробуйте ще", tapToContinueRun:"Натисніть, щоб продовжити",
       profile:"ПРОФІЛЬ", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAP",
       dayRank:"Місце сьогодні", monthRank:"Місце за місяць",
@@ -1004,7 +1004,7 @@
       oops:"哎呀！", score:"分数", endRun:"结束本局", gameOver:"游戏结束",
       best:"最高分", weekRank:"本周排名", newBest:"新纪录！", playAgain:"再来一局",
       watchContinue:"▶ 看广告继续", tapContinue:"▶ 点击继续",
-      loadingAd:"广告加载中…", play:"开始", continuesLeft:" 次续命剩余",
+      loadingAd:"广告加载中…", watchAd2:"观看第2个广告", play:"开始", continuesLeft:" 次续命剩余",
       adUnavailable:"广告不可用，请重试", tapToContinueRun:"点击继续本局",
       profile:"个人", bestScore:"最高分", flapBalance:"FLAP 余额",
       dayRank:"今日排名", monthRank:"本月排名",
@@ -1045,7 +1045,7 @@
       oops:"ओह!", score:"स्कोर", endRun:"रन समाप्त", gameOver:"खेल खत्म",
       best:"सर्वश्रेष्ठ", weekRank:"साप्ताहिक रैंक", newBest:"नया रिकॉर्ड!", playAgain:"फिर खेलें",
       watchContinue:"▶ विज्ञापन देखकर जारी रखें", tapContinue:"▶ जारी रखने के लिए टैप करें",
-      loadingAd:"विज्ञापन लोड…", play:"खेलें", continuesLeft:" जारी मौके बाकी",
+      loadingAd:"विज्ञापन लोड…", watchAd2:"दूसरा विज्ञापन देखें", play:"खेलें", continuesLeft:" जारी मौके बाकी",
       adUnavailable:"विज्ञापन उपलब्ध नहीं — फिर कोशिश करें", tapToContinueRun:"जारी रखने के लिए टैप करें",
       profile:"प्रोफ़ाइल", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAP बैलेंस",
       dayRank:"आज की रैंक", monthRank:"मासिक रैंक",
@@ -1095,7 +1095,7 @@
     document.querySelectorAll(".lang-opt").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
     });
-    if (startBtn && !startBtn.disabled && startBtn.textContent && !awaitingPlayAfterAd) {
+    if (startBtn && !startBtn.disabled && !awaitingPlayAfterAd && startAdStep === 0) {
       /* leave dynamic labels to their own setters */
     }
   }
@@ -1136,6 +1136,7 @@
   }
 
   var awaitingPlayAfterAd = false;
+  var startAdStep = 0;
   var awaitingContinueTap = false;
   var lbPeriod = 'day';
   var leaderboardCache = { day:null, week:null, month:null };
@@ -1454,30 +1455,47 @@
     state = 'playing';
     bird.vy = P.FLAP_VELOCITY * 0.7;
   }
+  function showStartAd(n){
+    startBtn.disabled = true;
+    startBtn.textContent = t('loadingAd') + ' ' + n + '/2';
+    return showRewardedAd().catch(function(err){
+      setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
+    }).then(function(){
+      startBtn.disabled = false;
+      if (n === 1) {
+        startAdStep = 1;
+        awaitingPlayAfterAd = false;
+        startBtn.textContent = t('watchAd2');
+      } else {
+        startAdStep = 2;
+        awaitingPlayAfterAd = true;
+        startBtn.textContent = t('play');
+      }
+    }).catch(function(){
+      startBtn.disabled = false;
+      startBtn.textContent = n === 1 ? t('tapToStart') : t('watchAd2');
+    });
+  }
   function beginRound(){
     startCard.classList.remove('hidden');
     overCard.classList.add('hidden');
     gameStartCount++;
     awaitingPlayAfterAd = false;
+    startAdStep = 0;
+    showStartAd(1);
+  }
+  function startGameAfterAds(){
+    awaitingPlayAfterAd = false;
+    startAdStep = 0;
+    startCard.classList.add('hidden');
     startBtn.disabled = true;
-    var adsNeeded = 2;
-    var shown = 0;
-    function nextAd(){
-      shown++;
-      startBtn.textContent = t('loadingAd') + ' ' + shown + '/' + adsNeeded;
-      return showRewardedAd().catch(function(err){
-        setSyncBadge('ad failed: ' + (err && err.message ? err.message : 'unknown'), 'err');
-      }).then(function(){
-        if (shown < adsNeeded) return nextAd();
-      });
-    }
-    nextAd().then(function(){ return startSession(); }).then(function(){
-      startCard.classList.add('hidden');
+    startSession().then(function(){
       startBtn.disabled = false;
       startBtn.textContent = t('tapToStart');
       actuallyStartGame();
     }).catch(function(){
-      startBtn.disabled = false; startBtn.textContent = t('tapToStart');
+      startBtn.disabled = false;
+      startBtn.textContent = t('tapToStart');
     });
   }
   function handleCrash(){
@@ -1552,11 +1570,13 @@
 
   startBtn.addEventListener('click', function(e){
     e.preventDefault();
-    if (awaitingPlayAfterAd) {
-      awaitingPlayAfterAd = false;
-      startCard.classList.add('hidden');
-      startBtn.textContent = t('tapToStart');
-      actuallyStartGame();
+    if (startBtn.disabled) return;
+    if (startAdStep === 2 || awaitingPlayAfterAd) {
+      startGameAfterAds();
+      return;
+    }
+    if (startAdStep === 1) {
+      showStartAd(2);
       return;
     }
     beginRound();
@@ -1564,6 +1584,9 @@
   restartBtn.addEventListener('click', function(e){
     e.preventDefault();
     overCard.classList.add('hidden');
+    startAdStep = 0;
+    awaitingPlayAfterAd = false;
+    startBtn.disabled = false;
     startBtn.textContent = t('tapToStart');
     startCard.classList.remove('hidden');
   });
@@ -1893,5 +1916,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3141a932a38d0fd',t:'MTc4Nzc2MDU5Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
