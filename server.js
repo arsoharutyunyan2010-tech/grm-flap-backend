@@ -194,6 +194,14 @@ app.post('/api/withdraw', (req, res) => {
   res.json({ ok: true, requestId: result.request.id, flapBalance: result.balance, balance: result.balance });
 });
 
+// TADS widget "reward URL" / postback. Must return 200 or TADS may retry.
+function tadsReward(req, res) {
+  console.log('TADS reward postback', req.method, req.query, req.body || {});
+  res.status(200).json({ ok: true });
+}
+app.get('/api/tads-reward', tadsReward);
+app.post('/api/tads-reward', tadsReward);
+
 app.post('/api/deposit', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
