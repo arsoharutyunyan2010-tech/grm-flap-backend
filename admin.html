@@ -39,6 +39,16 @@
     <div class="stat-card"><span>Playing now</span><b id="statActive">—</b></div>
     <div class="stat-card"><span>Total runs</span><b id="statRuns">—</b></div>
     <div class="stat-card"><span>FLAP rate</span><b>100 = $1</b></div>
+    <div class="stat-card"><span>Save file</span><b id="statFile">—</b></div>
+    <div class="stat-card"><span>Save exists</span><b id="statExists">—</b></div>
+  </div>
+  <p id="persistHint" style="opacity:0.7;font-size:13px;max-width:720px;"></p>
+  <div class="keybox">
+    <button onclick="downloadBackup()">Download backup</button>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+      Restore backup
+      <input id="backupFile" type="file" accept="application/json" onchange="uploadBackup(event)">
+    </label>
   </div>
 
   <h2>Top-up requests</h2>
@@ -74,6 +84,19 @@
         document.getElementById('statUsers').textContent = d.totalUsers;
         document.getElementById('statActive').textContent = d.activePlayers;
         document.getElementById('statRuns').textContent = d.totalRuns;
+        document.getElementById('statFile').textContent = d.dataFile || '—';
+        document.getElementById('statExists').textContent = d.exists ? ('yes · ' + (d.bytes||0) + ' B') : 'NO';
+        var hint = document.getElementById('persistHint');
+        if (!d.dataFile || d.dataFile.indexOf('/data/') !== 0) {
+          hint.textContent = 'WARNING: DATA_FILE is not on a Railway Volume (/data/store.json). Every GitHub deploy will erase leaderboard, profile and FLAP.';
+          hint.style.color = '#ff5d73';
+        } else if (!d.exists) {
+          hint.textContent = 'Volume path is set. File will appear after the first saved score.';
+          hint.style.color = '#f4c542';
+        } else {
+          hint.textContent = 'Persistent save is ON. Deploys will keep scores if the Volume stays mounted.';
+          hint.style.color = '#3ddc84';
+        }
       })
       .catch(function(e){ document.getElementById('err').textContent = 'Stats error: ' + e.message; });
   }
@@ -167,5 +190,5 @@
     if (saved) document.getElementById('adminKey').value = saved;
   } catch(e){}
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31405d14ad1fea5',t:'MTc4Nzc1OTc0Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31421f3eb07850d',t:'MTc4Nzc2MDg5OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
