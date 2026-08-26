@@ -13,9 +13,25 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
+
+try {
+  const art = require('./art-assets.js');
+  const dir = path.join(__dirname, 'img');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, b64] of Object.entries(art)) {
+    if (typeof b64 === 'string' && b64.length) {
+      fs.writeFileSync(path.join(dir, name), Buffer.from(b64, 'base64'));
+    }
+  }
+  console.log('FLAPY art ready at', dir);
+} catch (err) {
+  console.error('FLAPY art materialize failed:', err.message || err);
+}
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
