@@ -23,6 +23,8 @@ const allTimeBest = new Map();    // userId -> { name, score }
 const balances = new Map();       // userId -> number (FLAP coins; 100 FLAP = $1)
 const withdrawals = [];           // { id, userId, name, address, amount, status, requestedAt, paidAt? }
 let withdrawalSeq = 1;
+const deposits = [];              // { id, userId, name, amount, txHash, status, requestedAt }
+let depositSeq = 1;
 
 const knownUsers = new Set();
 const recentActivity = new Map();
@@ -72,6 +74,8 @@ function snapshot() {
     balances: bals,
     withdrawals,
     withdrawalSeq,
+    deposits,
+    depositSeq,
     knownUsers: Array.from(knownUsers).map(String),
     totalRuns,
     rewardHistory,
@@ -122,6 +126,15 @@ function hydrate(data) {
   }
   const maxId = withdrawals.reduce((m, w) => Math.max(m, Number(w.id) || 0), 0);
   withdrawalSeq = Math.max(Number(data.withdrawalSeq) || 1, maxId + 1);
+
+  deposits.length = 0;
+  if (Array.isArray(data.deposits)) {
+    for (const d of data.deposits) {
+      if (d && d.id != null) deposits.push(d);
+    }
+  }
+  const maxDepId = deposits.reduce((m, d) => Math.max(m, Number(d.id) || 0), 0);
+  depositSeq = Math.max(Number(data.depositSeq) || 1, maxDepId + 1);
 
   knownUsers.clear();
   if (Array.isArray(data.knownUsers)) {
@@ -325,6 +338,43 @@ function markWithdrawalPaid(id) {
   return w;
 }
 
+function requestDeposit(userId, name, amount, txHash) {
+  userId = String(userId);
+  if (!(amount > 0)) return { ok: false, error: 'invalid amount' };
+  const request = {
+    id: depositSeq++,
+    userId,
+    name,
+    amount,
+    txHash: String(txHash || '').trim(),
+    status: 'pending',
+    requestedAt: Date.now(),
+  };
+  deposits.push(request);
+  scheduleSave();
+  return { ok: true, request };
+}
+function listDeposits(status) {
+  return status ? deposits.filter(d => d.status === status) : deposits.slice();
+}
+function approveDeposit(id) {
+  const d = deposits.find(x => x.id === id);
+  if (!d || d.status !== 'pending') return null;
+  d.status = 'approved';
+  d.approvedAt = Date.now();
+  const balance = creditBalance(d.userId, d.amount);
+  scheduleSave();
+  return { deposit: d, balance };
+}
+function rejectDeposit(id) {
+  const d = deposits.find(x => x.id === id);
+  if (!d || d.status !== 'pending') return null;
+  d.status = 'rejected';
+  d.rejectedAt = Date.now();
+  scheduleSave();
+  return d;
+}
+
 function trackUser(userId) {
   userId = String(userId);
   const wasNew = !knownUsers.has(userId);
@@ -359,6 +409,7 @@ module.exports = {
   updateAllTimeBest, getAllTimeBest,
   getBalance, creditBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid,
+  requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   dataFile: DATA_FILE,
   flush: saveNow,
