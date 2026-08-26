@@ -76,10 +76,10 @@
   }
   .sound-fab{
     all: unset;
-    position:fixed;
-    top: max(18px, env(safe-area-inset-top));
-    left: 16px;
-    z-index: 55;
+    position:absolute;
+    top: calc(max(18px, env(safe-area-inset-top)) + 52px);
+    right: 16px;
+    z-index: 25;
     width: 44px; height: 44px;
     display:flex; align-items:center; justify-content:center;
     border: 1px solid rgba(244,197,66,0.35);
@@ -88,6 +88,33 @@
     font-size: 20px;
     cursor:pointer;
     box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  }
+  #soundCard{
+    position:fixed; inset:0; z-index: 80;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .sound-opt{
+    display:flex; align-items:center; justify-content:space-between;
+    text-align:left;
+    background: rgba(255,255,255,0.06);
+    color: var(--ink);
+    box-shadow: none;
+    margin-top: 8px;
+    padding: 12px 14px;
+  }
+  .sound-opt.off{ opacity: 0.55; }
+  .sound-state{
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+    color: #1b1033;
+  }
+  .sound-opt.off .sound-state{
+    background: rgba(255,255,255,0.12);
+    color: var(--ink);
   }
   .overlay{
     position:absolute; inset:0;
@@ -358,7 +385,6 @@
 </style>
 </head>
 <body>
-<button id="soundBtn" class="sound-fab" aria-label="Sound">🔊</button>
 <div id="wrap">
   <canvas id="game"></canvas>
 
@@ -402,6 +428,7 @@
 
 <div class="page hidden" id="page-profile">
   <button id="langBtn" class="lang-fab" aria-label="Language">🌐</button>
+  <button id="soundBtn" class="sound-fab" aria-label="Sound">🔊</button>
   <div class="page-inner">
     <div class="title" data-i18n="profile">PROFILE</div>
     <div class="avatar-wrap" id="profileAvatar">
@@ -505,6 +532,26 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="soundCard">
+  <div class="card">
+    <div class="title" style="font-size:24px;" data-i18n="sound">SOUND</div>
+    <div class="sub" data-i18n="soundSub">Choose what you hear</div>
+    <button type="button" class="sound-opt" data-sound="music">
+      <span data-i18n="soundMusic">Music</span>
+      <span class="sound-state" id="soundStateMusic">ON</span>
+    </button>
+    <button type="button" class="sound-opt" data-sound="click">
+      <span data-i18n="soundButtons">Buttons</span>
+      <span class="sound-state" id="soundStateClick">ON</span>
+    </button>
+    <button type="button" class="sound-opt" data-sound="flap">
+      <span data-i18n="soundFlap">Flying</span>
+      <span class="sound-state" id="soundStateFlap">ON</span>
+    </button>
+    <button id="soundCloseBtn" class="secondary" data-i18n="close">CLOSE</button>
+  </div>
+</div>
+
 <div class="navbar" id="navbar">
   <button class="nav-btn" data-page="profile" title="Profile">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
@@ -537,15 +584,35 @@
 
   var AudioFX = (function(){
     var actx = null, master, musicGain, sfxGain;
-    var muted = false, musicOn = false, step = 0, nextTime = 0, timer = null;
+    var flags = { music: true, click: true, flap: true };
+    var musicOn = false, step = 0, nextTime = 0, timer = null;
     var noiseCache = null;
     var SCALE = [146.83, 174.61, 185.00, 220.00, 246.94, 293.66, 329.63, 369.99];
     var MELODY = [5,7,6,4, 5,4,2,4, 7,6,5,4, 5,2,3,5];
     var BASS = [0,0,3,2, 0,0,4,3];
     var STEP_DUR = 60 / 100 / 2;
 
-    function loadMuted(){
-      try { return localStorage.getItem('grmflap_muted') === '1'; } catch(e){ return false; }
+    function loadFlags(){
+      try {
+        var raw = localStorage.getItem('grmflap_audio');
+        if (raw) {
+          var o = JSON.parse(raw);
+          if (typeof o.music === 'boolean') flags.music = o.music;
+          if (typeof o.click === 'boolean') flags.click = o.click;
+          if (typeof o.flap === 'boolean') flags.flap = o.flap;
+        } else if (localStorage.getItem('grmflap_muted') === '1') {
+          flags.music = false; flags.click = false; flags.flap = false;
+        }
+      } catch(e){}
+    }
+    function saveFlags(){
+      try { localStorage.setItem('grmflap_audio', JSON.stringify(flags)); } catch(e){}
+    }
+    function applyMusicGain(){
+      if (!actx || !musicGain) return;
+      var now = actx.currentTime;
+      musicGain.gain.cancelScheduledValues(now);
+      musicGain.gain.setTargetAtTime(flags.music ? 0.20 : 0, now, 0.05);
     }
     function noiseBuf(){
       if (noiseCache) return noiseCache;
@@ -568,15 +635,15 @@
       master.gain.value = 1;
       master.connect(actx.destination);
       musicGain = actx.createGain();
-      musicGain.gain.value = muted ? 0 : 0.20;
+      musicGain.gain.value = flags.music ? 0.20 : 0;
       musicGain.connect(master);
       sfxGain = actx.createGain();
-      sfxGain.gain.value = muted ? 0 : 0.55;
+      sfxGain.gain.value = 0.55;
       sfxGain.connect(master);
       return actx;
     }
     function click(){
-      if (muted || !ensure()) return;
+      if (!flags.click || !ensure()) return;
       var t0 = actx.currentTime;
       var o = actx.createOscillator();
       o.type = 'triangle';
@@ -597,7 +664,7 @@
       o2.start(t0); o2.stop(t0+0.04);
     }
     function flap(){
-      if (muted || !ensure()) return;
+      if (!flags.flap || !ensure()) return;
       var t0 = actx.currentTime;
       var o = actx.createOscillator();
       o.type = 'square';
@@ -710,52 +777,58 @@
       timer = setTimeout(scheduleLoop, 110);
     }
     function startMusic(){
-      if (musicOn || muted || !ensure()) return;
+      if (musicOn || !flags.music || !ensure()) return;
       musicOn = true;
       nextTime = actx.currentTime + 0.05;
       scheduleLoop();
-    }
-    function setMuted(m){
-      muted = !!m;
-      try { localStorage.setItem('grmflap_muted', muted ? '1' : '0'); } catch(e){}
-      if (ensure()) {
-        var now = actx.currentTime;
-        musicGain.gain.cancelScheduledValues(now);
-        sfxGain.gain.cancelScheduledValues(now);
-        musicGain.gain.setTargetAtTime(muted ? 0 : 0.20, now, 0.05);
-        sfxGain.gain.setTargetAtTime(muted ? 0 : 0.55, now, 0.03);
-      }
-      if (!muted) startMusic();
     }
     function pauseMusic(){
       if (!actx || !musicGain) return;
       musicGain.gain.setTargetAtTime(0, actx.currentTime, 0.04);
     }
     function resumeMusic(){
-      if (!actx || !musicGain || muted) return;
-      musicGain.gain.setTargetAtTime(0.20, actx.currentTime, 0.08);
+      if (!flags.music) return;
+      applyMusicGain();
       startMusic();
     }
-    muted = loadMuted();
+    loadFlags();
     return {
-      unlock: function(){ ensure(); if (!muted) startMusic(); },
+      unlock: function(){ ensure(); if (flags.music) startMusic(); },
       click: click,
       flap: flap,
-      setMuted: setMuted,
-      isMuted: function(){ return muted; },
+      isOn: function(name){ return !!flags[name]; },
+      anyOn: function(){ return flags.music || flags.click || flags.flap; },
+      toggle: function(name){
+        if (!flags.hasOwnProperty(name)) return false;
+        flags[name] = !flags[name];
+        saveFlags();
+        if (name === 'music') {
+          applyMusicGain();
+          if (flags.music) startMusic();
+        }
+        return flags[name];
+      },
       pauseMusic: pauseMusic,
       resumeMusic: resumeMusic
     };
   })();
-  function refreshSoundBtn(){
+  function refreshSoundUI(){
     var b = document.getElementById('soundBtn');
-    if (b) b.textContent = AudioFX.isMuted() ? '🔇' : '🔊';
+    if (b) b.textContent = AudioFX.anyOn() ? '🔊' : '🔇';
+    ['music','click','flap'].forEach(function(name){
+      var on = AudioFX.isOn(name);
+      var btn = document.querySelector('.sound-opt[data-sound="'+name+'"]');
+      var st = document.getElementById('soundState' + (name==='click'?'Click': name==='flap'?'Flap':'Music'));
+      if (btn) btn.classList.toggle('off', !on);
+      if (st) st.textContent = on ? t('soundOn') : t('soundOff');
+    });
   }
 
 
   var I18N = {
     en: {
       language:"LANGUAGE", languageSub:"Choose your language", close:"CLOSE",
+      sound:"SOUND", soundSub:"Choose what you hear", soundMusic:"Music", soundButtons:"Buttons", soundFlap:"Flying", soundOn:"ON", soundOff:"OFF",
       tagline:"Tap to keep the coin flying", tapToStart:"TAP TO START",
       scoreHint:"Pass pipes to score points and climb the leaderboards",
       oops:"OOPS!", score:"Score", endRun:"END RUN", gameOver:"GAME OVER",
@@ -791,6 +864,7 @@
     },
     ru: {
       language:"ЯЗЫК", languageSub:"Выберите язык", close:"ЗАКРЫТЬ",
+      sound:"ЗВУК", soundSub:"Выберите, что слышать", soundMusic:"Музыка", soundButtons:"Кнопки", soundFlap:"Полёт", soundOn:"ВКЛ", soundOff:"ВЫКЛ",
       tagline:"Нажимайте, чтобы монета летала", tapToStart:"НАЖМИТЕ, ЧТОБЫ НАЧАТЬ",
       scoreHint:"Пролетайте трубы, копите очки и поднимайтесь в таблице лидеров",
       oops:"УПС!", score:"Счёт", endRun:"ЗАВЕРШИТЬ", gameOver:"ИГРА ОКОНЧЕНА",
@@ -826,6 +900,7 @@
     },
     uk: {
       language:"МОВА", languageSub:"Оберіть мову", close:"ЗАКРИТИ",
+      sound:"ЗВУК", soundSub:"Оберіть, що чути", soundMusic:"Музика", soundButtons:"Кнопки", soundFlap:"Політ", soundOn:"УВІМК", soundOff:"ВИМК",
       tagline:"Натискайте, щоб монета летіла", tapToStart:"НАТИСНІТЬ, ЩОБ ПОЧАТИ",
       scoreHint:"Пролітайте труби, збирайте очки й піднімайтесь у рейтингу",
       oops:"ОП!", score:"Рахунок", endRun:"ЗАВЕРШИТИ", gameOver:"ГРУ ЗАВЕРШЕНО",
@@ -861,6 +936,7 @@
     },
     zh: {
       language:"语言", languageSub:"选择语言", close:"关闭",
+      sound:"声音", soundSub:"选择要听到的声音", soundMusic:"音乐", soundButtons:"按钮", soundFlap:"飞行", soundOn:"开", soundOff:"关",
       tagline:"点击让金币保持飞行", tapToStart:"点击开始",
       scoreHint:"穿过管道获得分数，冲击排行榜",
       oops:"哎呀！", score:"分数", endRun:"结束本局", gameOver:"游戏结束",
@@ -896,6 +972,7 @@
     },
     hi: {
       language:"भाषा", languageSub:"अपनी भाषा चुनें", close:"बंद करें",
+      sound:"आवाज़", soundSub:"क्या सुनना है चुनें", soundMusic:"संगीत", soundButtons:"बटन", soundFlap:"उड़ान", soundOn:"चालू", soundOff:"बंद",
       tagline:"सिक्के को उड़ाने के लिए टैप करें", tapToStart:"शुरू करने के लिए टैप करें",
       scoreHint:"पाइप पार कर अंक कमाएँ और लीडरबोर्ड पर चढ़ें",
       oops:"ओह!", score:"स्कोर", endRun:"रन समाप्त", gameOver:"खेल खत्म",
@@ -942,6 +1019,7 @@
       if (k) el.textContent = t(k);
     });
     document.getElementById("langBtn").textContent = LANG_FLAGS[lang] || "🌐";
+    if (typeof refreshSoundUI === "function") refreshSoundUI();
     document.querySelectorAll(".lang-opt").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
     });
@@ -997,23 +1075,38 @@
   }
   if (DEMO_MODE) setSyncBadge('DEMO — no server configured', 'err');
 
-  refreshSoundBtn();
+  var soundCard = document.getElementById('soundCard');
+  refreshSoundUI();
   document.getElementById('soundBtn').addEventListener('click', function(e){
     e.preventDefault();
     e.stopPropagation();
     AudioFX.unlock();
-    AudioFX.setMuted(!AudioFX.isMuted());
-    refreshSoundBtn();
+    if (langCard) langCard.classList.add('hidden');
+    refreshSoundUI();
+    soundCard.classList.toggle('hidden');
+  });
+  document.getElementById('soundCloseBtn').addEventListener('click', function(){
+    soundCard.classList.add('hidden');
+  });
+  document.querySelectorAll('.sound-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      AudioFX.unlock();
+      AudioFX.toggle(btn.getAttribute('data-sound'));
+      refreshSoundUI();
+    });
   });
   document.addEventListener('pointerdown', function(){ AudioFX.unlock(); }, true);
   document.addEventListener('click', function(e){
     AudioFX.unlock();
     var el = e.target.closest ? e.target.closest('button') : null;
-    if (el && el.id !== 'soundBtn') AudioFX.click();
+    if (!el) return;
+    if (el.id === 'soundBtn' || el.id === 'soundCloseBtn' || el.classList.contains('sound-opt')) return;
+    AudioFX.click();
   }, true);
 
 
   document.getElementById('langBtn').addEventListener('click', function(){
+    if (soundCard) soundCard.classList.add('hidden');
     langCard.classList.toggle('hidden');
   });
   document.getElementById('langCloseBtn').addEventListener('click', function(){
@@ -1493,6 +1586,7 @@
       ['profile','wallet','leaderboard','tasks'].forEach(function(p){
         document.getElementById('page-'+p).classList.toggle('hidden', page !== p);
       });
+      if (page !== 'profile' && soundCard) soundCard.classList.add('hidden');
       if (page === 'profile') loadProfilePage();
       if (page === 'wallet') loadWalletPage();
       if (page === 'leaderboard') loadLeaderboardPage(false);
@@ -1667,5 +1761,5 @@
   requestAnimationFrame(loop);
 })();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31367bdfc7e72df',t:'MTc4Nzc1MzI3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
