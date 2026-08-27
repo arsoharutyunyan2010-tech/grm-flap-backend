@@ -562,6 +562,14 @@
     letter-spacing: 0.4px;
     color: #f4c542;
   }
+  .pvp-credit{
+    margin: 12px 0 6px;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #ffe9a8;
+    font-weight: 700;
+  }
+  .pvp-credit .coin-on-gold{ margin: 0 2px; }
   .rate-glow{
     display:flex; align-items:center; justify-content:center;
   }
@@ -644,6 +652,15 @@
     </div>
   </div>
 
+  <div class="overlay hidden" id="pvpReadyCard">
+    <div class="card">
+      <div class="title" data-i18n="pvpAskReady">Are you ready?</div>
+      <div class="pvp-vs" id="pvpReadyVs"></div>
+      <div class="hint" id="pvpReadyHint"></div>
+      <button id="pvpReadyBtn" data-i18n="pvpReadyBtn">READY</button>
+    </div>
+  </div>
+
   <div class="overlay hidden" id="pvpInfoCard">
     <div class="card">
       <div class="title" id="pvpInfoTitle">PVP</div>
@@ -657,7 +674,7 @@
     <div class="card">
       <div class="title" id="pvpResultTitle">PVP</div>
       <div class="pvp-vs" id="pvpResultVs"></div>
-      <div class="rate-glow" id="pvpResultPrize"></div>
+      <div class="pvp-credit hidden" id="pvpResultCredit"></div>
       <button id="pvpResultOk" data-i18n="close">CLOSE</button>
     </div>
   </div>
@@ -1193,7 +1210,7 @@ window.FLAPY_ART = {
       howPvp:"PVP 1 VS 1: pick a C stake and find an opponent. You have 5 seconds to decline. If nobody declines, C is taken. Player 1 flies first, then Player 2. Higher score wins 90% of the bank. Closing the bot after the match starts is a loss — the other player takes the bank.",
       pvpFound:"OPPONENT FOUND", pvpDecline:"DECLINE",
       pvpConfirmHint:"5 seconds to decline. After that the stake is taken and the match starts.",
-      pvpYouWin:"You won! Take the prize.", pvpYouLose:"You lost. Try next time.", pvpDraw:"Draw. Prize split.",
+      pvpYouWin:"You won!", pvpCredited:"Coins were added to your account", pvpAskReady:"Are you ready?", pvpReadyBtn:"READY", pvpWaitReady:"Waiting for opponent…", pvpYouLose:"You lost. Try next time.", pvpDraw:"Draw. Prize split.",
       pvpP1Score:"Opponent scored", pvpBeat:"Beat that score!",
       rotateTitle:"Hold the phone upright", rotateHint:"Landscape is not supported. Please rotate your phone to play.",
       scoreHint:"Pass pipes to score points and climb the leaderboards",
@@ -1245,7 +1262,7 @@ window.FLAPY_ART = {
       howPvp:"PVP 1 VS 1: выберите ставку C и найдите соперника. 5 секунд, чтобы отказаться. Если никто не отказался — C списывается. Сначала играет игрок 1, затем игрок 2. Больший счёт забирает 90% банка. Закрыть бота после старта — поражение, соперник забирает банк.",
       pvpFound:"СОПЕРНИК НАЙДЕН", pvpDecline:"ОТКАЗАТЬСЯ",
       pvpConfirmHint:"5 секунд на отказ. Затем ставка списывается и матч начинается.",
-      pvpYouWin:"Вы выиграли! Заберите приз.", pvpYouLose:"Вы проиграли. Попробуйте ещё раз.", pvpDraw:"Ничья. Приз поделён.",
+      pvpYouWin:"Вы победили", pvpCredited:"Монеты успешно добавлены на ваш счёт", pvpAskReady:"Вы готовы?", pvpReadyBtn:"ГОТОВ", pvpWaitReady:"Ждём соперника…", pvpYouLose:"Вы проиграли. Попробуйте ещё раз.", pvpDraw:"Ничья. Приз поделён.",
       pvpP1Score:"Соперник набрал", pvpBeat:"Побейте этот счёт!",
       rotateTitle:"Держите телефон вертикально", rotateHint:"Горизонтально играть нельзя. Поверните телефон прямо.",
       scoreHint:"Пролетайте трубы, копите очки и поднимайтесь в таблице лидеров",
@@ -1297,7 +1314,7 @@ window.FLAPY_ART = {
       howPvp:"PVP 1 VS 1: оберіть ставку C і знайдіть суперника. 5 секунд, щоб відмовитись. Якщо ніхто не відмовився — C списується. Спочатку гравець 1, потім гравець 2. Більший рахунок забирає 90% банку. Закрити бота після старту — поразка, суперник забирає банк.",
       pvpFound:"СУПЕРНИКА ЗНАЙДЕНО", pvpDecline:"ВІДМОВИТИСЬ",
       pvpConfirmHint:"5 секунд на відмову. Потім ставка списується і матч починається.",
-      pvpYouWin:"Ви виграли! Заберіть приз.", pvpYouLose:"Ви програли. Спробуйте ще раз.", pvpDraw:"Нічия. Приз поділено.",
+      pvpYouWin:"Ви перемогли", pvpCredited:"Монети успішно додані на ваш рахунок", pvpAskReady:"Ви готові?", pvpReadyBtn:"ГОТОВИЙ", pvpWaitReady:"Чекаємо суперника…", pvpYouLose:"Ви програли. Спробуйте ще раз.", pvpDraw:"Нічия. Приз поділено.",
       pvpP1Score:"Суперник набрав", pvpBeat:"Побійте цей рахунок!",
       rotateTitle:"Тримайте телефон вертикально", rotateHint:"Горизонтально грати не можна. Поверніть телефон прямо.",
       scoreHint:"Пролітайте труби, збирайте очки й піднімайтесь у рейтингу",
@@ -1349,7 +1366,7 @@ window.FLAPY_ART = {
       howPvp:"PVP 1 VS 1：用 C 下注并匹配对手。有 5 秒可以拒绝。没人拒绝后扣除 C。玩家1先飞，再轮到玩家2。高分拿走奖池的 90%。开局后关闭机器人算输，对方拿走奖池。",
       pvpFound:"找到对手", pvpDecline:"拒绝",
       pvpConfirmHint:"5 秒内可拒绝。之后扣除下注并开始比赛。",
-      pvpYouWin:"你赢了！拿走奖金。", pvpYouLose:"你输了，下次再试。", pvpDraw:"平局。奖金平分。",
+      pvpYouWin:"你赢了", pvpCredited:"金币已成功加入你的账户", pvpAskReady:"准备好了吗？", pvpReadyBtn:"准备", pvpWaitReady:"等待对手…", pvpYouLose:"你输了，下次再试。", pvpDraw:"平局。奖金平分。",
       pvpP1Score:"对手得分", pvpBeat:"超过这个分数！",
       rotateTitle:"请竖着拿手机", rotateHint:"不支持横屏。请把手机转回竖屏再玩。",
       scoreHint:"穿过管道获得分数，冲击排行榜",
@@ -1401,7 +1418,7 @@ window.FLAPY_ART = {
       howPvp:"PVP 1 VS 1: C दांव चुनें और प्रतिद्वंद्वी खोजें। 5 सेकंड में मना कर सकते हैं। नहीं तो C कटता है। पहले प्लेयर 1, फिर प्लेयर 2। ऊँचा स्कोर बैंक का 90% पाता है। शुरू के बाद बॉट बंद करना हार है — दूसरा खिलाड़ी बैंक ले लेता है।",
       pvpFound:"प्रतिद्वंद्वी मिला", pvpDecline:"मना करें",
       pvpConfirmHint:"मना करने के लिए 5 सेकंड। उसके बाद दांव कटेगा और मैच शुरू होगा।",
-      pvpYouWin:"आप जीत गए! इनाम लें।", pvpYouLose:"आप हारे। अगली बार कोशिश करें।", pvpDraw:"ड्रॉ। इनाम बँटा।",
+      pvpYouWin:"आप जीत गए", pvpCredited:"सिक्के आपके खाते में जोड़ दिए गए", pvpAskReady:"तैयार हैं?", pvpReadyBtn:"तैयार", pvpWaitReady:"प्रतिद्वंद्वी का इंतज़ार…", pvpYouLose:"आप हारे। अगली बार कोशिश करें।", pvpDraw:"ड्रॉ। इनाम बँटा।",
       pvpP1Score:"प्रतिद्वंद्वी का स्कोर", pvpBeat:"इस स्कोर को मात दें!",
       rotateTitle:"फ़ोन सीधा पकड़ें", rotateHint:"आड़ा मोड में नहीं खेल सकते। फ़ोन को सीधा करें।",
       scoreHint:"पाइप पार कर अंक कमाएँ और लीडरबोर्ड पर चढ़ें",
@@ -2055,7 +2072,16 @@ window.FLAPY_ART = {
     hideGameOverlays();
     startGameAfterAds();
   });
-  document.getElementById('pvpResultOk').addEventListener('click', function(){ showMode(); });
+  document.getElementById('pvpResultOk').addEventListener('click', function(){
+    apiFetch('/api/pvp/ack', { method:'POST', body: JSON.stringify({ initData: initData }) }).catch(function(){});
+    showMode();
+  });
+  document.getElementById('pvpReadyBtn').addEventListener('click', function(){
+    document.getElementById('pvpReadyBtn').disabled = true;
+    apiFetch('/api/pvp/ready', { method:'POST', body: JSON.stringify({ initData: initData }) })
+      .then(function(res){ document.getElementById('pvpReadyBtn').disabled = false; applyPvpState(res); startPvpPoll(); })
+      .catch(function(){ document.getElementById('pvpReadyBtn').disabled = false; });
+  });
   document.getElementById('howBtn').addEventListener('click', function(){
     document.getElementById('howCard').classList.remove('hidden');
   });
@@ -2438,7 +2464,7 @@ window.FLAPY_ART = {
         r: 0.35+Math.random()*1.9,
         ph: Math.random()*6.28,
         sp: 0.35+Math.random()*1.6,
-        spark: Math.random()>0.72
+        spark: Math.random()>0.68
       });
     }
   }
@@ -2447,20 +2473,20 @@ window.FLAPY_ART = {
     ctx.save();
     for (var i=0;i<skyStars.length;i++){
       var s = skyStars[i];
-      var tw = 0.5 + 0.5 * Math.sin(elapsedMs/380*s.sp + s.ph);
-      var pulse = Math.pow(tw, 1.6);
-      var a = 0.12 + 0.88 * pulse;
-      var x = s.x*viewW, y = s.y*viewH, r = s.r * (0.75 + 0.55*pulse);
+      var tw = 0.5 + 0.5 * Math.sin(elapsedMs/420*s.sp + s.ph);
+      var pulse = Math.pow(tw, 1.45);
+      var a = 0.16 + 0.78 * pulse;
+      var x = s.x*viewW, y = s.y*viewH, r = s.r * (0.78 + 0.48*pulse);
       ctx.globalAlpha = a;
       ctx.fillStyle = s.spark ? '#fff6c8' : '#ffe9a0';
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI*2);
       ctx.fill();
-      if (s.spark && pulse > 0.55) {
-        ctx.globalAlpha = a * 0.85;
+      if (s.spark && pulse > 0.5) {
+        ctx.globalAlpha = a * 0.8;
         ctx.strokeStyle = '#fff8dc';
-        ctx.lineWidth = 0.7;
-        var arm = r * (3.2 + 2.2*pulse);
+        ctx.lineWidth = 0.65;
+        var arm = r * (3.0 + 1.8*pulse);
         ctx.beginPath();
         ctx.moveTo(x, y-arm); ctx.lineTo(x, y+arm);
         ctx.moveTo(x-arm, y); ctx.lineTo(x+arm, y);
@@ -2529,7 +2555,7 @@ window.FLAPY_ART = {
     el.innerHTML = '<span>'+v+'</span>' + coinImg(kind);
   }
   function hideGameOverlays(){
-    ['modeCard','pvpCard','pvpWaitCard','pvpConfirmCard','pvpInfoCard','pvpResultCard','startCard','overCard','howCard'].forEach(function(id){
+    ['modeCard','pvpCard','pvpWaitCard','pvpConfirmCard','pvpReadyCard','pvpInfoCard','pvpResultCard','startCard','overCard','howCard'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.classList.add('hidden');
     });
@@ -2571,6 +2597,11 @@ window.FLAPY_ART = {
   function stopPvpHeartbeat(){
     if (pvpBeatTimer) { clearInterval(pvpBeatTimer); pvpBeatTimer = null; }
   }
+  function pvpScoreLine(m){
+    var s1 = (m.p1.score==null?'—':m.p1.score);
+    var s2 = (m.p2.score==null?'—':m.p2.score);
+    return (m.p1.name||'P1') + ' — score ' + s1 + '\n' + (m.p2.name||'P2') + ' — score ' + s2;
+  }
   function applyPvpState(data){
     if (!data) return;
     if (data.cBalance != null) {
@@ -2588,7 +2619,7 @@ window.FLAPY_ART = {
       pvpMatchLive = false;
       stopPvpConfirmTick();
       hideGameOverlays();
-      document.getElementById('pvpWaitHint').innerHTML = pvpStake + ' ' + coinImg('c');
+      document.getElementById('pvpWaitHint').innerHTML = pvpStake + ' <span class="coin-on-gold">' + coinImg('c') + '</span>';
       document.getElementById('pvpWaitCard').classList.remove('hidden');
       return;
     }
@@ -2610,6 +2641,23 @@ window.FLAPY_ART = {
       return;
     }
     stopPvpConfirmTick();
+    if (m.status === 'ready_wait') {
+      pvpMatchLive = true;
+      startPvpHeartbeat();
+      startPvpPoll();
+      hideGameOverlays();
+      document.getElementById('pvpReadyVs').textContent = (m.p1.name||'P1') + ' vs ' + (m.p2.name||'P2');
+      var readyBtn = document.getElementById('pvpReadyBtn');
+      if (m.youReady) {
+        readyBtn.classList.add('hidden');
+        document.getElementById('pvpReadyHint').textContent = t('pvpWaitReady');
+      } else {
+        readyBtn.classList.remove('hidden');
+        document.getElementById('pvpReadyHint').textContent = '';
+      }
+      document.getElementById('pvpReadyCard').classList.remove('hidden');
+      return;
+    }
     if (m.status === 'done') {
       pvpMatchLive = false;
       stopPvpPoll();
@@ -2619,8 +2667,17 @@ window.FLAPY_ART = {
       var youWin = (m.winner === m.youAre);
       var title = m.winner === 'tie' ? t('pvpDraw') : (youWin ? t('pvpYouWin') : t('pvpYouLose'));
       document.getElementById('pvpResultTitle').textContent = title;
-      document.getElementById('pvpResultVs').textContent = (m.p1.name||'P1') + ' ' + (m.p1.score==null?'—':m.p1.score) + '  vs  ' + (m.p2.name||'P2') + ' ' + (m.p2.score==null?'—':m.p2.score);
-      document.getElementById('pvpResultPrize').innerHTML = youWin || m.winner==='tie' ? ('+'+m.winnerPrize+' '+coinImg('c')) : coinImg('c');
+      var vs = document.getElementById('pvpResultVs');
+      vs.style.whiteSpace = 'pre-line';
+      vs.textContent = pvpScoreLine(m);
+      var cred = document.getElementById('pvpResultCredit');
+      if (youWin || m.winner === 'tie') {
+        cred.classList.remove('hidden');
+        cred.innerHTML = t('pvpCredited') + '<br>+' + (m.winnerPrize||0) + ' <span class="coin-on-gold">' + coinImg('c') + '</span>';
+      } else {
+        cred.classList.add('hidden');
+        cred.innerHTML = '';
+      }
       document.getElementById('pvpResultCard').classList.remove('hidden');
       return;
     }
@@ -2633,8 +2690,7 @@ window.FLAPY_ART = {
       document.getElementById('pvpInfoVs').textContent = (m.p1.name||'P1') + ' vs ' + (m.p2.name||'P2');
       var hint = '';
       if (m.youAre === 'p2' && m.p1.score != null) hint = t('pvpP1Score') + ' ' + m.p1.score + ' — ' + t('pvpBeat');
-      else hint = '';
-      document.getElementById('pvpInfoHint').innerHTML = hint;
+      document.getElementById('pvpInfoHint').textContent = hint;
       document.getElementById('pvpGoBtn').classList.remove('hidden');
       document.getElementById('pvpInfoCard').classList.remove('hidden');
     } else {
@@ -2653,7 +2709,7 @@ window.FLAPY_ART = {
     pvpPollTimer = setInterval(function(){
       apiFetch('/api/pvp/status', { method:'POST', body: JSON.stringify({ initData: initData }) })
         .then(applyPvpState).catch(function(){});
-    }, 800);
+    }, 500);
   }
   function pvpLeaveIfNeeded(){
     if (state === 'playing' && pvpMode) {
@@ -2680,5 +2736,5 @@ window.FLAPY_ART = {
   requestAnimationFrame(loop);
 })();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a31d5cdb8f878dfc',t:'MTc4Nzg1NzY4Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
