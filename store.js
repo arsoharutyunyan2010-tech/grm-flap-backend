@@ -40,6 +40,10 @@ const knownUsers = new Set();
 const recentActivity = new Map();
 let totalRuns = 0;
 let saveTimer = null;
+const pvpQueue = new Map();
+const pvpMatches = new Map();
+const pvpByUser = new Map();
+let pvpHouseC = 0;
 
 function currentDayKey(d = new Date()) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD UTC
@@ -92,6 +96,7 @@ function snapshot() {
     knownUsers: Array.from(knownUsers).map(String),
     totalRuns,
     rewardHistory,
+    pvpMatches: Array.from(pvpMatches.values()),
   };
 }
 
@@ -167,6 +172,18 @@ function hydrate(data) {
   rewardHistory.length = 0;
   if (Array.isArray(data.rewardHistory)) {
     for (const row of data.rewardHistory) rewardHistory.push(row);
+  }
+
+  pvpMatches.clear();
+  pvpByUser.clear();
+  if (Array.isArray(data.pvpMatches)) {
+    for (const m of data.pvpMatches) {
+      if (m && m.id && m.status !== 'done') {
+        pvpMatches.set(m.id, m);
+        if (m.p1 && m.p1.userId) pvpByUser.set(String(m.p1.userId), m.id);
+        if (m.p2 && m.p2.userId) pvpByUser.set(String(m.p2.userId), m.id);
+      }
+    }
   }
 }
 
@@ -528,6 +545,171 @@ function getRunStats() {
   return { totalRuns };
 }
 
+const PVP_STAKES = [10, 20, 30, 50, 75, 100, 250, 500, 1000];
+const PVP_TURN_MS = 3 * 60 * 1000;
+
+function newPvpId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+function publicPvp(match, userId) {
+  userId = String(userId);
+  const youAre = match.p1.userId === userId ? 'p1' : (match.p2.userId === userId ? 'p2' : null);
+  return {
+    id: match.id,
+    stake: match.stake,
+    bank: match.bank,
+    prize: Math.floor(match.bank * 0.9),
+    status: match.status,
+    turn: match.turn,
+    youAre,
+    yourTurn: !!(youAre && match.turn === youAre && (match.status === 'p1_playing' || match.status === 'p2_playing')),
+    p1: { name: match.p1.name, score: match.p1.score },
+    p2: { name: match.p2.name, score: match.p2.score },
+    winner: match.winner || null,
+    winnerPrize: match.winnerPrize || 0,
+    cBalance: getCBalance(userId),
+  };
+}
+
+function pvpResolve(match) {
+  const s1 = Number(match.p1.score) || 0;
+  const s2 = Number(match.p2.score) || 0;
+  const house = Math.floor(match.bank * 0.1);
+  const prize = match.bank - house;
+  pvpHouseC += house;
+  if (s1 > s2) {
+    match.winner = 'p1';
+    match.winnerPrize = prize;
+    creditCBalance(match.p1.userId, prize);
+  } else if (s2 > s1) {
+    match.winner = 'p2';
+    match.winnerPrize = prize;
+    creditCBalance(match.p2.userId, prize);
+  } else {
+    match.winner = 'tie';
+    const half = Math.floor(prize / 2);
+    match.winnerPrize = half;
+    creditCBalance(match.p1.userId, half);
+    creditCBalance(match.p2.userId, prize - half);
+  }
+  match.status = 'done';
+  match.turn = null;
+  pvpByUser.delete(String(match.p1.userId));
+  pvpByUser.delete(String(match.p2.userId));
+  scheduleSave();
+}
+
+function pvpSweepTimeouts() {
+  const now = Date.now();
+  for (const match of pvpMatches.values()) {
+    if (match.status === 'p1_playing' && match.p1Deadline && now > match.p1Deadline && match.p1.score == null) {
+      match.p1.score = 0;
+      match.status = 'p2_playing';
+      match.turn = 'p2';
+      match.p2Deadline = now + PVP_TURN_MS;
+      scheduleSave();
+    }
+    if (match.status === 'p2_playing' && match.p2Deadline && now > match.p2Deadline && match.p2.score == null) {
+      match.p2.score = 0;
+      pvpResolve(match);
+    }
+  }
+}
+
+function pvpJoin(userId, name, stake) {
+  userId = String(userId);
+  stake = Number(stake);
+  if (PVP_STAKES.indexOf(stake) < 0) return { ok: false, error: 'invalid stake' };
+  pvpSweepTimeouts();
+  const existingId = pvpByUser.get(userId);
+  if (existingId && pvpMatches.has(existingId)) {
+    const m = pvpMatches.get(existingId);
+    if (m.status !== 'done') return { ok: true, match: publicPvp(m, userId) };
+  }
+  if (getCBalance(userId) < stake) return { ok: false, error: 'insufficient C' };
+
+  for (const [st, list] of pvpQueue) {
+    pvpQueue.set(st, (list || []).filter((x) => x.userId !== userId));
+  }
+
+  let q = (pvpQueue.get(stake) || []).filter((x) => Date.now() - x.joinedAt < 10 * 60 * 1000 && x.userId !== userId);
+  if (q.length) {
+    const idx = Math.floor(Math.random() * q.length);
+    const opp = q.splice(idx, 1)[0];
+    pvpQueue.set(stake, q);
+    if (getCBalance(userId) < stake || getCBalance(opp.userId) < stake) {
+      return { ok: false, error: 'insufficient C' };
+    }
+    creditCBalance(userId, -stake);
+    creditCBalance(opp.userId, -stake);
+    const match = {
+      id: newPvpId(),
+      stake,
+      bank: stake * 2,
+      p1: { userId, name: name || 'Player', score: null },
+      p2: { userId: String(opp.userId), name: opp.name || 'Player', score: null },
+      turn: 'p1',
+      status: 'p1_playing',
+      createdAt: Date.now(),
+      p1Deadline: Date.now() + PVP_TURN_MS,
+    };
+    pvpMatches.set(match.id, match);
+    pvpByUser.set(userId, match.id);
+    pvpByUser.set(String(opp.userId), match.id);
+    scheduleSave();
+    return { ok: true, match: publicPvp(match, userId) };
+  }
+  q.push({ userId, name: name || 'Player', joinedAt: Date.now() });
+  pvpQueue.set(stake, q);
+  return { ok: true, waiting: true, stake, cBalance: getCBalance(userId) };
+}
+
+function pvpCancel(userId) {
+  userId = String(userId);
+  for (const [st, list] of pvpQueue) {
+    pvpQueue.set(st, (list || []).filter((x) => x.userId !== userId));
+  }
+  return { ok: true, cBalance: getCBalance(userId) };
+}
+
+function pvpStatus(userId) {
+  userId = String(userId);
+  pvpSweepTimeouts();
+  const id = pvpByUser.get(userId);
+  if (id && pvpMatches.has(id)) return { ok: true, match: publicPvp(pvpMatches.get(id), userId) };
+  for (const [st, list] of pvpQueue) {
+    if ((list || []).some((x) => x.userId === userId)) {
+      return { ok: true, waiting: true, stake: st, cBalance: getCBalance(userId) };
+    }
+  }
+  return { ok: true, idle: true, cBalance: getCBalance(userId) };
+}
+
+function pvpSubmitScore(userId, score) {
+  userId = String(userId);
+  score = Math.max(0, Math.floor(Number(score) || 0));
+  pvpSweepTimeouts();
+  const id = pvpByUser.get(userId);
+  if (!id || !pvpMatches.has(id)) return { ok: false, error: 'no match' };
+  const match = pvpMatches.get(id);
+  if (match.status === 'done') return { ok: true, match: publicPvp(match, userId) };
+  if (match.status === 'p1_playing' && match.p1.userId === userId && match.p1.score == null) {
+    match.p1.score = score;
+    match.status = 'p2_playing';
+    match.turn = 'p2';
+    match.p2Deadline = Date.now() + PVP_TURN_MS;
+    scheduleSave();
+    return { ok: true, match: publicPvp(match, userId) };
+  }
+  if (match.status === 'p2_playing' && match.p2.userId === userId && match.p2.score == null) {
+    match.p2.score = score;
+    pvpResolve(match);
+    return { ok: true, match: publicPvp(match, userId) };
+  }
+  return { ok: false, error: 'not your turn' };
+}
+
 module.exports = {
   currentDayKey, currentWeekKey, currentMonthKey, periodKey,
   createSession, getSession, consumeSession,
@@ -540,6 +722,7 @@ module.exports = {
   requestWithdrawal, listWithdrawals, markWithdrawalPaid,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
+  pvpJoin, pvpCancel, pvpStatus, pvpSubmitScore, PVP_STAKES,
   dataFile: DATA_FILE,
   ready,
   flush: saveNow,
