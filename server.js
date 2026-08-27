@@ -35,6 +35,11 @@ try {
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+const INDEX_FILE = path.join(__dirname, 'index.html');
+app.get(['/', '/index.html'], (req, res, next) => {
+  if (fs.existsSync(INDEX_FILE)) return res.sendFile(INDEX_FILE);
+  next();
+});
 app.use(express.static(__dirname));
 
 const sessionNames = new Map();
@@ -174,7 +179,8 @@ app.post('/api/profile', (req, res) => {
     name: displayName(user),
     best: store.getAllTimeBest(userId),
     flapBalance: store.getBalance(userId),
-    depositAddress: process.env.DEPOSIT_TON_ADDRESS || '',
+    cBalance: store.getCBalance(userId),
+    depositAddress: process.env.DEPOSIT_TON_ADDRESS || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd',
     rank: ranks.week,
     ranks,
     dayKey: store.currentDayKey(),
@@ -246,6 +252,7 @@ app.post('/api/deposit', (req, res) => {
     amount,
     usd: amount / 100,
     flapBalance: store.getBalance(userId),
+    cBalance: store.getCBalance(userId),
   });
 });
 
@@ -278,7 +285,7 @@ app.post('/internal/deposits/:id/approve', (req, res) => {
   if (!requireAdmin(req, res)) return;
   const result = store.approveDeposit(Number(req.params.id));
   if (!result) return res.status(404).json({ error: 'not found or already handled' });
-  res.json({ ok: true, deposit: result.deposit, flapBalance: result.balance });
+  res.json({ ok: true, deposit: result.deposit, flapBalance: store.getBalance(result.deposit.userId), cBalance: result.cBalance != null ? result.cBalance : result.balance });
 });
 
 app.post('/internal/deposits/:id/reject', (req, res) => {
