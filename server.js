@@ -329,6 +329,31 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
   res.json(result);
 });
 
+app.post('/api/pvp/join', (req, res) => {
+  const user = authenticate(req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  const result = store.pvpJoin(String(user.id), displayName(user), Number(req.body.stake));
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json(result);
+});
+app.post('/api/pvp/cancel', (req, res) => {
+  const user = authenticate(req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  res.json(store.pvpCancel(String(user.id)));
+});
+app.post('/api/pvp/status', (req, res) => {
+  const user = authenticate(req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  res.json(store.pvpStatus(String(user.id)));
+});
+app.post('/api/pvp/submit', (req, res) => {
+  const user = authenticate(req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  const result = store.pvpSubmitScore(String(user.id), req.body.score);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json(result);
+});
+
 const PORT = process.env.PORT || 3000;
 const start = store.ready || Promise.resolve();
 start.then(() => {
