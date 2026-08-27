@@ -547,6 +547,8 @@ function getRunStats() {
 
 const PVP_STAKES = [10, 20, 30, 50, 75, 100, 250, 500, 1000];
 const PVP_TURN_MS = 3 * 60 * 1000;
+const PVP_CONFIRM_MS = 5000;
+const PVP_AFK_MS = 20 * 1000;
 
 function newPvpId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
@@ -562,14 +564,91 @@ function publicPvp(match, userId) {
     prize: Math.floor(match.bank * 0.9),
     status: match.status,
     turn: match.turn,
+    paid: !!match.paid,
+    confirmUntil: match.confirmUntil || 0,
+    forfeit: !!match.forfeit,
     youAre,
     yourTurn: !!(youAre && match.turn === youAre && (match.status === 'p1_playing' || match.status === 'p2_playing')),
-    p1: { name: match.p1.name, score: match.p1.score },
-    p2: { name: match.p2.name, score: match.p2.score },
+    youReady: !!(youAre && match[youAre] && match[youAre].ready),
+    p1: { name: match.p1.name, score: match.p1.score, ready: !!match.p1.ready },
+    p2: { name: match.p2.name, score: match.p2.score, ready: !!match.p2.ready },
     winner: match.winner || null,
     winnerPrize: match.winnerPrize || 0,
     cBalance: getCBalance(userId),
   };
+}
+
+function pvpClearUser(userId) {
+  pvpByUser.delete(String(userId));
+}
+
+function pvpRequeue(userId, name, stake) {
+  if (getCBalance(userId) < stake) return;
+  let q = pvpQueue.get(stake) || [];
+  if (q.some((x) => x.userId === String(userId))) return;
+  q.push({ userId: String(userId), name: name || 'Player', joinedAt: Date.now() });
+  pvpQueue.set(stake, q);
+}
+
+function pvpDropMatch(match) {
+  pvpMatches.delete(match.id);
+  if (match.p1) pvpClearUser(match.p1.userId);
+  if (match.p2) pvpClearUser(match.p2.userId);
+}
+
+function pvpAbortConfirm(match, declinedUserId) {
+  if (!match || match.status !== 'confirming' || match.paid) return;
+  const d = String(declinedUserId);
+  const other = match.p1.userId === d ? match.p2 : match.p1;
+  pvpDropMatch(match);
+  if (other && other.userId !== d) pvpRequeue(other.userId, other.name, match.stake);
+  scheduleSave();
+}
+
+function pvpPayAndStart(match) {
+  if (!match || match.status !== 'confirming' || match.paid) return;
+  const s = match.stake;
+  if (getCBalance(match.p1.userId) < s || getCBalance(match.p2.userId) < s) {
+    pvpDropMatch(match);
+    scheduleSave();
+    return;
+  }
+  creditCBalance(match.p1.userId, -s);
+  creditCBalance(match.p2.userId, -s);
+  match.paid = true;
+  match.bank = s * 2;
+  match.status = 'ready_wait';
+  match.turn = null;
+  match.p1.ready = false;
+  match.p2.ready = false;
+  match.p1.lastSeen = Date.now();
+  match.p2.lastSeen = Date.now();
+  scheduleSave();
+}
+
+function pvpBeginP1(match) {
+  match.status = 'p1_playing';
+  match.turn = 'p1';
+  match.p1Deadline = Date.now() + PVP_TURN_MS;
+  match.p1.lastSeen = Date.now();
+  match.p2.lastSeen = Date.now();
+  scheduleSave();
+}
+
+function pvpFinishForfeit(match, loserId) {
+  if (!match || match.status === 'done') return;
+  loserId = String(loserId);
+  const winnerIsP1 = match.p1.userId !== loserId;
+  const winner = winnerIsP1 ? match.p1 : match.p2;
+  const prize = match.paid ? match.bank : 0;
+  match.forfeit = true;
+  match.winner = winnerIsP1 ? 'p1' : 'p2';
+  match.winnerPrize = prize;
+  if (prize) creditCBalance(winner.userId, prize);
+  match.status = 'done';
+  match.turn = null;
+  match.resultUntil = Date.now() + 3 * 60 * 1000;
+  scheduleSave();
 }
 
 function pvpResolve(match) {
@@ -595,24 +674,36 @@ function pvpResolve(match) {
   }
   match.status = 'done';
   match.turn = null;
-  pvpByUser.delete(String(match.p1.userId));
-  pvpByUser.delete(String(match.p2.userId));
+  match.resultUntil = Date.now() + 3 * 60 * 1000;
   scheduleSave();
 }
 
 function pvpSweepTimeouts() {
   const now = Date.now();
-  for (const match of pvpMatches.values()) {
-    if (match.status === 'p1_playing' && match.p1Deadline && now > match.p1Deadline && match.p1.score == null) {
-      match.p1.score = 0;
-      match.status = 'p2_playing';
-      match.turn = 'p2';
-      match.p2Deadline = now + PVP_TURN_MS;
-      scheduleSave();
+  for (const match of Array.from(pvpMatches.values())) {
+    if (match.status === 'done') {
+      if (match.resultUntil && now > match.resultUntil) pvpDropMatch(match);
+      continue;
     }
-    if (match.status === 'p2_playing' && match.p2Deadline && now > match.p2Deadline && match.p2.score == null) {
-      match.p2.score = 0;
-      pvpResolve(match);
+    if (match.status === 'confirming' && match.confirmUntil && now >= match.confirmUntil) {
+      pvpPayAndStart(match);
+      continue;
+    }
+    if (match.status === 'ready_wait') {
+      const afk1 = match.p1.lastSeen && now - match.p1.lastSeen > PVP_AFK_MS && !match.p1.ready;
+      const afk2 = match.p2.lastSeen && now - match.p2.lastSeen > PVP_AFK_MS && !match.p2.ready;
+      if (afk1) pvpFinishForfeit(match, match.p1.userId);
+      else if (afk2) pvpFinishForfeit(match, match.p2.userId);
+      continue;
+    }
+    if (match.status === 'p1_playing' && match.p1.score == null) {
+      const afk = match.p1.lastSeen && now - match.p1.lastSeen > PVP_AFK_MS;
+      const late = match.p1Deadline && now > match.p1Deadline;
+      if (afk || late) pvpFinishForfeit(match, match.p1.userId);
+    } else if (match.status === 'p2_playing' && match.p2.score == null) {
+      const afk = match.p2.lastSeen && now - match.p2.lastSeen > PVP_AFK_MS;
+      const late = match.p2Deadline && now > match.p2Deadline;
+      if (afk || late) pvpFinishForfeit(match, match.p2.userId);
     }
   }
 }
@@ -625,7 +716,8 @@ function pvpJoin(userId, name, stake) {
   const existingId = pvpByUser.get(userId);
   if (existingId && pvpMatches.has(existingId)) {
     const m = pvpMatches.get(existingId);
-    if (m.status !== 'done') return { ok: true, match: publicPvp(m, userId) };
+    if (m.status && m.status !== 'done') return { ok: true, match: publicPvp(m, userId) };
+    pvpByUser.delete(userId);
   }
   if (getCBalance(userId) < stake) return { ok: false, error: 'insufficient C' };
 
@@ -641,18 +733,18 @@ function pvpJoin(userId, name, stake) {
     if (getCBalance(userId) < stake || getCBalance(opp.userId) < stake) {
       return { ok: false, error: 'insufficient C' };
     }
-    creditCBalance(userId, -stake);
-    creditCBalance(opp.userId, -stake);
+    const now = Date.now();
     const match = {
       id: newPvpId(),
       stake,
       bank: stake * 2,
-      p1: { userId, name: name || 'Player', score: null },
-      p2: { userId: String(opp.userId), name: opp.name || 'Player', score: null },
-      turn: 'p1',
-      status: 'p1_playing',
-      createdAt: Date.now(),
-      p1Deadline: Date.now() + PVP_TURN_MS,
+      paid: false,
+      p1: { userId, name: name || 'Player', score: null, lastSeen: now },
+      p2: { userId: String(opp.userId), name: opp.name || 'Player', score: null, lastSeen: now },
+      turn: null,
+      status: 'confirming',
+      createdAt: now,
+      confirmUntil: now + PVP_CONFIRM_MS,
     };
     pvpMatches.set(match.id, match);
     pvpByUser.set(userId, match.id);
@@ -671,6 +763,76 @@ function pvpCancel(userId) {
     pvpQueue.set(st, (list || []).filter((x) => x.userId !== userId));
   }
   return { ok: true, cBalance: getCBalance(userId) };
+}
+
+function pvpDecline(userId) {
+  userId = String(userId);
+  pvpSweepTimeouts();
+  const id = pvpByUser.get(userId);
+  if (id && pvpMatches.has(id)) {
+    const m = pvpMatches.get(id);
+    if (m.status === 'confirming' && !m.paid) pvpAbortConfirm(m, userId);
+  }
+  pvpCancel(userId);
+  return { ok: true, idle: true, cBalance: getCBalance(userId) };
+}
+
+function pvpReady(userId) {
+  userId = String(userId);
+  pvpSweepTimeouts();
+  const id = pvpByUser.get(userId);
+  if (!id || !pvpMatches.has(id)) return { ok: false, error: 'no match' };
+  const match = pvpMatches.get(id);
+  if (match.status === 'confirming') pvpPayAndStart(match);
+  if (match.status !== 'ready_wait') return { ok: true, match: publicPvp(match, userId) };
+  if (match.p1.userId === userId) match.p1.ready = true;
+  if (match.p2.userId === userId) match.p2.ready = true;
+  match.p1.lastSeen = match.p1.userId === userId ? Date.now() : match.p1.lastSeen;
+  match.p2.lastSeen = match.p2.userId === userId ? Date.now() : match.p2.lastSeen;
+  if (match.p1.ready && match.p2.ready) pvpBeginP1(match);
+  else scheduleSave();
+  return { ok: true, match: publicPvp(match, userId) };
+}
+
+function pvpAck(userId) {
+  userId = String(userId);
+  const id = pvpByUser.get(userId);
+  if (id && pvpMatches.has(id)) {
+    const m = pvpMatches.get(id);
+    if (m.status === 'done') pvpByUser.delete(userId);
+  }
+  return { ok: true, idle: true, cBalance: getCBalance(userId) };
+}
+
+function pvpForfeit(userId) {
+  userId = String(userId);
+  pvpSweepTimeouts();
+  const id = pvpByUser.get(userId);
+  if (!id || !pvpMatches.has(id)) return { ok: true, idle: true, cBalance: getCBalance(userId) };
+  const m = pvpMatches.get(id);
+  if (m.status === 'done') return { ok: true, match: publicPvp(m, userId) };
+  if (m.status === 'confirming' && !m.paid) {
+    pvpAbortConfirm(m, userId);
+    return { ok: true, idle: true, cBalance: getCBalance(userId) };
+  }
+  if (m.paid && (m.status === 'p1_playing' || m.status === 'p2_playing' || m.status === 'ready_wait')) {
+    pvpFinishForfeit(m, userId);
+    return { ok: true, match: publicPvp(m, userId) };
+  }
+  return { ok: true, match: publicPvp(m, userId) };
+}
+
+function pvpHeartbeat(userId) {
+  userId = String(userId);
+  pvpSweepTimeouts();
+  const id = pvpByUser.get(userId);
+  if (id && pvpMatches.has(id)) {
+    const m = pvpMatches.get(id);
+    if (m.p1.userId === userId) m.p1.lastSeen = Date.now();
+    if (m.p2.userId === userId) m.p2.lastSeen = Date.now();
+    return { ok: true, match: publicPvp(m, userId) };
+  }
+  return pvpStatus(userId);
 }
 
 function pvpStatus(userId) {
@@ -696,14 +858,17 @@ function pvpSubmitScore(userId, score) {
   if (match.status === 'done') return { ok: true, match: publicPvp(match, userId) };
   if (match.status === 'p1_playing' && match.p1.userId === userId && match.p1.score == null) {
     match.p1.score = score;
+    match.p1.lastSeen = Date.now();
     match.status = 'p2_playing';
     match.turn = 'p2';
     match.p2Deadline = Date.now() + PVP_TURN_MS;
+    match.p2.lastSeen = Date.now();
     scheduleSave();
     return { ok: true, match: publicPvp(match, userId) };
   }
   if (match.status === 'p2_playing' && match.p2.userId === userId && match.p2.score == null) {
     match.p2.score = score;
+    match.p2.lastSeen = Date.now();
     pvpResolve(match);
     return { ok: true, match: publicPvp(match, userId) };
   }
@@ -722,7 +887,7 @@ module.exports = {
   requestWithdrawal, listWithdrawals, markWithdrawalPaid,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
-  pvpJoin, pvpCancel, pvpStatus, pvpSubmitScore, PVP_STAKES,
+  pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
   dataFile: DATA_FILE,
   ready,
   flush: saveNow,
