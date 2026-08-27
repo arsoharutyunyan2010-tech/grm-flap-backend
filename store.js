@@ -29,7 +29,8 @@ const periodBoards = new Map();   // periodKey -> Map(userId -> { name, score, u
 const rewardHistory = [];         // archived weekly results
 const rateBuckets = new Map();    // userId -> [timestamps]
 const allTimeBest = new Map();    // userId -> { name, score }
-const balances = new Map();       // userId -> number (FLAP coins; 100 FLAP = $1)
+const balances = new Map();       // userId -> number (FLAP coins; withdraw only; 100 FLAP = $1)
+const cBalances = new Map();      // userId -> number (C coins; top-up; 100 C = $1)
 const withdrawals = [];           // { id, userId, name, address, amount, status, requestedAt, paidAt? }
 let withdrawalSeq = 1;
 const deposits = [];              // { id, userId, name, amount, txHash, status, requestedAt }
@@ -75,12 +76,15 @@ function snapshot() {
   for (const [uid, row] of allTimeBest) best[String(uid)] = row;
   const bals = {};
   for (const [uid, n] of balances) bals[String(uid)] = n;
+  const cBals = {};
+  for (const [uid, n] of cBalances) cBals[String(uid)] = n;
   return {
     version: 1,
     savedAt: Date.now(),
     periodBoards: boards,
     allTimeBest: best,
     balances: bals,
+    cBalances: cBals,
     withdrawals,
     withdrawalSeq,
     deposits,
@@ -125,6 +129,13 @@ function hydrate(data) {
   for (const uid of Object.keys(bals)) {
     const n = Number(bals[uid]);
     if (Number.isFinite(n)) balances.set(String(uid), n);
+  }
+
+  cBalances.clear();
+  const cBals = data.cBalances || {};
+  for (const uid of Object.keys(cBals)) {
+    const n = Number(cBals[uid]);
+    if (Number.isFinite(n)) cBalances.set(String(uid), n);
   }
 
   withdrawals.length = 0;
@@ -418,6 +429,15 @@ function creditBalance(userId, amount) {
   scheduleSave();
   return bal;
 }
+function getCBalance(userId) {
+  return cBalances.get(String(userId)) || 0;
+}
+function creditCBalance(userId, amount) {
+  const bal = getCBalance(userId) + amount;
+  cBalances.set(String(userId), bal);
+  scheduleSave();
+  return bal;
+}
 
 function requestWithdrawal(userId, name, address, amount) {
   userId = String(userId);
@@ -471,9 +491,9 @@ function approveDeposit(id) {
   if (!d || d.status !== 'pending') return null;
   d.status = 'approved';
   d.approvedAt = Date.now();
-  const balance = creditBalance(d.userId, d.amount);
+  const cBalance = creditCBalance(d.userId, d.amount);
   scheduleSave();
-  return { deposit: d, balance };
+  return { deposit: d, balance: cBalance, cBalance };
 }
 function rejectDeposit(id) {
   const d = deposits.find(x => x.id === id);
@@ -516,7 +536,7 @@ module.exports = {
   archiveWeek,
   rewardHistory,
   updateAllTimeBest, getAllTimeBest,
-  getBalance, creditBalance,
+  getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
