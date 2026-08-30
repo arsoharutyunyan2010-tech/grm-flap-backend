@@ -165,6 +165,7 @@ app.get('/api/leaderboard', (req, res) => {
     monthKey: store.currentMonthKey(),
     entries: top,
     me,
+    referralBoard: period === 'day' ? store.getReferralLeaderboardDay(20) : [],
   });
 });
 
@@ -175,6 +176,13 @@ app.post('/api/profile', (req, res) => {
   const userId = String(user.id);
   const ranks = ranksFor(userId);
 
+  store.trackUser(userId);
+  store.attachReferral(userId, displayName(user), req.body.startParam || req.body.ref || '');
+  const refInfo = store.getReferralInfo(userId, displayName(user));
+  const appLink = (process.env.TELEGRAM_APP_LINK || process.env.MINI_APP_SHARE || 'https://t.me/FlapyGameBot/directlink').trim().replace(/\/$/, '');
+  const referralLink = appLink
+    ? (appLink + (appLink.indexOf('?') >= 0 ? '&' : '?') + 'startapp=' + encodeURIComponent(refInfo.code))
+    : ('https://t.me/share/url?url=' + encodeURIComponent(refInfo.code));
   res.json({
     name: displayName(user),
     best: store.getAllTimeBest(userId),
@@ -186,6 +194,8 @@ app.post('/api/profile', (req, res) => {
     dayKey: store.currentDayKey(),
     weekKey: store.currentWeekKey(),
     monthKey: store.currentMonthKey(),
+    referral: Object.assign({}, refInfo, { link: referralLink }),
+    referralBoard: store.getReferralLeaderboardDay(20),
   });
 });
 
