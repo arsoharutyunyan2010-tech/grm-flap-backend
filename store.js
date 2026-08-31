@@ -45,6 +45,10 @@ const pvpMatches = new Map();
 const pvpByUser = new Map();
 let pvpHouseC = 0;
 
+const referralByUser = new Map(); // userId -> { code, referredBy, name, invited: [{id,name,at}], earned }
+const referralCodeIndex = new Map(); // code -> userId
+const dailyInvites = new Map(); // YYYY-MM-DD -> Map(userId -> { name, count })
+
 function currentDayKey(d = new Date()) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD UTC
 }
@@ -97,6 +101,16 @@ function snapshot() {
     totalRuns,
     rewardHistory,
     pvpMatches: Array.from(pvpMatches.values()),
+    referrals: Object.fromEntries(Array.from(referralByUser.entries()).map(([uid, row]) => [uid, row])),
+    dailyInvites: (function () {
+      const out = {};
+      for (const [day, m] of dailyInvites) {
+        const rows = {};
+        for (const [uid, row] of m) rows[uid] = row;
+        out[day] = rows;
+      }
+      return out;
+    })(),
   };
 }
 
@@ -848,6 +862,132 @@ function pvpStatus(userId) {
   return { ok: true, idle: true, cBalance: getCBalance(userId) };
 }
 
+function parseRefCode(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  try { s = decodeURIComponent(s); } catch (e) {}
+  s = s.trim();
+  const mStart = s.match(/[?&#]startapp=([^&#]+)/i) || s.match(/startapp=([^&#]+)/i);
+  if (mStart) {
+    try { s = decodeURIComponent(mStart[1]); } catch (e) { s = mStart[1]; }
+  }
+  s = s.split(/[?#&/]/)[0].trim();
+  if (/^ref[_-]?/i.test(s) || /^\d+$/.test(s)) return s;
+  const mRef = s.match(/ref[_-]?\d+/i);
+  return mRef ? mRef[0] : s;
+}
+
+function ensureReferral(userId, name) {
+  userId = String(userId);
+  let rec = referralByUser.get(userId);
+  if (!rec) {
+    const code = 'ref_' + userId;
+    rec = { code, referredBy: null, name: name || 'Player', invited: [], earned: 0 };
+    referralByUser.set(userId, rec);
+    referralCodeIndex.set(code.toLowerCase(), userId);
+    scheduleSave();
+  } else if (name && rec.name !== name) {
+    rec.name = name;
+  }
+  if (!referralCodeIndex.has(String(rec.code).toLowerCase())) {
+    referralCodeIndex.set(String(rec.code).toLowerCase(), userId);
+  }
+  return rec;
+}
+
+function attachReferral(userId, name, startParam) {
+  userId = String(userId);
+  const rec = ensureReferral(userId, name);
+  if (rec.referredBy) return rec;
+  const code = parseRefCode(startParam);
+  if (!code) return rec;
+  let referrerId = referralCodeIndex.get(code.toLowerCase());
+  if (!referrerId && /^ref[_-]?(\d+)$/i.test(code)) {
+    referrerId = code.replace(/^ref[_-]?/i, '');
+    ensureReferral(referrerId, 'Player');
+    referrerId = referralCodeIndex.get(('ref_' + referrerId).toLowerCase()) || referrerId;
+  }
+  if (!referrerId || String(referrerId) === userId) return rec;
+
+  let walk = String(referrerId);
+  for (let i = 0; i < 20 && walk; i++) {
+    if (walk === userId) return rec;
+    const up = referralByUser.get(walk);
+    walk = up && up.referredBy ? String(up.referredBy) : '';
+  }
+
+  rec.referredBy = String(referrerId);
+  rec.name = name || rec.name;
+  const parent = ensureReferral(referrerId, 'Player');
+  if (!parent.invited.some((x) => x.id === userId)) {
+    parent.invited.push({ id: userId, name: rec.name, at: Date.now() });
+    const day = currentDayKey();
+    if (!dailyInvites.has(day)) dailyInvites.set(day, new Map());
+    const board = dailyInvites.get(day);
+    const prev = board.get(String(referrerId)) || { name: parent.name, count: 0 };
+    prev.count += 1;
+    prev.name = parent.name || prev.name;
+    board.set(String(referrerId), prev);
+  }
+  scheduleSave();
+  return rec;
+}
+
+function invitedOf(userId) {
+  const rec = referralByUser.get(String(userId));
+  return rec && Array.isArray(rec.invited) ? rec.invited : [];
+}
+
+function getReferralInfo(userId, name) {
+  const rec = ensureReferral(userId, name);
+  const people1 = rec.invited.slice();
+  let level2 = 0;
+  let level3 = 0;
+  for (const p of people1) {
+    const kids = invitedOf(p.id);
+    level2 += kids.length;
+    for (const k of kids) level3 += invitedOf(k.id).length;
+  }
+  return {
+    code: rec.code,
+    level1: people1.length,
+    level2,
+    level3,
+    earned: rec.earned || 0,
+    people1: people1.map((x) => ({ id: x.id, name: x.name })),
+  };
+}
+
+function getReferralLeaderboardDay(limit) {
+  const board = dailyInvites.get(currentDayKey()) || new Map();
+  const entries = Array.from(board.entries())
+    .map(([userId, v]) => ({ userId, name: v.name || 'Player', invites: v.count || 0 }))
+    .filter((e) => e.invites > 0)
+    .sort((a, b) => b.invites - a.invites)
+    .slice(0, limit || 20)
+    .map((e, i) => Object.assign({ rank: i + 1 }, e));
+  return entries;
+}
+
+function creditReferralCommissions(userId, amount) {
+  amount = Number(amount) || 0;
+  if (!(amount > 0)) return;
+  const rates = [0.07, 0.03, 0.01];
+  let uid = String(userId);
+  for (let i = 0; i < rates.length; i++) {
+    const rec = referralByUser.get(uid);
+    const parentId = rec && rec.referredBy ? String(rec.referredBy) : '';
+    if (!parentId) break;
+    const pay = Math.floor(amount * rates[i]);
+    if (pay > 0) {
+      creditCBalance(parentId, pay);
+      const parent = ensureReferral(parentId, 'Player');
+      parent.earned = (parent.earned || 0) + pay;
+    }
+    uid = parentId;
+  }
+}
+
 function pvpSubmitScore(userId, score) {
   userId = String(userId);
   score = Math.max(0, Math.floor(Number(score) || 0));
@@ -888,6 +1028,7 @@ module.exports = {
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
+  attachReferral, getReferralInfo, getReferralLeaderboardDay,
   dataFile: DATA_FILE,
   ready,
   flush: saveNow,
