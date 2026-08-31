@@ -375,6 +375,8 @@
     color:#1b1033 !important;
     background: linear-gradient(180deg, #ffe9a8, #f4c542) !important;
   }
+  .lb-view-tabs{ margin-top: 2px; }
+  .lb-view-tabs button.lb-tab{ padding: 7px 4px !important; font-size: 11px !important; }
 
   #rotateLock{
     position:fixed; inset:0; z-index:400;
@@ -855,6 +857,10 @@
       <button class="lb-tab" data-period="week" data-i18n="weekly">WEEKLY</button>
       <button class="lb-tab" data-period="month" data-i18n="monthly">MONTHLY</button>
     </div>
+    <div class="lb-tabs lb-view-tabs" id="lbViewTabs">
+      <button class="lb-tab active" data-lb-view="score" data-i18n="lbViewScore">SCORE</button>
+      <button class="lb-tab" data-lb-view="invites" data-i18n="lbViewInvites">INVITES</button>
+    </div>
     <div class="lb-block" id="lbScoreWrap">
       <div class="section-title" data-i18n="lbRecordsTitle">Score records</div>
       <div class="sub" id="lbPagePeriod" data-i18n="lbSub">Best score this period — points only</div>
@@ -864,7 +870,7 @@
       </div>
       <div class="lb-list" id="lbPageList"></div>
     </div>
-    <div class="lb-block" id="lbRefWrap">
+    <div class="lb-block hidden" id="lbRefWrap">
       <div class="section-title" data-i18n="refLbTitle">Top inviters today</div>
       <div class="sub" data-i18n="refLbSub">Who invited the most people (level 1)</div>
       <div class="lb-list" id="lbRefList"><div class="hint" data-i18n="refEmpty">No invites yet.</div></div>
@@ -1308,7 +1314,7 @@ window.FLAPY_ART = {
       topupOk:"Top-up request submitted. We will credit C after review.",
       topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit C after checking.",
       leaderboard:"LEADERBOARD", lbSub:"Best score this period — points only", lbRecordsTitle:"Score records",
-      daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating",
+      daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
       lbNote:"Scores are verified on the server and cannot be forged from the browser.",
       tasks:"TASKS", comingSoon:"Coming soon.",
       referral:"REFERRAL", refSub:"Invite friends. Earn C when they top up.",
@@ -1367,7 +1373,7 @@ window.FLAPY_ART = {
       topupOk:"Заявка на пополнение отправлена. C начислим после проверки.",
       topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции. Админ начислит C после проверки.",
       leaderboard:"ЛИДЕРЫ", lbSub:"Лучший счёт за период — только очки", lbRecordsTitle:"Рекорды",
-      daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место",
+      daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место", lbViewScore:"ОЧКИ", lbViewInvites:"ПРИГЛАШЕНИЯ",
       lbNote:"Счёт проверяется сервером и его нельзя подделать в браузере.",
       tasks:"ЗАДАНИЯ", comingSoon:"Скоро.",
       referral:"РЕФЕРАЛЫ", refSub:"Приглашай друзей. Получай C с их пополнений.",
@@ -1426,7 +1432,7 @@ window.FLAPY_ART = {
       topupOk:"Заявку на поповнення надіслано. C нарахуємо після перевірки.",
       topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції. Адмін нарахує C після перевірки.",
       leaderboard:"ЛІДЕРИ", lbSub:"Найкращий рахунок за період — лише очки", lbRecordsTitle:"Рекорди",
-      daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце",
+      daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце", lbViewScore:"БАЛИ", lbViewInvites:"ЗАПРОШЕННЯ",
       lbNote:"Рахунок перевіряється сервером і його не можна підробити в браузері.",
       tasks:"ЗАВДАННЯ", comingSoon:"Незабаром.",
       referral:"РЕФЕРАЛИ", refSub:"Запрошуй друзів. Отримуй C з їх поповнень.",
@@ -1485,7 +1491,7 @@ window.FLAPY_ART = {
       topupOk:"充值申请已提交，审核后将到账 C。",
       topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希。管理员核对后会充值 C。",
       leaderboard:"排行榜", lbSub:"本周期最高分 — 仅计分数", lbRecordsTitle:"分数纪录",
-      daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名",
+      daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名", lbViewScore:"分数", lbViewInvites:"邀请",
       lbNote:"分数由服务器验证，无法在浏览器中伪造。",
       tasks:"任务", comingSoon:"即将推出。",
       referral:"推荐", refSub:"邀请好友。他们充值时你获得 C。",
@@ -1544,7 +1550,7 @@ window.FLAPY_ART = {
       topupOk:"जमा अनुरोध भेज दिया गया। जाँच के बाद C जुड़ जाएगा।",
       topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ। एडमिन जाँचकर C जोड़ देगा।",
       leaderboard:"लीडरबोर्ड", lbSub:"इस अवधि का सर्वश्रेष्ठ स्कोर — केवल अंक", lbRecordsTitle:"स्कोर रिकॉर्ड",
-      daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक",
+      daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक", lbViewScore:"स्कोर", lbViewInvites:"आमंत्रण",
       lbNote:"स्कोर सर्वर पर सत्यापित होते हैं और ब्राउज़र से नकली नहीं किए जा सकते।",
       tasks:"कार्य", comingSoon:"जल्द आ रहा है।",
       referral:"रेफरल", refSub:"दोस्तों को आमंत्रित करें। उनके टॉप-अप पर C पाएँ।",
@@ -1663,6 +1669,7 @@ window.FLAPY_ART = {
   var startAdStep = 0;
   var awaitingContinueTap = false;
   var lbPeriod = 'day';
+  var lbView = 'score';
   var leaderboardCache = { day:null, week:null, month:null };
 
   function setSyncBadge(text, cls){
@@ -1927,6 +1934,11 @@ window.FLAPY_ART = {
 
   var profileCache = null;
   function flapUsd(n){ return '$' + ((Number(n)||0) / FLAP_PER_USD).toFixed(2); }
+  function totalUsd(p){
+    var c = Number((p && p.cBalance) || 0) || 0;
+    var f = Number((p && p.flapBalance) || 0) || 0;
+    return '$' + ((c + f) / FLAP_PER_USD).toFixed(2);
+  }
   function fmtRank(r){ return r ? ('#'+r) : '—'; }
   function renderProfileFromCache(){
     if (!profileCache) { document.getElementById('profileHint').textContent = t('loading'); return; }
@@ -1941,7 +1953,7 @@ window.FLAPY_ART = {
     document.getElementById('profileRankMonth').textContent = fmtRank(ranks.month);
     document.getElementById('profileHint').textContent = '';
     setAmt('walletBalance', bal, 'f');
-    document.getElementById('walletUsd').textContent = flapUsd((profileCache && profileCache.cBalance) || 0);
+    document.getElementById('walletUsd').textContent = totalUsd(profileCache);
   }
   function renderLeaderboardFromCache(){
     var list = document.getElementById('lbPageList');
@@ -1953,10 +1965,9 @@ window.FLAPY_ART = {
     if (entries.length === 0) list.innerHTML = '<div class="hint">'+t('noScores')+'</div>';
     var refWrap = document.getElementById('lbRefWrap');
     var refList = document.getElementById('lbRefList');
-    showDayReferralBlock(lbPeriod === 'day');
-    if (refWrap && refList) {
+    applyLbViewState();
+    if (refList) {
       if (lbPeriod === 'day') {
-        refWrap.classList.remove('hidden');
         refList.innerHTML = '';
         var rb = data.referralBoard || [];
         if (!rb.length) refList.innerHTML = '<div class="hint">'+t('refEmpty')+'</div>';
@@ -1969,8 +1980,6 @@ window.FLAPY_ART = {
             '<div class="lb-score-row"><span class="lb-score">'+(e.invites||0)+'</span></div></div>';
           refList.appendChild(row);
         });
-      } else {
-        refWrap.classList.add('hidden');
       }
     }
     entries.forEach(function(e){
@@ -2289,7 +2298,7 @@ window.FLAPY_ART = {
     var cBal = (p && p.cBalance) || 0;
     setAmt('walletBalance', bal, 'f');
     setAmt('walletCBalance', cBal, 'c');
-    document.getElementById('walletUsd').textContent = flapUsd(cBal);
+    document.getElementById('walletUsd').textContent = totalUsd(p);
     var addr = (p && p.depositAddress) || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd';
     var payTo = document.getElementById('depositPayTo');
     if (payTo && addr) payTo.value = addr;
@@ -2322,8 +2331,8 @@ window.FLAPY_ART = {
       var bal = res.flapBalance != null ? res.flapBalance : res.balance;
       msg.textContent = t('withdrawOk') + bal + ' FLAPY (' + flapUsd(bal) + ')';
       setAmt('walletBalance', bal, 'f');
-      document.getElementById('walletUsd').textContent = flapUsd(bal);
       if (profileCache) profileCache.flapBalance = bal;
+      document.getElementById('walletUsd').textContent = totalUsd(profileCache);
       document.getElementById('walletAddress').value = '';
       document.getElementById('walletAmount').value = '';
     }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
@@ -2398,21 +2407,21 @@ window.FLAPY_ART = {
   });
   setWalletTab('topup');
 
-  function showDayReferralBlock(on){
+  function applyLbViewState(){
+    var viewTabs = document.getElementById('lbViewTabs');
+    var scoreWrap = document.getElementById('lbScoreWrap');
     var refWrap = document.getElementById('lbRefWrap');
-    if (!refWrap) return;
-    if (on) {
-      refWrap.classList.remove('hidden');
-      var refList = document.getElementById('lbRefList');
-      if (refList && !String(refList.innerHTML||'').trim()) {
-        refList.innerHTML = '<div class="hint">'+t('refEmpty')+'</div>';
-      }
-    } else {
-      refWrap.classList.add('hidden');
-    }
+    // The invites (referral) board is only available for the daily period.
+    if (lbPeriod !== 'day') lbView = 'score';
+    if (viewTabs) viewTabs.classList.toggle('hidden', lbPeriod !== 'day');
+    if (scoreWrap) scoreWrap.classList.toggle('hidden', lbView !== 'score');
+    if (refWrap) refWrap.classList.toggle('hidden', lbView !== 'invites');
+    document.querySelectorAll('[data-lb-view]').forEach(function(x){
+      x.classList.toggle('active', x.getAttribute('data-lb-view') === lbView);
+    });
   }
   function loadLeaderboardPage(force){
-    showDayReferralBlock(lbPeriod === 'day');
+    applyLbViewState();
     if (!force && leaderboardCache[lbPeriod]) { renderLeaderboardFromCache(); return; }
     document.getElementById('lbPageList').innerHTML = '<div class="hint">'+t('loading')+'</div>';
     fetchLeaderboard(lbPeriod).then(function(data){
@@ -2420,10 +2429,17 @@ window.FLAPY_ART = {
       renderLeaderboardFromCache();
     }).catch(function(){
       document.getElementById('lbPageList').innerHTML = '<div class="hint">'+t('couldNotVerify')+'</div>';
-      showDayReferralBlock(lbPeriod === 'day');
+      applyLbViewState();
     });
   }
-  document.querySelectorAll('.lb-tab').forEach(function(tab){
+  document.querySelectorAll('[data-lb-view]').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      lbView = tab.getAttribute('data-lb-view') || 'score';
+      applyLbViewState();
+      renderLeaderboardFromCache();
+    });
+  });
+  document.querySelectorAll('[data-period]').forEach(function(tab){
     tab.addEventListener('click', function(){
       lbPeriod = tab.getAttribute('data-period') || 'day';
       document.querySelectorAll('.lb-tab').forEach(function(x){

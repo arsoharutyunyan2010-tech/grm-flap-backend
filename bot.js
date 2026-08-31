@@ -22,11 +22,32 @@ if (!BOT_TOKEN) {
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
+  // Telegram appends the /start payload to the message text when the user
+  // opens the bot through a referral (Deep Link) — e.g. `startapp=ref_123`.
+  // Forward that parameter into the Mini App URL so the referral is credited.
+  let startApp = '';
+  try {
+    const payload = (match && match[1]) ? match[1].trim() : '';
+    if (payload) {
+      const params = new URLSearchParams(payload.replace(/^\?/, ''));
+      const sa = params.get('startapp') || params.get('start_param');
+      if (sa) startApp = sa;
+    }
+  } catch (e) {
+    startApp = '';
+  }
+
+  let webAppUrl = MINI_APP_URL;
+  if (startApp) {
+    const sep = webAppUrl.indexOf('?') >= 0 ? '&' : '?';
+    webAppUrl = webAppUrl + sep + 'startapp=' + encodeURIComponent(startApp);
+  }
+
   bot.sendMessage(msg.chat.id, 'Welcome to FLAPY! Tap to keep the coin flying and climb the daily, weekly and monthly leaderboards. 🪙', {
     reply_markup: {
       inline_keyboard: [[
-        { text: '▶ Play FLAPY', web_app: { url: MINI_APP_URL } }
+        { text: '▶ Play FLAPY', web_app: { url: webAppUrl } }
       ]]
     }
   });
