@@ -2862,7 +2862,9 @@ window.FLAPY_ART = {
       pvpMatchLive = false;
       stopPvpConfirmTick();
       hideGameOverlays();
-      document.getElementById('pvpWaitHint').innerHTML = pvpStake + ' <span class="coin-on-gold">' + coinImg('c') + '</span>';
+      // Use the stake the server actually queued us with (not the local var,
+      // which could have drifted if the user changed the stake while waiting).
+      document.getElementById('pvpWaitHint').innerHTML = (data.stake != null ? data.stake : pvpStake) + ' <span class="coin-on-gold">' + coinImg('c') + '</span>';
       document.getElementById('pvpWaitCard').classList.remove('hidden');
       return;
     }
