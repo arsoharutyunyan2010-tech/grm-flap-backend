@@ -1868,9 +1868,11 @@ window.FLAPY_ART = {
       session = { sessionId: 'demo-'+Date.now(), seed: localSeed(), startedAt: Date.now() };
       return Promise.resolve(session);
     }
+    var startParam = '';
+    try { startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || ''; } catch(e){}
     return apiFetch('/api/start-session', {
       method: 'POST',
-      body: JSON.stringify({ initData: initData })
+      body: JSON.stringify({ initData: initData, startParam: startParam })
     }).then(function(res){
       session = { sessionId: res.sessionId, seed: res.seed, startedAt: Date.now() };
       return session;

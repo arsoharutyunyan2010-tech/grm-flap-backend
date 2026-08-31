@@ -61,6 +61,16 @@ function displayName(user) {
   return user.username ? '@' + user.username : (user.first_name || 'Player');
 }
 
+function startParamFrom(req) {
+  let p = String((req.body && (req.body.startParam || req.body.ref)) || '').trim();
+  if (p) return p;
+  const initData = String((req.body && req.body.initData) || '');
+  try {
+    p = new URLSearchParams(initData).get('start_param') || '';
+  } catch (e) {}
+  return p;
+}
+
 function ranksFor(userId) {
   const day = store.getUserRank(userId, 'day');
   const week = store.getUserRank(userId, 'week');
@@ -81,6 +91,7 @@ app.post('/api/start-session', (req, res) => {
   }
 
   store.trackUser(String(user.id));
+  store.attachReferral(String(user.id), displayName(user), startParamFrom(req));
 
   const sessionId = crypto.randomBytes(16).toString('hex');
   const seed = crypto.randomInt(1, 2 ** 31 - 1);
