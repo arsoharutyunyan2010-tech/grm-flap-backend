@@ -199,6 +199,46 @@ function hydrate(data) {
       }
     }
   }
+
+  referralByUser.clear();
+  referralCodeIndex.clear();
+  const refs = data.referrals || {};
+  for (const uid of Object.keys(refs)) {
+    const row = refs[uid];
+    if (!row || typeof row !== 'object') continue;
+    const userId = String(uid);
+    const rec = {
+      code: row.code || ('ref_' + userId),
+      referredBy: row.referredBy ? String(row.referredBy) : null,
+      name: row.name || 'Player',
+      invited: Array.isArray(row.invited)
+        ? row.invited.filter(Boolean).map((x) => ({
+            id: String(x.id),
+            name: x.name || 'Player',
+            at: x.at || 0,
+          }))
+        : [],
+      earned: Number(row.earned) || 0,
+    };
+    referralByUser.set(userId, rec);
+    referralCodeIndex.set(String(rec.code).toLowerCase(), userId);
+    referralCodeIndex.set(('ref_' + userId).toLowerCase(), userId);
+  }
+
+  dailyInvites.clear();
+  const days = data.dailyInvites || {};
+  for (const day of Object.keys(days)) {
+    const m = new Map();
+    const rows = days[day] || {};
+    for (const uid of Object.keys(rows)) {
+      const row = rows[uid];
+      m.set(String(uid), {
+        name: (row && row.name) || 'Player',
+        count: Number(row && row.count) || 0,
+      });
+    }
+    dailyInvites.set(day, m);
+  }
 }
 
 function writeJsonFile(filePath, data) {
@@ -523,6 +563,7 @@ function approveDeposit(id) {
   d.status = 'approved';
   d.approvedAt = Date.now();
   const cBalance = creditCBalance(d.userId, d.amount);
+  creditReferralCommissions(d.userId, d.amount);
   scheduleSave();
   return { deposit: d, balance: cBalance, cBalance };
 }
@@ -971,8 +1012,10 @@ function getReferralLeaderboardDay(limit) {
 
 function creditReferralCommissions(userId, amount) {
   amount = Number(amount) || 0;
-  if (!(amount > 0)) return;
+  if (!(amount > 0)) return [];
+  // Level 1 / 2 / 3 of the depositor's upline: 7% / 3% / 1% in C.
   const rates = [0.07, 0.03, 0.01];
+  const paid = [];
   let uid = String(userId);
   for (let i = 0; i < rates.length; i++) {
     const rec = referralByUser.get(uid);
@@ -983,9 +1026,12 @@ function creditReferralCommissions(userId, amount) {
       creditCBalance(parentId, pay);
       const parent = ensureReferral(parentId, 'Player');
       parent.earned = (parent.earned || 0) + pay;
+      paid.push({ userId: parentId, level: i + 1, amount: pay });
     }
     uid = parentId;
   }
+  if (paid.length) scheduleSave();
+  return paid;
 }
 
 function pvpSubmitScore(userId, score) {
