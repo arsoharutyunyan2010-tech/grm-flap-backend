@@ -647,8 +647,11 @@ function pvpRequeue(userId, name, stake) {
 
 function pvpDropMatch(match) {
   pvpMatches.delete(match.id);
-  if (match.p1) pvpClearUser(match.p1.userId);
-  if (match.p2) pvpClearUser(match.p2.userId);
+  // Only clear a user's match pointer if it still points at THIS match.
+  // A player may have re-joined a newer match since this one finished, and
+  // wiping the pointer here would orphan their active match.
+  if (match.p1 && pvpByUser.get(String(match.p1.userId)) === match.id) pvpClearUser(match.p1.userId);
+  if (match.p2 && pvpByUser.get(String(match.p2.userId)) === match.id) pvpClearUser(match.p2.userId);
 }
 
 function pvpAbortConfirm(match, declinedUserId) {
@@ -664,7 +667,13 @@ function pvpPayAndStart(match) {
   if (!match || match.status !== 'confirming' || match.paid) return;
   const s = match.stake;
   if (getCBalance(match.p1.userId) < s || getCBalance(match.p2.userId) < s) {
+    // One (or both) can no longer cover the stake. Drop the match but put the
+    // player who still CAN pay back in the queue so they aren't silently removed.
+    const p1Short = getCBalance(match.p1.userId) < s;
+    const p2Short = getCBalance(match.p2.userId) < s;
     pvpDropMatch(match);
+    if (!p1Short) pvpRequeue(match.p1.userId, match.p1.name, s);
+    if (!p2Short) pvpRequeue(match.p2.userId, match.p2.name, s);
     scheduleSave();
     return;
   }
@@ -762,6 +771,16 @@ function pvpSweepTimeouts() {
     }
   }
 }
+
+// Background sweeper so PvP matches advance even when no client is polling:
+// enforces forfeit/deadline/confirm timeouts and drops finished matches.
+setInterval(() => {
+  try {
+    pvpSweepTimeouts();
+  } catch (err) {
+    console.error('pvpSweepTimeouts failed:', err.message || err);
+  }
+}, 3000).unref();
 
 function pvpJoin(userId, name, stake) {
   userId = String(userId);
