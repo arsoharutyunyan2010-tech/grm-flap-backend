@@ -45,11 +45,24 @@
   <p id="persistHint" style="opacity:0.7;font-size:13px;max-width:720px;"></p>
   <div class="keybox">
     <button onclick="downloadBackup()">Download backup</button>
+    <button onclick="createBackup()">Create backup now</button>
+    <button onclick="loadBackups()">Refresh backups</button>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
       Restore backup
       <input id="backupFile" type="file" accept="application/json" onchange="uploadBackup(event)">
     </label>
   </div>
+
+  <h2>Automatic backups</h2>
+  <p style="opacity:0.7;font-size:13px;max-width:720px;">
+    Snapshots of every balance, referral and leaderboard row. Taken automatically
+    (hourly by default) and before any restore. If a deploy ever goes wrong, restore
+    the newest snapshot here — nobody loses progress.
+  </p>
+  <table>
+    <thead><tr><th>When</th><th>Players</th><th>Where</th><th>Label</th><th></th></tr></thead>
+    <tbody id="bRows"><tr><td colspan="5">Enter admin key and press Load.</td></tr></tbody>
+  </table>
 
   <h2>Top-up requests</h2>
   <table>
@@ -76,6 +89,7 @@
     loadStats(key);
     loadDeposits(key);
     loadWithdrawals(key);
+    loadBackups();
   }
 
   function loadStats(key){
@@ -88,6 +102,11 @@
         document.getElementById('statFile').textContent = d.dataFile || '—';
         document.getElementById('statExists').textContent = d.exists ? ('yes · ' + (d.bytes||0) + ' B') : 'NO';
         var hint = document.getElementById('persistHint');
+        if (d.degraded) {
+          hint.textContent = 'DEGRADED: the server could not load saved data at startup, so saving is BLOCKED to protect player balances. Reason: ' + (d.loadError || 'unknown') + '. Fix the storage config and restart.';
+          hint.style.color = '#ff5d73';
+          return;
+        }
         if (d.redis || d.backend === 'upstash-redis') {
           hint.textContent = 'Redis save is ON. Leaderboard and FLAP will survive GitHub deploys.';
           hint.style.color = '#3ddc84';
@@ -186,6 +205,103 @@
       method: 'POST',
       headers: { 'x-admin-key': key }
     }).then(function(){ loadWithdrawals(key); });
+  };
+
+  window.downloadBackup = function(){
+    var key = getKey();
+    if (!key) return;
+    fetch(API_BASE + '/internal/backup', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.blob(); })
+      .then(function(blob){
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'flapy-backup-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
+        document.body.appendChild(a); a.click(); a.remove();
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Backup error: ' + e.message; });
+  };
+
+  window.uploadBackup = function(ev){
+    var key = getKey();
+    var file = ev.target.files && ev.target.files[0];
+    if (!key || !file) return;
+    if (!confirm('Replace ALL current data with this backup file?')) { ev.target.value=''; return; }
+    var reader = new FileReader();
+    reader.onload = function(){
+      fetch(API_BASE + '/internal/backup', {
+        method: 'POST',
+        headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+        body: reader.result
+      })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          document.getElementById('err').textContent = d.error ? ('Restore error: ' + d.error) : '';
+          if (!d.error) alert('Restored: ' + JSON.stringify(d.restored));
+          loadAll();
+        })
+        .catch(function(e){ document.getElementById('err').textContent = 'Restore error: ' + e.message; });
+      ev.target.value = '';
+    };
+    reader.readAsText(file);
+  };
+
+  window.createBackup = function(){
+    var key = getKey();
+    if (!key) return;
+    fetch(API_BASE + '/internal/backups/create', {
+      method: 'POST',
+      headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'manual' })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d.ok) document.getElementById('err').textContent = 'Backup error: ' + (d.error || '');
+        loadBackups();
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Backup error: ' + e.message; });
+  };
+
+  window.loadBackups = function(){
+    var key = getKey();
+    if (!key) return;
+    fetch(API_BASE + '/internal/backups', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        var tb = document.getElementById('bRows');
+        var list = d.backups || [];
+        if (!list.length) { tb.innerHTML = '<tr><td colspan="5">No backups yet.</td></tr>'; return; }
+        tb.innerHTML = '';
+        list.forEach(function(b){
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + (b.at ? new Date(b.at).toLocaleString() : '—') + '</td>' +
+            '<td>' + (b.players == null ? '—' : b.players) + '</td>' +
+            '<td>' + b.source + '</td>' +
+            '<td>' + (b.label || '') + '</td>' +
+            '<td><button data-id="' + b.id + '">Restore</button></td>';
+          tr.querySelector('button').onclick = function(){ restoreBackup(b.id); };
+          tb.appendChild(tr);
+        });
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Backups error: ' + e.message; });
+  };
+
+  window.restoreBackup = function(id){
+    var key = getKey();
+    if (!key) return;
+    if (!confirm('Restore snapshot ' + id + '?\nCurrent data is backed up first.')) return;
+    fetch(API_BASE + '/internal/backups/restore', {
+      method: 'POST',
+      headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d.ok) { document.getElementById('err').textContent = 'Restore error: ' + (d.error || ''); return; }
+        alert('Restored ' + d.players + ' players.');
+        loadAll();
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Restore error: ' + e.message; });
   };
 
   // Prefill from a previous session on this device.
