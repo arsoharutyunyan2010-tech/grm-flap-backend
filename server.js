@@ -354,6 +354,41 @@ app.post('/internal/backup', (req, res) => {
   res.json({ ok: true, restored: info });
 });
 
+// --- rolling backups / disaster recovery ---------------------------------
+app.get('/internal/backups', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    res.json({ backups: await store.listBackups(), persist: store.persistInfo() });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.post('/internal/backups/create', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const result = await store.createBackup((req.body && req.body.label) || 'manual');
+  res.status(result.ok ? 200 : 500).json(result);
+});
+
+app.post('/internal/backups/restore', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const result = await store.restoreBackup(req.body && req.body.id);
+    res.status(result.ok ? 200 : 400).json(result);
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// Lightweight health probe: shows whether player data is safely persisted.
+app.get('/internal/health', (req, res) => {
+  const info = store.persistInfo();
+  res.status(info.degraded ? 503 : 200).json({
+    ok: !info.degraded && info.durable,
+    persist: info,
+  });
+});
+
 const { runWeeklyRewardJob } = require('./rewards.js');
 app.post('/internal/run-weekly-rewards', (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -447,6 +482,12 @@ start.then(() => {
     const info = store.persistInfo();
     console.log(`GRM FLAP backend listening on :${PORT}`);
     console.log('Persist backend:', info.backend, info.redis ? '(Upstash Redis)' : store.dataFile);
+    console.log(`Persist state: ${info.loadState} | players: ${info.players} | durable: ${info.durable}`);
+    if (info.warning) console.warn('!!! DATA SAFETY WARNING:', info.warning);
+    if (info.degraded) {
+      console.error('!!! STORE DEGRADED — saving is blocked to protect existing player data.');
+      console.error('    Reason:', info.loadError);
+    }
   });
 }).catch((err) => {
   console.error('Failed to load store:', err);

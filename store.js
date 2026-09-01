@@ -7,9 +7,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
 const FALLBACK_FILE = path.join(__dirname, 'data', 'store.json');
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(DATA_FILE), 'backups');
 const UPSTASH_URL = String(
   process.env.UPSTASH_REDIS_REST_URL ||
   process.env.KV_REST_API_URL ||
@@ -22,7 +24,40 @@ const UPSTASH_TOKEN =
   process.env.UPSTASH_REDIS_KV_REST_TOKEN ||
   '';
 const REDIS_KEY = process.env.STORE_REDIS_KEY || 'flapy:store';
+const BACKUP_PREFIX = REDIS_KEY + ':bak:';
+const BACKUP_INDEX_KEY = REDIS_KEY + ':bakindex';
 const useRedis = !!(UPSTASH_URL && UPSTASH_TOKEN);
+
+// --- data-safety configuration -------------------------------------------
+// How often an automatic snapshot backup is taken (default: 1 hour).
+const BACKUP_EVERY_MS = Math.max(60 * 1000, Number(process.env.BACKUP_EVERY_MS) || 60 * 60 * 1000);
+// How many rolling backups to keep (Redis + local files).
+const BACKUP_KEEP = Math.max(3, Number(process.env.BACKUP_KEEP) || 48);
+// TTL for a backup key in Redis (default 30 days).
+const BACKUP_TTL_SEC = Math.max(3600, Number(process.env.BACKUP_TTL_SEC) || 30 * 24 * 3600);
+// Refuse to overwrite storage if the player count would drop below this
+// fraction of the previously known count (protects against a bad deploy /
+// failed load wiping everybody's balance + leaderboard).
+const SHRINK_GUARD_RATIO = Number(process.env.SHRINK_GUARD_RATIO) || 0.5;
+// How often we re-check whether another instance wrote newer data.
+const CONFLICT_CHECK_MS = Math.max(2000, Number(process.env.CONFLICT_CHECK_MS) || 15000);
+
+// Unique id of this process — lets us detect "another container wrote after us".
+const INSTANCE_ID = crypto.randomBytes(8).toString('hex');
+// 'pending' until the initial load finished. Saving before/without a
+// successful load is what destroys data, so it is hard-blocked.
+let loadState = 'pending';
+let loadError = null;
+let peakKnownUsers = 0;      // biggest player count we ever held/saw
+let lastBackupAt = 0;
+let lastConflictCheckAt = 0;
+let lastRemoteSavedAt = 0;   // savedAt of the snapshot we know is in Redis
+let lastSaveOkAt = 0;
+let lastSaveError = null;
+let blockedSaves = 0;
+// Unknown top-level fields from a snapshot written by a NEWER version of the
+// code are kept verbatim, so rolling back a deploy never deletes new data.
+let extraFields = {};
 
 const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used }
 const periodBoards = new Map();   // periodKey -> Map(userId -> { name, score, updatedAt })
@@ -86,9 +121,10 @@ function snapshot() {
   for (const [uid, n] of balances) bals[String(uid)] = n;
   const cBals = {};
   for (const [uid, n] of cBalances) cBals[String(uid)] = n;
-  return {
-    version: 1,
+  return Object.assign({}, extraFields, {
+    version: 2,
     savedAt: Date.now(),
+    savedBy: INSTANCE_ID,
     periodBoards: boards,
     allTimeBest: best,
     balances: bals,
@@ -117,11 +153,26 @@ function snapshot() {
       }
       return out;
     })(),
-  };
+  });
 }
+
+const KNOWN_SNAPSHOT_FIELDS = new Set([
+  'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
+  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'totalRuns',
+  'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
+]);
 
 function hydrate(data) {
   if (!data || typeof data !== 'object') return;
+
+  // Keep every field this version of the code does not understand, so that
+  // deploying older code (or a rollback) can never delete data written by a
+  // newer version.
+  extraFields = {};
+  for (const key of Object.keys(data)) {
+    if (!KNOWN_SNAPSHOT_FIELDS.has(key)) extraFields[key] = data[key];
+  }
+
   periodBoards.clear();
   const boards = data.periodBoards || {};
   for (const key of Object.keys(boards)) {
@@ -130,11 +181,11 @@ function hydrate(data) {
     for (const uid of Object.keys(rows)) {
       const row = rows[uid];
       if (row && Number.isFinite(row.score)) {
-        m.set(String(uid), {
+        m.set(String(uid), Object.assign({}, row, {
           name: row.name || 'Player',
           score: row.score,
           updatedAt: row.updatedAt || 0,
-        });
+        }));
       }
     }
     periodBoards.set(key, m);
@@ -145,7 +196,7 @@ function hydrate(data) {
   for (const uid of Object.keys(best)) {
     const row = best[uid];
     if (row && Number.isFinite(row.score)) {
-      allTimeBest.set(String(uid), { name: row.name || 'Player', score: row.score });
+      allTimeBest.set(String(uid), Object.assign({}, row, { name: row.name || 'Player', score: row.score }));
     }
   }
 
@@ -227,7 +278,7 @@ function hydrate(data) {
     const row = refs[uid];
     if (!row || typeof row !== 'object') continue;
     const userId = String(uid);
-    const rec = {
+    const rec = Object.assign({}, row, {
       code: row.code || ('ref_' + userId),
       referredBy: row.referredBy ? String(row.referredBy) : null,
       name: row.name || 'Player',
@@ -239,7 +290,7 @@ function hydrate(data) {
           }))
         : [],
       earned: Number(row.earned) || 0,
-    };
+    });
     referralByUser.set(userId, rec);
     referralCodeIndex.set(String(rec.code).toLowerCase(), userId);
     referralCodeIndex.set(('ref_' + userId).toLowerCase(), userId);
@@ -269,16 +320,165 @@ function writeJsonFile(filePath, data) {
   fs.renameSync(tmp, filePath);
 }
 
-function saveFile() {
-  const json = JSON.stringify(snapshot());
+/* ------------------------------------------------------------------ *
+ * Data-safety helpers
+ * ------------------------------------------------------------------ */
+
+function countPlayers(snap) {
+  const users = new Set();
+  for (const uid of snap.knownUsers || []) users.add(String(uid));
+  for (const uid of Object.keys(snap.allTimeBest || {})) users.add(String(uid));
+  for (const uid of Object.keys(snap.balances || {})) users.add(String(uid));
+  for (const uid of Object.keys(snap.cBalances || {})) users.add(String(uid));
+  for (const uid of Object.keys(snap.referrals || {})) users.add(String(uid));
+  return users.size;
+}
+
+function snapshotHasPlayers(snap) {
+  return !!(
+    (snap.knownUsers && snap.knownUsers.length) ||
+    (snap.allTimeBest && Object.keys(snap.allTimeBest).length) ||
+    (snap.balances && Object.keys(snap.balances).length) ||
+    snap.totalRuns
+  );
+}
+
+function parseSnapshot(raw) {
+  if (!raw) return null;
+  const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  return data;
+}
+
+/**
+ * Merge two snapshots so that NO player is ever lost.
+ * `base` wins on conflicts (it is the newer side); anything that exists only
+ * in `other` is added back, and numeric progress takes the safer/larger value.
+ * Used when two containers overlap during a deploy.
+ */
+function mergeSnapshots(base, other) {
+  if (!other) return base;
+  if (!base) return other;
+  const out = JSON.parse(JSON.stringify(base));
+
+  // unknown (newer-version) fields
+  for (const key of Object.keys(other)) {
+    if (!(key in out)) out[key] = other[key];
+  }
+
+  // all-time best: keep the highest score
+  out.allTimeBest = out.allTimeBest || {};
+  for (const [uid, row] of Object.entries(other.allTimeBest || {})) {
+    const cur = out.allTimeBest[uid];
+    if (!cur || (Number(row && row.score) || 0) > (Number(cur.score) || 0)) out.allTimeBest[uid] = row;
+  }
+
+  // period leaderboards: keep the highest score per period + user
+  out.periodBoards = out.periodBoards || {};
+  for (const [pkey, rows] of Object.entries(other.periodBoards || {})) {
+    if (!out.periodBoards[pkey]) { out.periodBoards[pkey] = rows; continue; }
+    for (const [uid, row] of Object.entries(rows || {})) {
+      const cur = out.periodBoards[pkey][uid];
+      if (!cur || (Number(row && row.score) || 0) > (Number(cur.score) || 0)) out.periodBoards[pkey][uid] = row;
+    }
+  }
+
+  // balances: never invent money — only restore users missing on the base side
+  for (const field of ['balances', 'cBalances']) {
+    out[field] = out[field] || {};
+    for (const [uid, n] of Object.entries(other[field] || {})) {
+      if (!(uid in out[field]) && Number.isFinite(Number(n))) out[field][uid] = Number(n);
+    }
+  }
+
+  // withdrawals / deposits: union by id, base wins on the same id
+  for (const field of ['withdrawals', 'deposits']) {
+    const byId = new Map();
+    for (const row of other[field] || []) if (row && row.id != null) byId.set(String(row.id), row);
+    for (const row of out[field] || []) if (row && row.id != null) byId.set(String(row.id), row);
+    out[field] = Array.from(byId.values()).sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  }
+  out.withdrawalSeq = Math.max(Number(out.withdrawalSeq) || 1, Number(other.withdrawalSeq) || 1);
+  out.depositSeq = Math.max(Number(out.depositSeq) || 1, Number(other.depositSeq) || 1);
+
+  // users / counters
+  const users = new Set([...(out.knownUsers || []), ...(other.knownUsers || [])].map(String));
+  out.knownUsers = Array.from(users);
+  out.totalRuns = Math.max(Number(out.totalRuns) || 0, Number(other.totalRuns) || 0);
+  out.pvpHouseC = Math.max(Number(out.pvpHouseC) || 0, Number(other.pvpHouseC) || 0);
+
+  // reward history: union
+  const seenReward = new Set((out.rewardHistory || []).map((r) => JSON.stringify([r && r.weekKey, r && r.archivedAt])));
+  out.rewardHistory = out.rewardHistory || [];
+  for (const r of other.rewardHistory || []) {
+    const sig = JSON.stringify([r && r.weekKey, r && r.archivedAt]);
+    if (!seenReward.has(sig)) { seenReward.add(sig); out.rewardHistory.push(r); }
+  }
+
+  // referrals: union of invited lists, best earned value
+  out.referrals = out.referrals || {};
+  for (const [uid, row] of Object.entries(other.referrals || {})) {
+    const cur = out.referrals[uid];
+    if (!cur) { out.referrals[uid] = row; continue; }
+    const invited = new Map();
+    for (const x of row && row.invited ? row.invited : []) if (x && x.id != null) invited.set(String(x.id), x);
+    for (const x of cur.invited || []) if (x && x.id != null) invited.set(String(x.id), x);
+    cur.invited = Array.from(invited.values());
+    cur.earned = Math.max(Number(cur.earned) || 0, Number(row.earned) || 0);
+    cur.referredBy = cur.referredBy || row.referredBy || null;
+    cur.code = cur.code || row.code;
+  }
+
+  // daily invite counts: keep the larger count
+  out.dailyInvites = out.dailyInvites || {};
+  for (const [day, rows] of Object.entries(other.dailyInvites || {})) {
+    if (!out.dailyInvites[day]) { out.dailyInvites[day] = rows; continue; }
+    for (const [uid, row] of Object.entries(rows || {})) {
+      const cur = out.dailyInvites[day][uid];
+      if (!cur || (Number(row && row.count) || 0) > (Number(cur.count) || 0)) out.dailyInvites[day][uid] = row;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Last line of defence before any write: never persist a state that was not
+ * loaded correctly, and never let the player count collapse.
+ * Returns null when the write is allowed, or a reason string when blocked.
+ */
+function saveBlockedReason(snap, force) {
+  if (loadState !== 'ok') {
+    return 'initial load did not succeed (' + loadState + ') — refusing to overwrite live data';
+  }
+  if (force) return null;
+  const players = countPlayers(snap);
+  if (peakKnownUsers >= 5 && players < Math.ceil(peakKnownUsers * SHRINK_GUARD_RATIO)) {
+    return `player count dropped ${peakKnownUsers} -> ${players} (shrink guard)`;
+  }
+  if (players > peakKnownUsers) peakKnownUsers = players;
+  return null;
+}
+
+function saveFile(force) {
+  const snap = snapshot();
+  const blocked = saveBlockedReason(snap, force);
+  if (blocked) {
+    blockedSaves++;
+    if (blockedSaves <= 3 || blockedSaves % 50 === 0) console.error('store: SAVE BLOCKED —', blocked);
+    return false;
+  }
+  const json = JSON.stringify(snap);
   try {
     writeJsonFile(DATA_FILE, json);
   } catch (err) {
-    console.error('store file save failed:', err.message || err);
+    lastSaveError = String(err.message || err);
+    console.error('store file save failed:', lastSaveError);
   }
   if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) {
     try { writeJsonFile(FALLBACK_FILE, json); } catch (e) {}
   }
+  return true;
 }
 
 async function redisCmd(cmd) {
@@ -295,46 +495,188 @@ async function redisCmd(cmd) {
   return data.result;
 }
 
-function snapshotHasPlayers(snap) {
-  return !!(
-    (snap.knownUsers && snap.knownUsers.length) ||
-    (snap.allTimeBest && Object.keys(snap.allTimeBest).length) ||
-    snap.totalRuns
-  );
+/* ---------------------------- backups ---------------------------- */
+
+function backupFileName(at = Date.now()) {
+  return 'store-' + new Date(at).toISOString().replace(/[:.]/g, '-') + '.json';
 }
 
-async function saveRedis() {
+function createFileBackup(snap) {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    writeJsonFile(path.join(BACKUP_DIR, backupFileName(snap.savedAt)), JSON.stringify(snap));
+    const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith('store-') && f.endsWith('.json')).sort();
+    while (files.length > BACKUP_KEEP) {
+      const old = files.shift();
+      try { fs.unlinkSync(path.join(BACKUP_DIR, old)); } catch (e) {}
+    }
+    return true;
+  } catch (err) {
+    console.error('store: file backup failed:', err.message || err);
+    return false;
+  }
+}
+
+async function readBackupIndex() {
+  try {
+    const raw = await redisCmd(['GET', BACKUP_INDEX_KEY]);
+    const list = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+async function createRedisBackup(snap, label) {
+  const key = BACKUP_PREFIX + new Date(snap.savedAt).toISOString().replace(/[:.]/g, '-');
+  await redisCmd(['SET', key, JSON.stringify(snap), 'EX', String(BACKUP_TTL_SEC)]);
+  const index = await readBackupIndex();
+  index.push({ key, at: snap.savedAt, players: countPlayers(snap), label: label || 'auto' });
+  while (index.length > BACKUP_KEEP) {
+    const old = index.shift();
+    try { await redisCmd(['DEL', old.key]); } catch (e) {}
+  }
+  await redisCmd(['SET', BACKUP_INDEX_KEY, JSON.stringify(index)]);
+  return { key, at: snap.savedAt, players: countPlayers(snap), label: label || 'auto' };
+}
+
+async function createBackup(label) {
   const snap = snapshot();
-  if (!snapshotHasPlayers(snap)) {
-    try {
-      const existing = await redisCmd(['GET', REDIS_KEY]);
-      if (existing) {
-        console.warn('store: skip empty Redis overwrite (keeping previous scores)');
-        return;
-      }
-    } catch (err) {
-      console.warn('store: skip empty Redis save', err.message || err);
-      return;
+  if (!snapshotHasPlayers(snap)) return { ok: false, error: 'nothing to back up yet' };
+  if (loadState !== 'ok') return { ok: false, error: 'store not loaded — backup skipped' };
+  createFileBackup(snap);
+  lastBackupAt = Date.now();
+  if (!useRedis) return { ok: true, target: 'file', at: snap.savedAt, players: countPlayers(snap) };
+  try {
+    const info = await createRedisBackup(snap, label);
+    return Object.assign({ ok: true, target: 'redis+file' }, info);
+  } catch (err) {
+    return { ok: false, error: String(err.message || err), target: 'file' };
+  }
+}
+
+function maybeBackup() {
+  if (loadState !== 'ok') return;
+  if (Date.now() - lastBackupAt < BACKUP_EVERY_MS) return;
+  lastBackupAt = Date.now();
+  createBackup('auto')
+    .then((r) => { if (r && r.ok) console.log('store: auto backup done —', r.players, 'players'); })
+    .catch((err) => console.error('store: auto backup failed:', err.message || err));
+}
+
+async function listBackups() {
+  const out = [];
+  if (useRedis) {
+    for (const row of await readBackupIndex()) {
+      out.push({ id: row.key, source: 'redis', at: row.at, players: row.players, label: row.label || 'auto' });
     }
   }
+  try {
+    for (const f of fs.readdirSync(BACKUP_DIR).filter((x) => x.startsWith('store-') && x.endsWith('.json')).sort()) {
+      const full = path.join(BACKUP_DIR, f);
+      let at = 0;
+      try { at = fs.statSync(full).mtimeMs; } catch (e) {}
+      out.push({ id: 'file:' + f, source: 'file', at, players: null, label: 'file' });
+    }
+  } catch (e) {}
+  return out.sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
+async function restoreBackup(id) {
+  if (!id) return { ok: false, error: 'backup id required' };
+  let data = null;
+  if (String(id).startsWith('file:')) {
+    const full = path.join(BACKUP_DIR, path.basename(String(id).slice(5)));
+    data = parseSnapshot(fs.readFileSync(full, 'utf8'));
+  } else {
+    if (!useRedis) return { ok: false, error: 'redis not configured' };
+    data = parseSnapshot(await redisCmd(['GET', String(id)]));
+  }
+  if (!data) return { ok: false, error: 'backup not found or unreadable' };
+  // Safety net: snapshot the CURRENT state before replacing it.
+  await createBackup('pre-restore').catch(() => {});
+  hydrate(data);
+  peakKnownUsers = countPlayers(snapshot());
+  await saveAll(true);
+  return { ok: true, players: allTimeBest.size, boards: periodBoards.size, restoredFrom: id };
+}
+
+/* ---------------------------- writing ---------------------------- */
+
+async function saveRedis(force) {
+  const snap = snapshot();
+  const blocked = saveBlockedReason(snap, force);
+  if (blocked) {
+    blockedSaves++;
+    if (blockedSaves <= 3 || blockedSaves % 50 === 0) console.error('store: REDIS SAVE BLOCKED —', blocked);
+    return false;
+  }
+
+  // Detect a second container (old deploy still shutting down, or two
+  // replicas) that wrote after us, and merge instead of overwriting.
+  const now = Date.now();
+  let toWrite = snap;
+  if (force || now - lastConflictCheckAt > CONFLICT_CHECK_MS) {
+    lastConflictCheckAt = now;
+    try {
+      const remote = parseSnapshot(await redisCmd(['GET', REDIS_KEY]));
+      if (remote) {
+        const remoteAt = Number(remote.savedAt) || 0;
+        const foreign = remote.savedBy && remote.savedBy !== INSTANCE_ID;
+        if (foreign && remoteAt > lastRemoteSavedAt) {
+          console.warn('store: another instance wrote at', new Date(remoteAt).toISOString(), '— merging');
+          toWrite = mergeSnapshots(remote, snap);
+          hydrate(toWrite);                 // adopt the merged state locally
+          toWrite = snapshot();
+          peakKnownUsers = Math.max(peakKnownUsers, countPlayers(toWrite));
+        } else if (!snapshotHasPlayers(snap) && snapshotHasPlayers(remote)) {
+          console.warn('store: skip empty overwrite (keeping stored players)');
+          return false;
+        } else if (countPlayers(snap) < Math.ceil(countPlayers(remote) * SHRINK_GUARD_RATIO) && !force) {
+          console.error('store: REDIS SAVE BLOCKED — stored copy has far more players, merging instead');
+          toWrite = mergeSnapshots(remote, snap);
+          hydrate(toWrite);
+          toWrite = snapshot();
+          peakKnownUsers = Math.max(peakKnownUsers, countPlayers(toWrite));
+        }
+      }
+    } catch (err) {
+      console.warn('store: conflict check failed:', err.message || err);
+    }
+  }
+
   let lastErr;
   for (let i = 0; i < 3; i++) {
     try {
-      await redisCmd(['SET', REDIS_KEY, JSON.stringify(snap)]);
-      return;
+      await redisCmd(['SET', REDIS_KEY, JSON.stringify(toWrite)]);
+      lastRemoteSavedAt = Number(toWrite.savedAt) || Date.now();
+      lastSaveOkAt = Date.now();
+      lastSaveError = null;
+      return true;
     } catch (err) {
       lastErr = err;
       await new Promise((r) => setTimeout(r, 250 * (i + 1)));
     }
   }
+  lastSaveError = String((lastErr && lastErr.message) || lastErr);
   throw lastErr;
 }
 
+async function saveAll(force) {
+  saveFile(force);
+  if (useRedis) await saveRedis(force);
+  else lastSaveOkAt = Date.now();
+  maybeBackup();
+}
+
 function saveNow() {
-  saveFile();
+  saveFile(false);
   if (useRedis) {
-    saveRedis().catch((err) => console.error('store redis save failed:', err.message || err));
+    saveRedis(false).catch((err) => console.error('store redis save failed:', err.message || err));
+  } else {
+    lastSaveOkAt = Date.now();
   }
+  maybeBackup();
 }
 
 function scheduleSave() {
@@ -346,14 +688,29 @@ function scheduleSave() {
   if (saveTimer.unref) saveTimer.unref();
 }
 
+/* ---------------------------- loading ---------------------------- */
+
+function latestBackupFile() {
+  try {
+    const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith('store-') && f.endsWith('.json')).sort();
+    if (!files.length) return null;
+    return path.join(BACKUP_DIR, files[files.length - 1]);
+  } catch (e) {
+    return null;
+  }
+}
+
 function loadFromDisk() {
   const files = [DATA_FILE];
   if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) files.push(FALLBACK_FILE);
+  const backup = latestBackupFile();
+  if (backup) files.push(backup);
   for (const filePath of files) {
     try {
       if (!fs.existsSync(filePath)) continue;
-      const raw = fs.readFileSync(filePath, 'utf8');
-      hydrate(JSON.parse(raw));
+      const data = parseSnapshot(fs.readFileSync(filePath, 'utf8'));
+      if (!data) continue;
+      hydrate(data);
       console.log(
         'store: loaded',
         allTimeBest.size, 'players,',
@@ -369,12 +726,45 @@ function loadFromDisk() {
   return false;
 }
 
+async function redisGetWithRetry(key, attempts = 5) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await redisCmd(['GET', key]);
+    } catch (err) {
+      lastErr = err;
+      console.error(`store: redis GET ${key} failed (try ${i + 1}/${attempts}):`, err.message || err);
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function loadLatestRedisBackup() {
+  const index = await readBackupIndex();
+  for (let i = index.length - 1; i >= 0; i--) {
+    try {
+      const data = parseSnapshot(await redisCmd(['GET', index[i].key]));
+      if (data) {
+        hydrate(data);
+        console.warn('store: recovered from backup', index[i].key);
+        return true;
+      }
+    } catch (e) {}
+  }
+  return false;
+}
+
 async function loadAll() {
   if (useRedis) {
     try {
-      const raw = await redisCmd(['GET', REDIS_KEY]);
-      if (raw) {
-        hydrate(typeof raw === 'string' ? JSON.parse(raw) : raw);
+      const raw = await redisGetWithRetry(REDIS_KEY);
+      const data = parseSnapshot(raw);
+      if (data) {
+        hydrate(data);
+        loadState = 'ok';
+        lastRemoteSavedAt = Number(data.savedAt) || 0;
+        peakKnownUsers = countPlayers(snapshot());
         console.log(
           'store: loaded',
           allTimeBest.size, 'players,',
@@ -382,15 +772,52 @@ async function loadAll() {
         );
         return;
       }
+      if (raw) {
+        // Key exists but is unreadable — try a backup instead of starting empty.
+        console.error('store: stored snapshot is corrupted, trying backups');
+        if (await loadLatestRedisBackup()) {
+          loadState = 'ok';
+          peakKnownUsers = countPlayers(snapshot());
+          return;
+        }
+        loadState = 'failed';
+        loadError = 'corrupted snapshot and no usable backup';
+        console.error('store: DEGRADED MODE — writes are blocked to protect existing data');
+        return;
+      }
       console.log('store: Redis key empty, trying local file');
     } catch (err) {
-      console.error('store redis load failed:', err.message || err);
+      loadError = String(err.message || err);
+      console.error('store redis load failed:', loadError);
+      if (await loadLatestRedisBackup().catch(() => false)) {
+        loadState = 'ok';
+        peakKnownUsers = countPlayers(snapshot());
+        return;
+      }
+      loadFromDisk();
+      loadState = 'failed';
+      console.error(
+        'store: DEGRADED MODE — could not reach Redis at startup. The game keeps running,\n' +
+        '       but saving is BLOCKED so that nobody\'s balance/leaderboard gets overwritten.\n' +
+        '       Fix UPSTASH_REDIS_REST_URL / TOKEN and restart.'
+      );
+      return;
     }
   }
+
   const fromFile = loadFromDisk();
+  loadState = 'ok';
+  peakKnownUsers = countPlayers(snapshot());
+  if (!useRedis) {
+    console.warn(
+      'store: WARNING — no Upstash Redis configured. Data lives in ' + DATA_FILE + ' only.\n' +
+      '       On Railway/Render this file is WIPED on every deploy unless it sits on a\n' +
+      '       mounted volume. Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN.'
+    );
+  }
   if (useRedis && fromFile) {
     try {
-      await saveRedis();
+      await saveRedis(true);
       console.log('store: copied file snapshot into Redis');
     } catch (err) {
       console.error('store redis seed failed:', err.message || err);
@@ -399,19 +826,34 @@ async function loadAll() {
 }
 
 const ready = loadAll();
-
 function flushAndExit(code) {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  saveFile();
-  const done = useRedis ? saveRedis() : Promise.resolve();
-  done.catch((err) => console.error('store flush failed:', err.message || err))
-    .then(() => process.exit(code));
+  console.log('store: shutting down — flushing data (merge-safe)…');
+  // On shutdown always run the conflict check: during a deploy the NEW
+  // container may already be serving players, and we must merge with it
+  // instead of overwriting its fresh scores with our stale copy.
+  const done = (async () => {
+    saveFile(false);
+    if (useRedis) await saveRedis(true);
+  })();
+  const timeout = new Promise((r) => setTimeout(r, 8000));
+  Promise.race([
+    done.catch((err) => console.error('store flush failed:', err.message || err)),
+    timeout,
+  ]).then(() => process.exit(code));
 }
 process.on('SIGTERM', () => flushAndExit(0));
 process.on('SIGINT', () => flushAndExit(0));
+
+// Periodic safety save + rolling backup, even if the game is idle.
+const autosaveTimer = setInterval(() => {
+  if (loadState !== 'ok') return;
+  saveNow();
+}, Math.max(30000, Number(process.env.AUTOSAVE_MS) || 5 * 60 * 1000));
+if (autosaveTimer.unref) autosaveTimer.unref();
 
 function createSession(sessionId, userId, seed) {
   sessions.set(sessionId, { userId, seed, startedAt: Date.now(), used: false });
@@ -1155,9 +1597,16 @@ module.exports = {
   ready,
   flush: saveNow,
   getSnapshot: snapshot,
+  createBackup,
+  _mergeSnapshots: mergeSnapshots,
+  _countPlayers: countPlayers,
+  listBackups,
+  restoreBackup,
   importSnapshot: function(data) {
     hydrate(data);
-    saveNow();
+    peakKnownUsers = countPlayers(snapshot());
+    saveFile(true);
+    if (useRedis) saveRedis(true).catch((err) => console.error('store redis save failed:', err.message || err));
     return {
       players: allTimeBest.size,
       boards: periodBoards.size,
@@ -1174,6 +1623,7 @@ module.exports = {
         bytes = fs.statSync(DATA_FILE).size;
       }
     } catch (e) {}
+    const durable = useRedis || /^\/(data|mnt|volume)/.test(path.resolve(DATA_FILE));
     return {
       dataFile: DATA_FILE,
       exists,
@@ -1182,6 +1632,20 @@ module.exports = {
       backend: useRedis ? 'upstash-redis' : 'file',
       players: allTimeBest.size,
       boards: periodBoards.size,
+      // data-safety diagnostics
+      instanceId: INSTANCE_ID,
+      loadState,
+      loadError,
+      degraded: loadState !== 'ok',
+      durable,
+      warning: durable ? null : 'Data is stored in an ephemeral file — it will be lost on the next deploy. Configure Upstash Redis or a mounted volume.',
+      peakKnownUsers,
+      blockedSaves,
+      lastSaveOkAt,
+      lastSaveError,
+      lastBackupAt,
+      backupEveryMs: BACKUP_EVERY_MS,
+      backupKeep: BACKUP_KEEP,
     };
   },
 };
