@@ -101,6 +101,12 @@ function snapshot() {
     totalRuns,
     rewardHistory,
     pvpMatches: Array.from(pvpMatches.values()),
+    pvpHouseC,
+    pvpQueue: (function () {
+      const out = {};
+      for (const [stake, list] of pvpQueue) out[String(stake)] = list;
+      return out;
+    })(),
     referrals: Object.fromEntries(Array.from(referralByUser.entries()).map(([uid, row]) => [uid, row])),
     dailyInvites: (function () {
       const out = {};
@@ -190,14 +196,28 @@ function hydrate(data) {
 
   pvpMatches.clear();
   pvpByUser.clear();
+  pvpQueue.clear();
+  pvpHouseC = Math.max(0, Math.floor(Number(data.pvpHouseC) || 0));
   if (Array.isArray(data.pvpMatches)) {
+    const now = Date.now();
     for (const m of data.pvpMatches) {
       if (m && m.id && m.status !== 'done') {
+        if (m.p1) m.p1.lastSeen = now;
+        if (m.p2) m.p2.lastSeen = now;
         pvpMatches.set(m.id, m);
         if (m.p1 && m.p1.userId) pvpByUser.set(String(m.p1.userId), m.id);
         if (m.p2 && m.p2.userId) pvpByUser.set(String(m.p2.userId), m.id);
       }
     }
+  }
+  const qIn = data.pvpQueue || {};
+  for (const key of Object.keys(qIn)) {
+    const stake = Number(key);
+    const list = Array.isArray(qIn[key]) ? qIn[key] : [];
+    const cleaned = list
+      .filter((x) => x && x.userId && !pvpByUser.has(String(x.userId)))
+      .map((x) => ({ userId: String(x.userId), name: x.name || 'Player', joinedAt: x.joinedAt || Date.now() }));
+    if (cleaned.length) pvpQueue.set(stake, cleaned);
   }
 
   referralByUser.clear();
@@ -625,6 +645,7 @@ function publicPvp(match, userId) {
     youAre,
     yourTurn: !!(youAre && match.turn === youAre && (match.status === 'p1_playing' || match.status === 'p2_playing')),
     youReady: !!(youAre && match[youAre] && match[youAre].ready),
+    turnStartedAt: match.turn === 'p1' ? (match.p1TurnAt || 0) : (match.turn === 'p2' ? (match.p2TurnAt || 0) : 0),
     p1: { name: match.p1.name, score: match.p1.score, ready: !!match.p1.ready },
     p2: { name: match.p2.name, score: match.p2.score, ready: !!match.p2.ready },
     winner: match.winner || null,
@@ -664,7 +685,7 @@ function pvpAbortConfirm(match, declinedUserId) {
 }
 
 function pvpPayAndStart(match) {
-  if (!match || match.status !== 'confirming' || match.paid) return;
+  if (!match || match.status !== 'confirming' || match.paid) return false;
   const s = match.stake;
   if (getCBalance(match.p1.userId) < s || getCBalance(match.p2.userId) < s) {
     // One (or both) can no longer cover the stake. Drop the match but put the
@@ -675,7 +696,7 @@ function pvpPayAndStart(match) {
     if (!p1Short) pvpRequeue(match.p1.userId, match.p1.name, s);
     if (!p2Short) pvpRequeue(match.p2.userId, match.p2.name, s);
     scheduleSave();
-    return;
+    return false;
   }
   creditCBalance(match.p1.userId, -s);
   creditCBalance(match.p2.userId, -s);
@@ -688,14 +709,17 @@ function pvpPayAndStart(match) {
   match.p1.lastSeen = Date.now();
   match.p2.lastSeen = Date.now();
   scheduleSave();
+  return true;
 }
 
 function pvpBeginP1(match) {
+  const now = Date.now();
   match.status = 'p1_playing';
   match.turn = 'p1';
-  match.p1Deadline = Date.now() + PVP_TURN_MS;
-  match.p1.lastSeen = Date.now();
-  match.p2.lastSeen = Date.now();
+  match.p1TurnAt = now;
+  match.p1Deadline = now + PVP_TURN_MS;
+  match.p1.lastSeen = now;
+  match.p2.lastSeen = now;
   scheduleSave();
 }
 
@@ -799,13 +823,27 @@ function pvpJoin(userId, name, stake) {
     pvpQueue.set(st, (list || []).filter((x) => x.userId !== userId));
   }
 
-  let q = (pvpQueue.get(stake) || []).filter((x) => Date.now() - x.joinedAt < 10 * 60 * 1000 && x.userId !== userId);
+  // Drop anyone who has been waiting too long OR can no longer cover the stake,
+  // so we never pull an insolvent opponent out of the queue and then fail the join.
+  let q = (pvpQueue.get(stake) || []).filter((x) => {
+    if (x.userId === userId) return false;
+    if (Date.now() - x.joinedAt >= 10 * 60 * 1000) return false;
+    return getCBalance(x.userId) >= stake;
+  });
   if (q.length) {
     const idx = Math.floor(Math.random() * q.length);
     const opp = q.splice(idx, 1)[0];
     pvpQueue.set(stake, q);
-    if (getCBalance(userId) < stake || getCBalance(opp.userId) < stake) {
+    if (getCBalance(userId) < stake) {
+      // Joiner went broke between the earlier check and now — put the opponent back.
+      pvpRequeue(opp.userId, opp.name, stake);
       return { ok: false, error: 'insufficient C' };
+    }
+    if (getCBalance(opp.userId) < stake) {
+      // Opponent went broke in the tiny window after the filter. Don't strand the joiner.
+      q.push({ userId, name: name || 'Player', joinedAt: Date.now() });
+      pvpQueue.set(stake, q);
+      return { ok: true, waiting: true, stake, cBalance: getCBalance(userId) };
     }
     const now = Date.now();
     const match = {
@@ -845,7 +883,13 @@ function pvpDecline(userId) {
   const id = pvpByUser.get(userId);
   if (id && pvpMatches.has(id)) {
     const m = pvpMatches.get(id);
-    if (m.status === 'confirming' && !m.paid) pvpAbortConfirm(m, userId);
+    if (m.status === 'confirming' && !m.paid) {
+      pvpAbortConfirm(m, userId);
+    } else if (m.paid && m.status !== 'done') {
+      // After C is taken, walking away is a forfeit, not a free exit.
+      pvpFinishForfeit(m, userId);
+      return { ok: true, match: publicPvp(m, userId) };
+    }
   }
   pvpCancel(userId);
   return { ok: true, idle: true, cBalance: getCBalance(userId) };
@@ -857,7 +901,9 @@ function pvpReady(userId) {
   const id = pvpByUser.get(userId);
   if (!id || !pvpMatches.has(id)) return { ok: false, error: 'no match' };
   const match = pvpMatches.get(id);
-  if (match.status === 'confirming') pvpPayAndStart(match);
+  // Never skip the 5s decline window by calling ready early — that would
+  // force-debit the opponent before they can decline.
+  if (match.status === 'confirming') return { ok: true, match: publicPvp(match, userId) };
   if (match.status !== 'ready_wait') return { ok: true, match: publicPvp(match, userId) };
   if (match.p1.userId === userId) match.p1.ready = true;
   if (match.p2.userId === userId) match.p2.ready = true;
@@ -1053,25 +1099,36 @@ function creditReferralCommissions(userId, amount) {
   return paid;
 }
 
-function pvpSubmitScore(userId, score) {
+function pvpSubmitScore(userId, score, opts) {
   userId = String(userId);
-  score = Math.max(0, Math.floor(Number(score) || 0));
+  score = Math.max(0, Math.min(100000, Math.floor(Number(score) || 0)));
   pvpSweepTimeouts();
   const id = pvpByUser.get(userId);
   if (!id || !pvpMatches.has(id)) return { ok: false, error: 'no match' };
   const match = pvpMatches.get(id);
   if (match.status === 'done') return { ok: true, match: publicPvp(match, userId) };
+
+  const startedAt = opts && Number.isFinite(opts.sessionStartedAt) ? opts.sessionStartedAt : 0;
+  function sessionFreshFor(turnAt) {
+    if (!startedAt || !turnAt) return true;
+    // Session must have been issued for THIS turn, not an older classic/PvP run.
+    return startedAt >= turnAt;
+  }
+
   if (match.status === 'p1_playing' && match.p1.userId === userId && match.p1.score == null) {
+    if (!sessionFreshFor(match.p1TurnAt)) return { ok: false, error: 'stale session' };
     match.p1.score = score;
     match.p1.lastSeen = Date.now();
     match.status = 'p2_playing';
     match.turn = 'p2';
-    match.p2Deadline = Date.now() + PVP_TURN_MS;
+    match.p2TurnAt = Date.now();
+    match.p2Deadline = match.p2TurnAt + PVP_TURN_MS;
     match.p2.lastSeen = Date.now();
     scheduleSave();
     return { ok: true, match: publicPvp(match, userId) };
   }
   if (match.status === 'p2_playing' && match.p2.userId === userId && match.p2.score == null) {
+    if (!sessionFreshFor(match.p2TurnAt)) return { ok: false, error: 'stale session' };
     match.p2.score = score;
     match.p2.lastSeen = Date.now();
     pvpResolve(match);

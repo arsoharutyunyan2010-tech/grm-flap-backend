@@ -2098,7 +2098,7 @@ window.FLAPY_ART = {
   function handleCrash(){
     state = 'crashed';
     crashScoreEl.textContent = score;
-    if (pvpMode) { finalizeRun(); return; }
+    if (pvpMode) { finalizePvpRun(); return; }
     if (revivesUsed >= MAX_REVIVES) { finalizeRun(); return; }
     awaitingContinueTap = false;
     continueBtn.disabled = false;
@@ -2118,6 +2118,7 @@ window.FLAPY_ART = {
     state = 'playing';
   }
   function finalizeRun(){
+    if (pvpMode) { finalizePvpRun(); return; }
     state = 'over';
     var totalSteps = stepIndex;
     var clientScore = score;
@@ -2151,8 +2152,12 @@ window.FLAPY_ART = {
       } else {
         verifyNote.classList.add('hidden');
       }
-      if (pvpMode) pvpOnRunOver(res.verified ? res.score : clientScore);
     });
+  }
+  function finalizePvpRun(){
+    state = 'over';
+    hideGameOverlays();
+    pvpOnRunOver(score, flapLog, reviveLog, stepIndex);
   }
 
   function onPointerDown(e){ e.preventDefault(); flap(); }
@@ -2215,7 +2220,9 @@ window.FLAPY_ART = {
     showMode();
   });
   document.getElementById('pvpGoBtn').addEventListener('click', function(){
+    if (state === 'playing' || pvpPendingSubmit) return;
     pvpMode = true;
+    pvpPendingSubmit = null;
     hideGameOverlays();
     startGameAfterAds();
   });
@@ -2240,8 +2247,8 @@ window.FLAPY_ART = {
       .then(function(){ stopPvpPoll(); stopPvpConfirmTick(); showMode(); })
       .catch(function(){ showMode(); });
   });
-  document.addEventListener('visibilitychange', function(){ if (document.hidden) pvpLeaveIfNeeded(); });
-  window.addEventListener('pagehide', pvpLeaveIfNeeded);
+  // Telegram overlays / notification shade fire visibilitychange and would
+  // steal the stake if we forfeited here. AFK timeout covers a real leave.
   try {
     if (window.Telegram && Telegram.WebApp && Telegram.WebApp.onEvent) {
       Telegram.WebApp.onEvent('viewportChanged', function(){});
@@ -2787,6 +2794,7 @@ window.FLAPY_ART = {
   var pvpBeatTimer = null;
   var pvpConfirmTick = null;
   var pvpMatchLive = false;
+  var pvpPendingSubmit = null;
   var pvpStakes = [10,20,30,50,75,100,250,500,1000];
   function coinImg(kind){
     return '<img class="tiny-coin" src="'+artBlobUrl(kind==='c' ? 'c-coin.png' : 'coin.png')+'" alt="">';
@@ -2806,6 +2814,7 @@ window.FLAPY_ART = {
   function showMode(){
     pvpMode = false;
     pvpMatchLive = false;
+    pvpPendingSubmit = null;
     stopPvpPoll();
     stopPvpHeartbeat();
     stopPvpConfirmTick();
@@ -2856,6 +2865,13 @@ window.FLAPY_ART = {
       pvpMatchLive = false;
       stopPvpConfirmTick();
       stopPvpHeartbeat();
+      // Match vanished (declined, insolvent, server restart). Don't leave the
+      // player staring at a dead confirm/wait/ready card.
+      var onPvpUi = ['pvpWaitCard','pvpConfirmCard','pvpReadyCard','pvpInfoCard'].some(function(id){
+        var el = document.getElementById(id);
+        return el && !el.classList.contains('hidden');
+      });
+      if (onPvpUi && !(state === 'playing' && pvpMode)) showMode();
       return;
     }
     if (data.waiting) {
@@ -2929,6 +2945,7 @@ window.FLAPY_ART = {
     pvpMatchLive = true;
     startPvpHeartbeat();
     if (m.yourTurn) {
+      if (pvpPendingSubmit) return;
       if (state === 'playing' && pvpMode) return;
       hideGameOverlays();
       document.getElementById('pvpInfoTitle').textContent = t('pvpYourTurn');
@@ -2938,6 +2955,7 @@ window.FLAPY_ART = {
       document.getElementById('pvpInfoHint').textContent = hint;
       document.getElementById('pvpGoBtn').classList.remove('hidden');
       document.getElementById('pvpInfoCard').classList.remove('hidden');
+      startPvpPoll();
     } else {
       if (state === 'playing' && pvpMode) return;
       hideGameOverlays();
@@ -2956,25 +2974,67 @@ window.FLAPY_ART = {
         .then(applyPvpState).catch(function(){});
     }, 500);
   }
-  function pvpLeaveIfNeeded(){
-    if (state === 'playing' && pvpMode) {
-      apiFetch('/api/pvp/forfeit', { method:'POST', body: JSON.stringify({ initData: initData }) }).catch(function(){});
-      return;
-    }
-    if (document.getElementById('pvpConfirmCard') && !document.getElementById('pvpConfirmCard').classList.contains('hidden')) {
-      apiFetch('/api/pvp/decline', { method:'POST', body: JSON.stringify({ initData: initData }) }).catch(function(){});
-    }
+  function sendPvpSubmit(){
+    if (!pvpPendingSubmit) return;
+    var payload = pvpPendingSubmit;
+    apiFetch('/api/pvp/submit', {
+      method:'POST',
+      body: JSON.stringify({
+        initData: initData,
+        sessionId: payload.sessionId,
+        flapLog: payload.flapLog || [],
+        totalSteps: payload.totalSteps,
+        score: payload.score
+      })
+    })
+      .then(function(res){
+        pvpPendingSubmit = null;
+        applyPvpState(res);
+        startPvpPoll();
+      })
+      .catch(function(){
+        // Don't dump to mode (that used to let the player start a fresh flight).
+        // If the match already moved on (forfeit / opponent finished), stop retrying.
+        apiFetch('/api/pvp/status', { method:'POST', body: JSON.stringify({ initData: initData }) })
+          .then(function(res){
+            if (res && res.match && (res.match.status === 'done' || !res.match.yourTurn)) {
+              pvpPendingSubmit = null;
+              applyPvpState(res);
+            } else {
+              setTimeout(function(){ if (pvpPendingSubmit) sendPvpSubmit(); }, 1500);
+            }
+            startPvpPoll();
+          })
+          .catch(function(){
+            setTimeout(function(){ if (pvpPendingSubmit) sendPvpSubmit(); }, 1500);
+          });
+      });
   }
-  function pvpOnRunOver(finalScore){
-    apiFetch('/api/pvp/submit', { method:'POST', body: JSON.stringify({ initData: initData, score: finalScore }) })
-      .then(function(res){ applyPvpState(res); startPvpPoll(); })
-      .catch(function(){ showMode(); });
+  function pvpOnRunOver(finalScore, runFlapLog, runReviveLog, totalSteps){
+    pvpPendingSubmit = {
+      score: finalScore,
+      flapLog: runFlapLog || flapLog || [],
+      totalSteps: totalSteps != null ? totalSteps : stepIndex,
+      sessionId: session && session.sessionId
+    };
+    sendPvpSubmit();
+  }
+  function resumePvpIfAny(){
+    if (DEMO_MODE) return;
+    apiFetch('/api/pvp/status', { method:'POST', body: JSON.stringify({ initData: initData }) })
+      .then(function(res){
+        if (res && (res.match || res.waiting)) {
+          applyPvpState(res);
+          startPvpPoll();
+        }
+      }).catch(function(){});
   }
   function init(){
     applyI18n();
     renderStakes();
     document.getElementById('navbar').classList.remove('hidden');
     showMode();
+    resumePvpIfAny();
   }
   resetGame();
   init();
