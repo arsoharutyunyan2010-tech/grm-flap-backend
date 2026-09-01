@@ -198,3 +198,6 @@ UPSTASH_REDIS_REST_TOKEN=xxxxx
 > `store.js`-ի snapshot-ի մեջ (նոր դաշտ ավելացրու `snapshot()` և `hydrate()`
 > ֆունկցիաներում ու գրիր `KNOWN_SNAPSHOT_FIELDS`-ի մեջ) — այդ դեպքում նոր
 > ֆունկցիոնալի տվյալները նույնպես կունենան նույն պաշտպանությունը։
+
+
+
