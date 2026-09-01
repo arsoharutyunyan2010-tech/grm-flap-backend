@@ -101,21 +101,22 @@ app.post('/api/start-session', (req, res) => {
   res.json({ sessionId, seed, physicsVersion: P.VERSION, maxRevives: P.MAX_REVIVES });
 });
 
-app.post('/api/submit-score', (req, res) => {
-  const { sessionId, flapLog, totalSteps, clientScore, reviveLog } = req.body || {};
-
+function replaySession(sessionId, flapLog, totalSteps, reviveLog, opts) {
+  opts = opts || {};
   if (!sessionId || !Array.isArray(flapLog) || !Number.isFinite(totalSteps)) {
-    return res.status(400).json({ error: 'malformed submission' });
+    return { ok: false, status: 400, error: 'malformed submission' };
   }
   if (flapLog.length > 20000 || totalSteps > P.MAX_STEPS_PER_SESSION) {
-    return res.status(400).json({ error: 'submission too large' });
+    return { ok: false, status: 400, error: 'submission too large' };
   }
-  const revives = Array.isArray(reviveLog) ? reviveLog.slice(0, 10) : [];
-
   const session = store.getSession(sessionId);
-  if (!session) return res.status(404).json({ error: 'unknown or expired session' });
-  if (session.used) return res.status(409).json({ error: 'session already submitted' });
+  if (!session) return { ok: false, status: 404, error: 'unknown or expired session' };
+  if (session.used) return { ok: false, status: 409, error: 'session already submitted' };
+  if (opts.userId && String(session.userId) !== String(opts.userId)) {
+    return { ok: false, status: 403, error: 'session belongs to another user' };
+  }
 
+  const revives = opts.allowRevives && Array.isArray(reviveLog) ? reviveLog.slice(0, 10) : [];
   const elapsedRealMs = Date.now() - session.startedAt;
   const revivesClaimed = Math.min(revives.length, P.MAX_REVIVES);
   const REVIVE_ALLOWANCE_MS = 5000;
@@ -123,7 +124,7 @@ app.post('/api/submit-score', (req, res) => {
   const TOLERANCE = 1.15;
   if (claimedMs > (elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) * TOLERANCE + 2000) {
     store.consumeSession(sessionId);
-    return res.status(400).json({ error: 'submission rejected: implausible timing' });
+    return { ok: false, status: 400, error: 'submission rejected: implausible timing' };
   }
 
   const allowedSteps = Math.min(
@@ -131,8 +132,18 @@ app.post('/api/submit-score', (req, res) => {
     Math.ceil(((elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) / 1000) / P.STEP) + 5
   );
   const replay = P.simulate(session.seed, flapLog, allowedSteps, revives);
-
   store.consumeSession(sessionId);
+  return { ok: true, session, replay };
+}
+
+app.post('/api/submit-score', (req, res) => {
+  const { sessionId, flapLog, totalSteps, clientScore, reviveLog } = req.body || {};
+
+  const verified = replaySession(sessionId, flapLog, totalSteps, reviveLog, { allowRevives: true });
+  if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
+
+  const session = verified.session;
+  const replay = verified.replay;
 
   const verifiedScore = replay.score;
   const name = sessionNames.get(sessionId) || 'Player';
@@ -353,6 +364,9 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
 app.post('/api/pvp/join', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (!store.allowRequest('pvpjoin:' + user.id, 20, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   const result = store.pvpJoin(String(user.id), displayName(user), Number(req.body.stake));
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
@@ -370,7 +384,31 @@ app.post('/api/pvp/status', (req, res) => {
 app.post('/api/pvp/submit', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
-  const result = store.pvpSubmitScore(String(user.id), req.body.score);
+  const userId = String(user.id);
+  if (!store.allowRequest('pvpsubmit:' + userId, 20, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP submits, slow down' });
+  }
+  const { sessionId, flapLog, totalSteps } = req.body || {};
+  // Don't consume a session unless it is actually this player's turn.
+  const pre = store.pvpStatus(userId);
+  if (pre && pre.match && pre.match.status === 'done') return res.json(pre);
+  if (!pre || !pre.match || !pre.match.yourTurn) {
+    return res.status(400).json({ error: 'not your turn' });
+  }
+  const peek = store.getSession(sessionId);
+  if (peek && pre.match.turnStartedAt && peek.startedAt < pre.match.turnStartedAt) {
+    return res.status(400).json({ error: 'stale session' });
+  }
+  // PvP never grants ad-revives: replay with an empty revive log so a forged
+  // reviveLog can't inflate the stake-settling score.
+  const verified = replaySession(sessionId, flapLog, totalSteps, [], {
+    allowRevives: false,
+    userId,
+  });
+  if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
+  const result = store.pvpSubmitScore(userId, verified.replay.score, {
+    sessionStartedAt: verified.session.startedAt,
+  });
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
 });
