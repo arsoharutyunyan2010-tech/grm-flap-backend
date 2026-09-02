@@ -18,6 +18,7 @@ const path = require('path');
 const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
+const AC = require('./anticheat.js');
 
 try {
   const art = require('./art-assets.js');
@@ -34,19 +35,48 @@ try {
 }
 
 const app = express();
-app.use(express.json({ limit: '256kb' }));
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '256kb', strict: true }));
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
+// Never serve the whole repo: that used to leak server.js, store.js, .env and
+// data/store.json (every balance + TON address) to anyone who guessed the path.
 const INDEX_FILE = path.join(__dirname, 'index.html');
 app.get(['/', '/index.html'], (req, res, next) => {
   if (fs.existsSync(INDEX_FILE)) return res.sendFile(INDEX_FILE);
   next();
 });
-app.use(express.static(__dirname));
-
-const sessionNames = new Map();
+app.get('/physics.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store');
+  res.sendFile(path.join(__dirname, 'physics.js'));
+});
+app.get('/admin.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+const IMG_DIR = path.join(__dirname, 'img');
+if (fs.existsSync(IMG_DIR)) {
+  app.use('/img', express.static(IMG_DIR, { fallthrough: false, index: false }));
+}
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const ALLOW_INSECURE_DEV = process.env.ALLOW_INSECURE_DEV === 'true';
-const INIT_DATA_MAX_AGE_SECONDS = 24 * 60 * 60;
+const NODE_ENV = process.env.NODE_ENV || '';
+let ALLOW_INSECURE_DEV = process.env.ALLOW_INSECURE_DEV === 'true';
+if (NODE_ENV === 'production' && ALLOW_INSECURE_DEV) {
+  console.error('ALLOW_INSECURE_DEV is ignored in production — Telegram auth is required.');
+  ALLOW_INSECURE_DEV = false;
+}
+const INIT_DATA_MAX_AGE_SECONDS = 12 * 60 * 60;
+if (process.env.SESSION_SECRET || BOT_TOKEN) {
+  AC.setSessionSecret(process.env.SESSION_SECRET || BOT_TOKEN);
+}
 
 function authenticate(initData) {
   if (ALLOW_INSECURE_DEV && !initData) {
@@ -58,7 +88,16 @@ function authenticate(initData) {
 }
 
 function displayName(user) {
-  return user.username ? '@' + user.username : (user.first_name || 'Player');
+  const raw = user && user.username ? '@' + user.username : ((user && user.first_name) || 'Player');
+  return AC.sanitizeName(raw);
+}
+
+function rejectBanned(user, res) {
+  if (!user) return false;
+  if (!store.isBanned(String(user.id))) return false;
+  const info = store.banInfo(String(user.id));
+  res.status(403).json({ error: 'temporarily banned for cheating', until: info && info.until });
+  return true;
 }
 
 function startParamFrom(req) {
@@ -83,71 +122,126 @@ function ranksFor(userId) {
 }
 
 app.post('/api/start-session', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
 
-  if (!store.allowRequest('start:' + user.id, 12, 60 * 1000)) {
+  const ip = AC.clientIp(req);
+  if (!store.allowRequest('ip:' + ip, 90, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  // 6 new games per 2 minutes — farming a bot at 12/min used to be allowed.
+  if (!store.allowRequest('start:' + user.id, 6, 2 * 60 * 1000)) {
     return res.status(429).json({ error: 'too many session starts, slow down' });
   }
+  if (!store.allowRequest('startday:' + user.id, 250, 24 * 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'daily session cap reached' });
+  }
 
+  const name = displayName(user);
   store.trackUser(String(user.id));
-  store.attachReferral(String(user.id), displayName(user), startParamFrom(req));
+  store.attachReferral(String(user.id), name, startParamFrom(req));
 
   const sessionId = crypto.randomBytes(16).toString('hex');
   const seed = crypto.randomInt(1, 2 ** 31 - 1);
-  store.createSession(sessionId, String(user.id), seed);
-  sessionNames.set(sessionId, displayName(user));
+  const token = AC.sessionToken(sessionId, String(user.id), seed);
+  // Revives are NOT granted here. Ads are client-side and trivially spoofed;
+  // a script would just send reviveLog=[crashStep,...]. Score continues only
+  // count when grantRevive() is called from a verified S2S ad postback.
+  store.createSession(sessionId, String(user.id), seed, { name, token, grantedRevives: 0 });
 
-  res.json({ sessionId, seed, physicsVersion: P.VERSION, maxRevives: P.MAX_REVIVES });
+  res.json({
+    sessionId,
+    seed,
+    token,
+    physicsVersion: P.VERSION,
+    maxRevives: 0,
+  });
 });
 
 function replaySession(sessionId, flapLog, totalSteps, reviveLog, opts) {
   opts = opts || {};
-  if (!sessionId || !Array.isArray(flapLog) || !Number.isFinite(totalSteps)) {
+  if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 80) {
     return { ok: false, status: 400, error: 'malformed submission' };
   }
-  if (flapLog.length > 20000 || totalSteps > P.MAX_STEPS_PER_SESSION) {
+  if (!Number.isFinite(totalSteps) || totalSteps < 0) {
+    return { ok: false, status: 400, error: 'malformed submission' };
+  }
+  if (!Array.isArray(flapLog) || flapLog.length > AC.MAX_FLAP_LOG || totalSteps > P.MAX_STEPS_PER_SESSION) {
     return { ok: false, status: 400, error: 'submission too large' };
   }
-  const session = store.getSession(sessionId);
-  if (!session) return { ok: false, status: 404, error: 'unknown or expired session' };
-  if (session.used) return { ok: false, status: 409, error: 'session already submitted' };
-  if (opts.userId && String(session.userId) !== String(opts.userId)) {
+  const flaps = AC.sanitizeIntArray(flapLog, AC.MAX_FLAP_LOG, P.MAX_STEPS_PER_SESSION);
+
+  const peek = store.getSession(sessionId);
+  if (!peek) return { ok: false, status: 404, error: 'unknown or expired session' };
+  if (peek.used) return { ok: false, status: 409, error: 'session already submitted' };
+  if (opts.userId && String(peek.userId) !== String(opts.userId)) {
     return { ok: false, status: 403, error: 'session belongs to another user' };
   }
+  if (peek.token && !AC.tokensMatch(opts.token, peek.token)) {
+    return { ok: false, status: 403, error: 'bad session token' };
+  }
 
-  const revives = opts.allowRevives && Array.isArray(reviveLog) ? reviveLog.slice(0, 10) : [];
-  const elapsedRealMs = Date.now() - session.startedAt;
-  const revivesClaimed = Math.min(revives.length, P.MAX_REVIVES);
-  const REVIVE_ALLOWANCE_MS = 5000;
-  const claimedMs = totalSteps * (P.STEP * 1000);
-  const TOLERANCE = 1.15;
-  if (claimedMs > (elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) * TOLERANCE + 2000) {
+  const granted = Math.max(0, Number(peek.grantedRevives) || 0);
+  const revives = (opts.allowRevives && granted > 0)
+    ? AC.sanitizeIntArray(reviveLog, AC.MAX_REVIVE_LOG, P.MAX_STEPS_PER_SESSION).slice(0, granted)
+    : [];
+  const elapsedRealMs = Date.now() - peek.startedAt;
+  const reviveAllowanceMs = revives.length * 4000;
+  const timing = AC.checkTiming(totalSteps, elapsedRealMs, reviveAllowanceMs);
+  if (!timing.ok) {
     store.consumeSession(sessionId);
     return { ok: false, status: 400, error: 'submission rejected: implausible timing' };
   }
 
-  const allowedSteps = Math.min(
-    totalSteps,
-    Math.ceil(((elapsedRealMs + revivesClaimed * REVIVE_ALLOWANCE_MS) / 1000) / P.STEP) + 5
-  );
-  const replay = P.simulate(session.seed, flapLog, allowedSteps, revives);
-  store.consumeSession(sessionId);
-  return { ok: true, session, replay };
+  // Consume BEFORE simulate so two parallel submits cannot both score.
+  const session = store.consumeSession(sessionId);
+  if (!session) return { ok: false, status: 409, error: 'session already submitted' };
+
+  const allowedSteps = Math.min(totalSteps, AC.allowedStepsFor(elapsedRealMs, reviveAllowanceMs));
+  const replay = P.simulate(session.seed, flaps, allowedSteps, revives);
+
+  const judged = AC.verdict({
+    score: replay.score,
+    totalSteps: allowedSteps,
+    flapLog: flaps,
+    elapsedMs: elapsedRealMs,
+    heartbeats: session.heartbeats,
+    startedAt: session.startedAt,
+    revivesUsed: replay.revivesUsed,
+    grantedRevives: granted,
+    reviveAllowanceMs,
+  });
+  if (!judged.ok) {
+    store.addStrike(session.userId, judged.hard[0] || 'anticheat', { hard: judged.hard, score: replay.score });
+    return { ok: false, status: 400, error: 'submission rejected: ' + (judged.hard[0] || 'anticheat') };
+  }
+  return { ok: true, session, replay, judged, flapLog: flaps };
 }
 
 app.post('/api/submit-score', (req, res) => {
-  const { sessionId, flapLog, totalSteps, clientScore, reviveLog } = req.body || {};
+  const body = req.body || {};
+  const { sessionId, flapLog, totalSteps, clientScore, reviveLog, token } = body;
 
-  const verified = replaySession(sessionId, flapLog, totalSteps, reviveLog, { allowRevives: true });
+  const user = authenticate(body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('submit:' + user.id, 20, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many submits, slow down' });
+  }
+
+  const verified = replaySession(sessionId, flapLog, totalSteps, reviveLog, {
+    allowRevives: true,
+    userId: String(user.id),
+    token,
+  });
   if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
 
   const session = verified.session;
   const replay = verified.replay;
 
   const verifiedScore = replay.score;
-  const name = sessionNames.get(sessionId) || 'Player';
-  sessionNames.delete(sessionId);
+  const name = session.name || displayName(user);
   store.submitPeriodScores(session.userId, name, verifiedScore);
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
   const ranks = ranksFor(session.userId);
@@ -166,6 +260,26 @@ app.post('/api/submit-score', (req, res) => {
     revivesUsed: replay.revivesUsed,
     flapBalance: store.getBalance(session.userId),
   });
+});
+
+app.post('/api/session-heartbeat', (req, res) => {
+  const body = req.body || {};
+  const user = authenticate(body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+
+  const sessionId = String(body.sessionId || '');
+  const session = store.getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'unknown or expired session' });
+  if (String(session.userId) !== String(user.id)) {
+    return res.status(403).json({ error: 'session belongs to another user' });
+  }
+  if (session.token && !AC.tokensMatch(body.token, session.token)) {
+    return res.status(403).json({ error: 'bad session token' });
+  }
+  const result = store.addHeartbeat(sessionId, body.step);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json({ ok: true });
 });
 
 app.get('/api/leaderboard', (req, res) => {
@@ -192,8 +306,9 @@ app.get('/api/leaderboard', (req, res) => {
 });
 
 app.post('/api/profile', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
 
   const userId = String(user.id);
   const ranks = ranksFor(userId);
@@ -224,16 +339,17 @@ app.post('/api/profile', (req, res) => {
 const TON_ADDRESS_RE = /^(?:[A-Za-z0-9_-]{48}|-?\d:[0-9a-fA-F]{64})$/;
 
 app.post('/api/withdraw', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
 
   const userId = String(user.id);
   if (!store.allowRequest('withdraw:' + userId, 5, 60 * 60 * 1000)) {
     return res.status(429).json({ error: 'too many withdrawal requests, try again later' });
   }
 
-  const address = String(req.body.address || '').trim();
-  const amount = Number(req.body.amount);
+  const address = String((req.body && req.body.address) || '').trim();
+  const amount = Number(req.body && req.body.amount);
 
   if (!TON_ADDRESS_RE.test(address)) {
     return res.status(400).json({ error: 'invalid TON address format' });
@@ -257,20 +373,21 @@ app.get('/api/tads-reward', tadsReward);
 app.post('/api/tads-reward', tadsReward);
 
 app.post('/api/deposit', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
 
   const userId = String(user.id);
   if (!store.allowRequest('deposit:' + userId, 8, 60 * 60 * 1000)) {
     return res.status(429).json({ error: 'too many top-up requests, try again later' });
   }
 
-  const amount = Number(req.body.amount);
-  const txHash = String(req.body.txHash || '').trim();
+  const amount = Number(req.body && req.body.amount);
+  const txHash = AC.sanitizeTxHash(req.body && req.body.txHash);
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ error: 'invalid amount' });
   }
-  if (txHash.length < 8 || txHash.length > 128) {
+  if (!txHash) {
     return res.status(400).json({ error: 'invalid transaction hash' });
   }
 
@@ -289,7 +406,14 @@ app.post('/api/deposit', (req, res) => {
 });
 
 function requireAdmin(req, res) {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) {
+  const expected = process.env.ADMIN_KEY;
+  // Unset / short keys used to compare `undefined !== undefined` → OPEN admin.
+  if (!expected || String(expected).length < 16) {
+    res.status(403).json({ error: 'admin not configured' });
+    return false;
+  }
+  const got = req.headers['x-admin-key'];
+  if (!AC.safeEqual(got, expected)) {
     res.status(403).json({ error: 'forbidden' });
     return false;
   }
@@ -394,7 +518,13 @@ app.get('/internal/health', (req, res) => {
 // does not just trust the env — it proves the backend is reachable AND
 // writable right now, so you can confirm right before/after every deploy that
 // player data will really survive it.
+app.get('/internal/anticheat', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ events: store.listAntiCheatEvents(80) });
+});
+
 app.get('/internal/durability', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
   try {
     const persist = store.persistInfo();
     const probe = await store.probeDurability();
@@ -413,8 +543,9 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
 });
 
 app.post('/api/pvp/join', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   if (!store.allowRequest('pvpjoin:' + user.id, 20, 60 * 1000)) {
     return res.status(429).json({ error: 'too many PvP requests, slow down' });
   }
@@ -433,13 +564,14 @@ app.post('/api/pvp/status', (req, res) => {
   res.json(store.pvpStatus(String(user.id)));
 });
 app.post('/api/pvp/submit', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   const userId = String(user.id);
   if (!store.allowRequest('pvpsubmit:' + userId, 20, 60 * 1000)) {
     return res.status(429).json({ error: 'too many PvP submits, slow down' });
   }
-  const { sessionId, flapLog, totalSteps } = req.body || {};
+  const { sessionId, flapLog, totalSteps, token } = req.body || {};
   // Don't consume a session unless it is actually this player's turn.
   const pre = store.pvpStatus(userId);
   if (pre && pre.match && pre.match.status === 'done') return res.json(pre);
@@ -455,6 +587,7 @@ app.post('/api/pvp/submit', (req, res) => {
   const verified = replaySession(sessionId, flapLog, totalSteps, [], {
     allowRevives: false,
     userId,
+    token,
   });
   if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
   const result = store.pvpSubmitScore(userId, verified.replay.score, {
@@ -464,29 +597,29 @@ app.post('/api/pvp/submit', (req, res) => {
   res.json(result);
 });
 app.post('/api/pvp/decline', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   res.json(store.pvpDecline(String(user.id)));
 });
 app.post('/api/pvp/forfeit', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   res.json(store.pvpForfeit(String(user.id)));
 });
 app.post('/api/pvp/heartbeat', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   res.json(store.pvpHeartbeat(String(user.id)));
 });
 app.post('/api/pvp/ready', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   const result = store.pvpReady(String(user.id));
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
 });
 app.post('/api/pvp/ack', (req, res) => {
-  const user = authenticate(req.body.initData);
+  const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   res.json(store.pvpAck(String(user.id)));
 });

@@ -90,6 +90,27 @@
     loadDeposits(key);
     loadWithdrawals(key);
     loadBackups();
+    loadAntiCheat(key);
+  }
+
+  function loadAntiCheat(key){
+    fetch(API_BASE + '/internal/anticheat', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        var tb = document.getElementById('acRows');
+        var list = d.events || [];
+        if (!list.length) { tb.innerHTML = '<tr><td colspan="3">No rejects yet.</td></tr>'; return; }
+        tb.innerHTML = '';
+        list.forEach(function(ev){
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + (ev.at ? new Date(ev.at).toLocaleString() : '—') + '</td>' +
+            '<td>' + String(ev.userId||'').replace(/</g,'&lt;') + '</td>' +
+            '<td>' + String(ev.reason||'').replace(/</g,'&lt;') + '</td>';
+          tb.appendChild(tr);
+        });
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Anticheat error: ' + e.message; });
   }
 
   function loadStats(key){
@@ -191,7 +212,7 @@
       tr.innerHTML =
         '<td>#'+w.id+'</td>' +
         '<td>'+ (w.name||'').replace(/</g,'&lt;') +'</td>' +
-        '<td style="word-break:break-all;max-width:160px;">'+ w.address +'</td>' +
+        '<td style="word-break:break-all;max-width:160px;">'+ String(w.address||'').replace(/</g,'&lt;') +'</td>' +
         '<td>'+ w.amount +' FLAP</td>' +
         '<td class="status-'+w.status+'">'+ w.status +'</td>' +
         '<td>'+ payCell +'</td>';

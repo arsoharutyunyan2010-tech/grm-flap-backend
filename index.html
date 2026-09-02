@@ -1881,7 +1881,7 @@ window.FLAPY_ART = {
       method: 'POST',
       body: JSON.stringify({ initData: initData, startParam: startParam })
     }).then(function(res){
-      session = { sessionId: res.sessionId, seed: res.seed, startedAt: Date.now() };
+      session = { sessionId: res.sessionId, seed: res.seed, token: res.token || '', startedAt: Date.now() };
       return session;
     }).catch(function(err){
       session = { sessionId: null, seed: localSeed(), startedAt: Date.now(), offline: true };
@@ -1894,11 +1894,19 @@ window.FLAPY_ART = {
     }
     return apiFetch('/api/submit-score', {
       method: 'POST',
-      body: JSON.stringify({ sessionId: session.sessionId, flapLog: flapLog, reviveLog: reviveLog, totalSteps: totalSteps, clientScore: clientScore })
+      body: JSON.stringify({ sessionId: session.sessionId, flapLog: flapLog, reviveLog: reviveLog, totalSteps: totalSteps, clientScore: clientScore, initData: initData, token: session.token || '' })
     }).then(function(res){ res.verified = true; return res; })
       .catch(function(err){
         return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false, error: String(err.message||err) };
       });
+  }
+  var lastHeartbeatAt = 0;
+  function sendHeartbeat(){
+    if (DEMO_MODE || !session || !session.sessionId || state !== 'playing') return;
+    apiFetch('/api/session-heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ initData: initData, sessionId: session.sessionId, step: stepIndex, token: session.token || '' })
+    }).catch(function(){});
   }
   function fetchLeaderboard(period){
     period = period || lbPeriod;
@@ -2781,6 +2789,7 @@ window.FLAPY_ART = {
     if (state === 'playing') {
       accumulator += dt;
       while (accumulator >= STEP) { simStep(); accumulator -= STEP; if(state!=='playing') { accumulator=0; break; } }
+      if (!lastHeartbeatAt || ts - lastHeartbeatAt > 3000) { lastHeartbeatAt = ts; sendHeartbeat(); }
     } else if (state === 'ready') {
       bird.y = P.BIRD_START_Y + Math.sin(elapsedMs/300)*8;
     }
@@ -2984,7 +2993,8 @@ window.FLAPY_ART = {
         sessionId: payload.sessionId,
         flapLog: payload.flapLog || [],
         totalSteps: payload.totalSteps,
-        score: payload.score
+        score: payload.score,
+        token: (session && session.token) || ''
       })
     })
       .then(function(res){

@@ -41,7 +41,12 @@ function distributeGrmRewards(payouts, store) {
 }
 
 function runWeeklyRewardJob(store, weekKeyOverride) {
-  const weekKey = weekKeyOverride || store.currentWeekKey();
+  // Default to the LAST completed ISO week. At Monday 00:00 UTC currentWeekKey
+  // has already rolled forward, so paying "this week" would credit an empty board.
+  const weekKey = weekKeyOverride || (store.previousWeekKey ? store.previousWeekKey() : store.currentWeekKey());
+  if (store.weekAlreadyPaid && store.weekAlreadyPaid(weekKey)) {
+    return { weekKey, paidOut: 0, payouts: [], skipped: true, reason: 'already paid' };
+  }
   const { ranked } = store.getLeaderboard(weekKey, Infinity);
 
   const payouts = ranked

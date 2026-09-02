@@ -59,7 +59,9 @@ let blockedSaves = 0;
 // code are kept verbatim, so rolling back a deploy never deletes new data.
 let extraFields = {};
 
-const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used }
+const sessions = new Map();       // sessionId -> { userId, seed, startedAt, used, ... }
+const bans = new Map();           // userId -> { until, reason, strikes }
+const antiCheatEvents = [];       // recent rejects (capped)
 const periodBoards = new Map();   // periodKey -> Map(userId -> { name, score, updatedAt })
 const rewardHistory = [];         // archived weekly results
 const rateBuckets = new Map();    // userId -> [timestamps]
@@ -100,6 +102,14 @@ function currentWeekKey(d = new Date()) {
 
 function currentMonthKey(d = new Date()) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function previousWeekKey(d = new Date()) {
+  return currentWeekKey(new Date(d.getTime() - 7 * 24 * 3600 * 1000));
+}
+
+function weekAlreadyPaid(weekKey) {
+  return rewardHistory.some((r) => r && r.weekKey === String(weekKey));
 }
 
 function periodKey(period, d = new Date()) {
@@ -144,6 +154,8 @@ function snapshot() {
       return out;
     })(),
     referrals: Object.fromEntries(Array.from(referralByUser.entries()).map(([uid, row]) => [uid, row])),
+    bans: Object.fromEntries(Array.from(bans.entries()).map(([uid, row]) => [uid, row])),
+    antiCheatEvents: antiCheatEvents.slice(-200),
     dailyInvites: (function () {
       const out = {};
       for (const [day, m] of dailyInvites) {
@@ -160,6 +172,7 @@ const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
   'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'totalRuns',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
+  'bans', 'antiCheatEvents',
 ]);
 
 function hydrate(data) {
@@ -294,6 +307,24 @@ function hydrate(data) {
     referralByUser.set(userId, rec);
     referralCodeIndex.set(String(rec.code).toLowerCase(), userId);
     referralCodeIndex.set(('ref_' + userId).toLowerCase(), userId);
+  }
+
+  bans.clear();
+  const banIn = data.bans || {};
+  for (const uid of Object.keys(banIn)) {
+    const row = banIn[uid];
+    if (!row || typeof row !== 'object') continue;
+    bans.set(String(uid), {
+      until: Number(row.until) || 0,
+      reason: String(row.reason || 'cheat').slice(0, 120),
+      strikes: Math.max(0, Number(row.strikes) || 0),
+    });
+  }
+  antiCheatEvents.length = 0;
+  if (Array.isArray(data.antiCheatEvents)) {
+    for (const ev of data.antiCheatEvents.slice(-200)) {
+      if (ev && typeof ev === 'object') antiCheatEvents.push(ev);
+    }
   }
 
   dailyInvites.clear();
@@ -668,7 +699,9 @@ async function restoreBackup(id) {
     data = parseSnapshot(fs.readFileSync(full, 'utf8'));
   } else {
     if (!useRedis) return { ok: false, error: 'redis not configured' };
-    data = parseSnapshot(await redisCmd(['GET', String(id)]));
+    const rid = String(id);
+    if (rid.indexOf(BACKUP_PREFIX) !== 0) return { ok: false, error: 'invalid backup id' };
+    data = parseSnapshot(await redisCmd(['GET', rid]));
   }
   if (!data) return { ok: false, error: 'backup not found or unreadable' };
   // Safety net: snapshot the CURRENT state before replacing it.
@@ -933,15 +966,105 @@ const autosaveTimer = setInterval(() => {
 }, Math.max(30000, Number(process.env.AUTOSAVE_MS) || 5 * 60 * 1000));
 if (autosaveTimer.unref) autosaveTimer.unref();
 
-function createSession(sessionId, userId, seed) {
-  sessions.set(sessionId, { userId, seed, startedAt: Date.now(), used: false });
+function createSession(sessionId, userId, seed, extra) {
+  extra = extra || {};
+  sessions.set(sessionId, {
+    userId: String(userId),
+    seed,
+    startedAt: Date.now(),
+    used: false,
+    name: extra.name || 'Player',
+    token: extra.token || '',
+    grantedRevives: Math.max(0, Math.min(2, Number(extra.grantedRevives) || 0)),
+    heartbeats: [],
+    lastHeartbeatAt: 0,
+    lastHeartbeatStep: 0,
+  });
 }
 function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
+/** Atomically mark a session used. Returns the session, or null if missing/already used. */
 function consumeSession(sessionId) {
   const s = sessions.get(sessionId);
-  if (s) s.used = true;
+  if (!s || s.used) return null;
+  s.used = true;
+  return s;
+}
+
+function addHeartbeat(sessionId, step) {
+  const s = sessions.get(sessionId);
+  if (!s || s.used) return { ok: false, error: 'unknown or expired session' };
+  step = Math.max(0, Math.floor(Number(step) || 0));
+  const now = Date.now();
+  if (s.lastHeartbeatAt && now - s.lastHeartbeatAt < 700) {
+    return { ok: false, error: 'too fast' };
+  }
+  if (step < s.lastHeartbeatStep) {
+    return { ok: false, error: 'step rewind' };
+  }
+  const dt = now - (s.lastHeartbeatAt || s.startedAt);
+  const maxJump = Math.ceil((dt / 1000) / (1 / 60)) + 120;
+  if (step > s.lastHeartbeatStep + maxJump) {
+    return { ok: false, error: 'step jump' };
+  }
+  s.heartbeats.push({ at: now, step });
+  if (s.heartbeats.length > 400) s.heartbeats.splice(0, s.heartbeats.length - 400);
+  s.lastHeartbeatAt = now;
+  s.lastHeartbeatStep = step;
+  return { ok: true };
+}
+
+function grantRevive(sessionId) {
+  const s = sessions.get(sessionId);
+  if (!s || s.used) return { ok: false, error: 'unknown or expired session' };
+  if (s.grantedRevives >= 2) return { ok: false, error: 'no revives left' };
+  s.grantedRevives += 1;
+  return { ok: true, grantedRevives: s.grantedRevives };
+}
+
+function isBanned(userId) {
+  const row = bans.get(String(userId));
+  if (!row) return false;
+  if (row.until && Date.now() > row.until) {
+    bans.delete(String(userId));
+    return false;
+  }
+  return row.until ? Date.now() < row.until : false;
+}
+
+function banInfo(userId) {
+  if (!isBanned(userId)) return null;
+  return bans.get(String(userId)) || null;
+}
+
+function addStrike(userId, reason, details) {
+  userId = String(userId);
+  const now = Date.now();
+  const ev = { userId, reason: String(reason || 'cheat').slice(0, 120), at: now, details: details || null };
+  antiCheatEvents.push(ev);
+  if (antiCheatEvents.length > 400) antiCheatEvents.splice(0, antiCheatEvents.length - 400);
+
+  const row = bans.get(userId) || { until: 0, reason: '', strikes: 0, windowStart: now };
+  if (!row.windowStart || now - row.windowStart > 24 * 60 * 60 * 1000) {
+    row.windowStart = now;
+    row.strikes = 0;
+  }
+  row.strikes += 1;
+  row.reason = ev.reason;
+  // 5 rejects in 24h → 12h ban; 8 → 48h.
+  if (row.strikes >= 8) {
+    row.until = now + 48 * 60 * 60 * 1000;
+  } else if (row.strikes >= 5) {
+    row.until = now + 12 * 60 * 60 * 1000;
+  }
+  bans.set(userId, row);
+  scheduleSave();
+  return row;
+}
+
+function listAntiCheatEvents(limit) {
+  return antiCheatEvents.slice(-(limit || 50)).reverse();
 }
 setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
@@ -952,6 +1075,8 @@ setInterval(() => {
 
 function upsertBoardScore(key, userId, name, score) {
   userId = String(userId);
+  score = Math.max(0, Math.min(100000, Math.floor(Number(score) || 0)));
+  name = String(name || 'Player').replace(/[\u0000-\u001f\u007f<>]/g, '').slice(0, 48) || 'Player';
   if (!periodBoards.has(key)) periodBoards.set(key, new Map());
   const board = periodBoards.get(key);
   const existing = board.get(userId);
@@ -1019,6 +1144,8 @@ function archiveWeek(weekKey, payouts) {
 
 function updateAllTimeBest(userId, name, score) {
   userId = String(userId);
+  score = Math.max(0, Math.min(100000, Math.floor(Number(score) || 0)));
+  name = String(name || 'Player').replace(/[\u0000-\u001f\u007f<>]/g, '').slice(0, 48) || 'Player';
   const existing = allTimeBest.get(userId);
   if (!existing || score > existing.score) {
     allTimeBest.set(userId, { name, score });
@@ -1035,6 +1162,8 @@ function getBalance(userId) {
   return balances.get(String(userId)) || 0;
 }
 function creditBalance(userId, amount) {
+  amount = Number(amount);
+  if (!Number.isFinite(amount)) return getBalance(userId);
   const bal = getBalance(userId) + amount;
   balances.set(String(userId), bal);
   scheduleSave();
@@ -1044,16 +1173,23 @@ function getCBalance(userId) {
   return cBalances.get(String(userId)) || 0;
 }
 function creditCBalance(userId, amount) {
+  amount = Number(amount);
+  if (!Number.isFinite(amount)) return getCBalance(userId);
   const bal = getCBalance(userId) + amount;
   cBalances.set(String(userId), bal);
   scheduleSave();
   return bal;
 }
 
+const MIN_WITHDRAW_FLAP = Math.max(1, Math.floor(Number(process.env.MIN_WITHDRAW_FLAP) || 10));
+
 function requestWithdrawal(userId, name, address, amount) {
   userId = String(userId);
+  amount = Math.floor(Number(amount));
   const bal = getBalance(userId);
-  if (!(amount > 0)) return { ok: false, error: 'invalid amount' };
+  if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_FLAP) {
+    return { ok: false, error: 'minimum withdrawal is ' + MIN_WITHDRAW_FLAP + ' FLAP' };
+  }
   if (amount > bal) return { ok: false, error: 'insufficient balance' };
   balances.set(userId, bal - amount);
   const request = {
@@ -1072,6 +1208,7 @@ function listWithdrawals(status) {
 function markWithdrawalPaid(id) {
   const w = withdrawals.find(w => w.id === id);
   if (!w) return null;
+  if (w.status === 'paid') return w;
   w.status = 'paid';
   w.paidAt = Date.now();
   scheduleSave();
@@ -1080,13 +1217,19 @@ function markWithdrawalPaid(id) {
 
 function requestDeposit(userId, name, amount, txHash) {
   userId = String(userId);
-  if (!(amount > 0)) return { ok: false, error: 'invalid amount' };
+  amount = Math.floor(Number(amount));
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: 'invalid amount' };
+  if (amount > 1e9) return { ok: false, error: 'invalid amount' };
+  const hash = String(txHash || '').trim().toLowerCase();
+  if (hash.length < 8 || hash.length > 128) return { ok: false, error: 'invalid transaction hash' };
+  const dup = deposits.find((d) => d && String(d.txHash || '').toLowerCase() === hash && d.status !== 'rejected');
+  if (dup) return { ok: false, error: 'transaction already submitted' };
   const request = {
     id: depositSeq++,
     userId,
     name,
     amount,
-    txHash: String(txHash || '').trim(),
+    txHash: hash,
     status: 'pending',
     requestedAt: Date.now(),
   };
@@ -1529,9 +1672,12 @@ function attachReferral(userId, name, startParam) {
   if (!code) return rec;
   let referrerId = referralCodeIndex.get(code.toLowerCase());
   if (!referrerId && /^ref[_-]?(\d+)$/i.test(code)) {
-    referrerId = code.replace(/^ref[_-]?/i, '');
-    ensureReferral(referrerId, 'Player');
-    referrerId = referralCodeIndex.get(('ref_' + referrerId).toLowerCase()) || referrerId;
+    const maybe = code.replace(/^ref[_-]?/i, '');
+    // Only credit a referrer who already exists — don't invent ghost accounts
+    // from a forged start_param (scripts used to mint fake uplines).
+    if (knownUsers.has(String(maybe)) || referralByUser.has(String(maybe))) {
+      referrerId = maybe;
+    }
   }
   if (!referrerId || String(referrerId) === userId) return rec;
 
@@ -1658,15 +1804,17 @@ function pvpSubmitScore(userId, score, opts) {
 }
 
 module.exports = {
-  currentDayKey, currentWeekKey, currentMonthKey, periodKey,
-  createSession, getSession, consumeSession,
+  currentDayKey, currentWeekKey, currentMonthKey, previousWeekKey, periodKey,
+  weekAlreadyPaid,
+  createSession, getSession, consumeSession, addHeartbeat, grantRevive,
+  isBanned, banInfo, addStrike, listAntiCheatEvents,
   submitPeriodScores, submitWeeklyScore, getLeaderboard, getUserRank,
   allowRequest,
   archiveWeek,
   rewardHistory,
   updateAllTimeBest, getAllTimeBest,
   getBalance, creditBalance, getCBalance, creditCBalance,
-  requestWithdrawal, listWithdrawals, markWithdrawalPaid,
+  requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
   trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,

@@ -9,6 +9,7 @@ Pipeline: **Telegram Bot → Mini App → Rewarded Ads → Game → Score → Se
 | `index.html` | The game itself, loaded as the Telegram Mini App. |
 | `physics.js` | **Shared** deterministic simulation. Loaded by both the browser and the server. |
 | `server.js` | Express backend: session issuance, score verification, leaderboard API. |
+| `anticheat.js` | Server-side anti-cheat: HMAC session tokens, heartbeats, tap-cadence, revive grants, input sanitization. |
 | `telegramAuth.js` | Verifies Telegram `initData` (proves the request really comes from that Telegram user). |
 | `store.js` | Data layer (in-memory demo — swap for Redis/Postgres in production; see comments inside). |
 | `rewards.js` | Weekly GRM reward tiers + payout stub. |
@@ -47,8 +48,31 @@ client/server mismatches.
 
 ## Anti-cheat layers, specifically
 
+The client is **never trusted** for score, revives, balance, or referrals.
+A userscript / modified `index.html` / raw `curl` can only send inputs;
+the server decides what they are worth (`anticheat.js` + `physics.js`).
+
 - **Server-authoritative replay** (above) — the big one. A modified client
   can only change *when* it flaps, not what happens physically afterward.
+- **Telegram auth on every scoring request** — `/api/submit-score` and
+  `/api/session-heartbeat` require valid `initData` matching the session
+  owner. Stolen `sessionId` alone cannot post a score.
+- **HMAC session token** — `start-session` returns a token bound to
+  `{sessionId, userId, seed}`. Submit/heartbeat without it is rejected.
+- **Atomic one-shot sessions** — `consumeSession` marks the session used
+  *before* replay, so two parallel submits cannot both score.
+- **Live heartbeats** — runs longer than ~25s of simulated time must ping
+  `/api/session-heartbeat` with a monotonically increasing step. A script
+  that waits wall-clock then dumps a precomputed `flapLog` fails because
+  the heartbeat steps do not match the run.
+- **Unearned revives dropped** — `reviveLog` from the client is ignored
+  unless the server previously called `grantRevive()` from a verified
+  ad S2S postback. Client-side "I watched an ad" is not a grant. PvP never
+  allows revives.
+- **Human tap-cadence analysis** — bots that flap on the exact minimum
+  legal interval (or a perfect metronome) for a high-score run are
+  rejected. Repeat offenders get strikes → 12h / 48h temp-ban.
+- **Score hard cap** (400) and flap-log size cap (8000).
 - **Tap-rate cap** (`MAX_FLAPS_PER_SECOND` in `physics.js`) — flaps faster
   than a human sustainable rate are dropped during replay, client-side and
   server-side identically, so this can't be used to desync the two.
@@ -56,19 +80,25 @@ client/server mismatches.
   simulated duration is longer than the real time elapsed since
   `start-session` (with small slack for latency). You can't precompute a
   10-minute "perfect" run and submit it instantly.
-- **One-time sessions** — a session is consumed on first submission; replay
-  attacks on a captured request don't work.
-- **Telegram `initData` verification** (`telegramAuth.js`) — proves the
-  request comes from a real, currently-authenticated Telegram user, using
-  Telegram's official HMAC scheme, and rejects stale `initData` (>24h old).
-- **Rate limiting** — `store.allowRequest` caps how often a given Telegram
-  user can start new sessions per minute.
-- **Hard step/size ceilings** — `MAX_STEPS_PER_SESSION`, plus a cap on
-  `flapLog` length, so a malformed or huge payload can't be used to burn
-  server CPU.
+- **Rate limiting** — 6 new games / 2 minutes / user, 250 / day, plus an
+  IP bucket. Withdrawals 5/hour, deposits 8/hour.
+- **Referral fraud** — a `start_param` cannot mint a ghost upline; the
+  referrer must already be a known user. Self-referral and cycles blocked.
+- **Money movement** — duplicate deposit `txHash` rejected; withdrawals
+  are integer FLAP with a minimum; balances ignore `NaN`.
+- **Admin lock** — if `ADMIN_KEY` is missing or shorter than 16 chars,
+  every `/internal/*` mutating route returns 403 (used to compare
+  `undefined !== undefined` and fall open). Comparison is timing-safe.
+- **No source leak** — the HTTP server only serves `index.html`,
+  `physics.js`, `admin.html` and `/img`. It does **not** statically host
+  `server.js`, `store.js`, `.env` or `data/store.json`.
+- **`ALLOW_INSECURE_DEV` is ignored when `NODE_ENV=production`.**
+- **Weekly rewards** — pays the *previous* ISO week and refuses to pay
+  the same week twice.
 
 None of this requires trusting the client for anything except *when it
 tapped* — everything that turns taps into a score happens on the server.
+Run `npm run test:anticheat` to exercise the checks.
 
 ## Setup
 
