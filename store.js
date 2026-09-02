@@ -495,6 +495,84 @@ async function redisCmd(cmd) {
   return data.result;
 }
 
+/**
+ * Live storage self-probe.
+ *
+ * "durable: true" in persistInfo() is only an educated guess from the env
+ * (e.g. "an Upstash URL was set"). It does NOT prove the backend is actually
+ * reachable or writable — a wrong token, a throttled key or a read-only volume
+ * would still report durable. This probe does a real write + read (and delete)
+ * round-trip against the ACTIVE backend and reports the truth, so the operator
+ * can confirm before/after every deploy that player data really will survive.
+ */
+function durableLooksOk() {
+  if (useRedis) return true;
+  return /^\/(data|mnt|volume)/.test(path.resolve(DATA_FILE));
+}
+
+async function probeDurability() {
+  const t0 = Date.now();
+  if (useRedis) {
+    const probeKey = REDIS_KEY + ':durprobe:' + INSTANCE_ID + ':' + Date.now();
+    const val = 'alive-' + Date.now();
+    try {
+      await redisCmd(['SET', probeKey, val, 'EX', '120']);
+      const got = await redisCmd(['GET', probeKey]);
+      await redisCmd(['DEL', probeKey]).catch(() => {});
+      return {
+        ok: got === val,
+        backend: 'upstash-redis',
+        detail: got === val ? 'write + read round-trip ok' : 'read-back mismatch',
+        durable: true,
+        ms: Date.now() - t0,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        backend: 'upstash-redis',
+        durable: true,
+        error: String((err && err.message) || err),
+        ms: Date.now() - t0,
+      };
+    }
+  }
+
+  // File backend: confirm the directory is writable AND sits on a mount that
+  // survives a redeploy (not the container's ephemeral root filesystem).
+  try {
+    const dir = path.dirname(DATA_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const probePath = path.join(dir, '__durability_probe__' + INSTANCE_ID + '.tmp');
+    const payload = JSON.stringify({ t: Date.now(), i: INSTANCE_ID });
+    fs.writeFileSync(probePath, payload, 'utf8');
+    const read = fs.readFileSync(probePath, 'utf8');
+    try { fs.unlinkSync(probePath); } catch (e) {}
+    const ok = read === payload;
+    const durable = durableLooksOk();
+    return {
+      ok,
+      backend: 'file',
+      dataFile: DATA_FILE,
+      durable,
+      detail: ok ? 'temp file write + read ok' : 'write/read mismatch',
+      warning: durable
+        ? null
+        : 'This file is on the container\u2019s EPHEMERAL disk — it will be wiped on the next deploy. ' +
+          'Mount a volume at /data (Railway) and set DATA_FILE=/data/store.json, or use Upstash Redis.',
+      ms: Date.now() - t0,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      backend: 'file',
+      dataFile: DATA_FILE,
+      durable: durableLooksOk(),
+      error: String((err && err.message) || err),
+      ms: Date.now() - t0,
+    };
+  }
+}
+
 /* ---------------------------- backups ---------------------------- */
 
 function backupFileName(at = Date.now()) {
@@ -1598,6 +1676,7 @@ module.exports = {
   flush: saveNow,
   getSnapshot: snapshot,
   createBackup,
+  probeDurability,
   _mergeSnapshots: mergeSnapshots,
   _countPlayers: countPlayers,
   listBackups,
@@ -1623,7 +1702,7 @@ module.exports = {
         bytes = fs.statSync(DATA_FILE).size;
       }
     } catch (e) {}
-    const durable = useRedis || /^\/(data|mnt|volume)/.test(path.resolve(DATA_FILE));
+    const durable = durableLooksOk();
     return {
       dataFile: DATA_FILE,
       exists,
