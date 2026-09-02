@@ -179,6 +179,8 @@ UPSTASH_REDIS_REST_TOKEN=xxxxx
 | Endpoint | Ինչի համար |
 |---|---|
 | `GET /internal/health` | Առողջության ստուգում՝ degraded, durable, players |
+| `GET /internal/durability` | **Իրական** ստուգում՝ write→read→delete ամեն redeploy-ից առաջ/հետո |
+| `npm run check:durable` | Տերմինալի ստուգում (`node check-durability.js`), exit 0 = անվտանգ |
 | `GET /internal/stats` | Վիճակագրություն + պահպանման ախտորոշում |
 | `GET /internal/backup` | Ներբեռնել ամբողջ վիճակը JSON ֆայլով |
 | `POST /internal/backup` | Վերականգնել վերբեռնված JSON ֆայլից |
@@ -198,6 +200,11 @@ UPSTASH_REDIS_REST_TOKEN=xxxxx
 > `store.js`-ի snapshot-ի մեջ (նոր դաշտ ավելացրու `snapshot()` և `hydrate()`
 > ֆունկցիաներում ու գրիր `KNOWN_SNAPSHOT_FIELDS`-ի մեջ) — այդ դեպքում նոր
 > ֆունկցիոնալի տվյալները նույնպես կունենան նույն պաշտպանությունը։
+
+**Պահեստի durable կարգավորումը քայլ առ քայլ** (Upstash Redis կամ Railway Volume)՝
+տես [PERSISTENCE_SETUP.md](PERSISTENCE_SETUP.md)։ Ամեն redeploy-ից առաջ/հետո բացիր
+`GET /internal/durability` (կամ `npm run check:durable`) և համոզվիր, որ `"ok": true`
+— այդպես երբեք բալանս/ռեֆեռալ/լիդերբորդ չի կորչի նոր դետալ ավելացնելիս։
 
 
 

@@ -147,6 +147,23 @@ setTimeout(() => {
   check('balance restored to pre-accident value', roundTrip.restored > roundTrip.broken,
     roundTrip.broken + ' -> ' + roundTrip.restored);
 
+  console.log('\\n5) live durability probe reports a real write+read round-trip');
+  const durProbe = runScenario(`
+    const store = require(${STORE});
+    (async () => {
+      await store.ready;
+      const probe = await store.probeDurability();
+      const info = store.persistInfo();
+      console.log('RESULT ' + JSON.stringify({ probeOk: probe.ok, durable: info.durable,
+        backend: probe.backend, ms: probe.ms, writeFailed: !!probe.error }));
+      process.exit(0);
+    })();
+  `);
+  check('probe reports ok against live redis', durProbe.probeOk === true, JSON.stringify(durProbe));
+  check('probe targets redis backend', durProbe.backend === 'upstash-redis');
+  check('persist flags it durable', durProbe.durable === true);
+  check('probe did not error', durProbe.writeFailed !== true);
+
   mock.kill();
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {}
   console.log('\n' + (failures ? failures + ' CHECK(S) FAILED' : 'ALL CHECKS PASSED'));

@@ -389,6 +389,22 @@ app.get('/internal/health', (req, res) => {
   });
 });
 
+// REAL durability check: performs an actual write + read (and delete)
+// round-trip against the live storage backend. Unlike /internal/health this
+// does not just trust the env — it proves the backend is reachable AND
+// writable right now, so you can confirm right before/after every deploy that
+// player data will really survive it.
+app.get('/internal/durability', async (req, res) => {
+  try {
+    const persist = store.persistInfo();
+    const probe = await store.probeDurability();
+    const good = !persist.degraded && probe.ok && (probe.durable !== false);
+    res.status(good ? 200 : 503).json({ ok: good, persist, probe });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 const { runWeeklyRewardJob } = require('./rewards.js');
 app.post('/internal/run-weekly-rewards', (req, res) => {
   if (!requireAdmin(req, res)) return;
