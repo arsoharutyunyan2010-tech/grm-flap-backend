@@ -10,7 +10,10 @@
 const crypto = require('crypto');
 
 function verifyInitData(initData, botToken, maxAgeSeconds) {
-  if (!initData || typeof initData !== 'string') {
+  if (!botToken || typeof botToken !== 'string') {
+    return { ok: false, reason: 'server misconfigured' };
+  }
+  if (!initData || typeof initData !== 'string' || initData.length > 4096) {
     return { ok: false, reason: 'missing initData' };
   }
   const params = new URLSearchParams(initData);

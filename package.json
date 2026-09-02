@@ -7,6 +7,8 @@
     "start": "node server.js",
     "dev": "ALLOW_INSECURE_DEV=true node server.js",
     "test:persistence": "node test/persistence.test.js",
+    "test:anticheat": "node test/anticheat.test.js",
+    "test": "node test/anticheat.test.js && node test/persistence.test.js",
     "check:durable": "node check-durability.js"
   },
   "dependencies": {
