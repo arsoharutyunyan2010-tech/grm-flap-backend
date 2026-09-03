@@ -57,6 +57,41 @@ check('jittered flaps accepted', human.ok === true, JSON.stringify(human));
 const short = AC.analyzeFlapPattern([10, 25, 40], 5);
 check('short runs not judged', short.ok === true);
 
+// A solver bot that flaps on a LONGER constant interval with ±1 step jitter
+// (stdev ~0.8 but only 2 distinct gaps) used to slip past the min-gap check.
+const jitterBot = [];
+let jt = 30;
+for (let i = 0; i < 140; i++) { jt += (i % 2 ? 18 : 19); jitterBot.push(jt); }
+const jb = AC.analyzeFlapPattern(jitterBot, 100);
+check('±1-step jittered metronome rejected', jb.ok === false, JSON.stringify({ reason: jb.reason, cv: jb.cv, u: jb.uniqueGaps }));
+
+// Long run with only 3 distinct inter-flap intervals.
+const threeGap = [];
+let gt = 30;
+for (let i = 0; i < 120; i++) { gt += [15, 16, 17][i % 3]; threeGap.push(gt); }
+const tg = AC.analyzeFlapPattern(threeGap, 90);
+check('3-unique-gap long run rejected', tg.ok === false, tg.reason);
+
+// Genuinely irregular human play over a high-scoring run must still pass.
+const humanHigh = [];
+let ht = 20;
+for (let i = 0; i < 160; i++) {
+  ht += 14 + Math.floor(Math.abs(Math.sin(i * 2.7)) * 10) + (i % 7 === 0 ? 6 : 0) + (i % 11 === 0 ? 4 : 0);
+  humanHigh.push(ht);
+}
+const hh = AC.analyzeFlapPattern(humanHigh, 120);
+check('irregular human high-score run accepted', hh.ok === true, JSON.stringify({ cv: hh.cv && hh.cv.toFixed(2), u: hh.uniqueGaps }));
+
+// clientIp must use the proxy-trusted socket-side address, never the
+// client-supplied left-most X-Forwarded-For entry.
+const fakeReq = {
+  ip: '203.0.113.7',
+  headers: { 'x-forwarded-for': '1.2.3.4, 203.0.113.7' },
+  socket: { remoteAddress: '10.0.0.1' },
+};
+check('clientIp trusts req.ip not spoofed XFF', AC.clientIp(fakeReq) === '203.0.113.7', AC.clientIp(fakeReq));
+check('clientIp falls back without req.ip', AC.clientIp({ socket: { remoteAddress: '9.9.9.9' } }) === '9.9.9.9');
+
 console.log('\n5) heartbeats');
 const started = Date.now() - 40000;
 const beats = [];
@@ -79,6 +114,24 @@ check(
     [{ at: started + 1000, step: 0 }, { at: started + 2000, step: 1 }],
     started, 40000, 2400
   ).ok === false
+);
+
+// Long run: heartbeats that end far before the final step are a precomputed
+// dump (the client only pinged early, then sent a scripted perfect log).
+const longRun = 60 * 60 * 2; // ~2 minutes of sim = 7200 steps
+const longBeats = [];
+for (let i = 0; i < 30; i++) longBeats.push({ at: started + i * 3000, step: i * 180 });
+// beats reach ~5220 but run claims 7200
+check(
+  'long run with heartbeats stopping early is rejected',
+  AC.checkHeartbeats(longBeats, started - 90000, 90000, longRun).ok === false
+);
+// ...while the same cadence that reaches the end passes (within 480 steps).
+const coverBeats = [];
+for (let i = 0; i < 42; i++) coverBeats.push({ at: started - 90000 + i * 2100, step: Math.min(longRun - 100, i * 175) });
+check(
+  'long run with heartbeats reaching near the end accepted',
+  AC.checkHeartbeats(coverBeats, started - 90000, 90000, longRun).ok === true
 );
 
 console.log('\n6) full verdict');

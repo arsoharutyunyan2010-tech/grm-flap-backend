@@ -101,10 +101,17 @@ function sanitizeTxHash(raw) {
 }
 
 function clientIp(req) {
+  // Prefer Express's req.ip: with `app.set('trust proxy', 1)` it walks
+  // X-Forwarded-For from the SOCKET side and returns the address the
+  // trusted proxy itself appended — the value a client cannot forge.
+  // Taking the raw left-most XFF entry (as before) let a script rotate a
+  // spoofed header and reset the per-IP rate limit on every request.
+  if (req && typeof req.ip === 'string' && req.ip) return req.ip;
   const xf = req && req.headers && req.headers['x-forwarded-for'];
   if (typeof xf === 'string' && xf.length) {
-    const first = xf.split(',')[0].trim();
-    if (first && first.length < 80) return first;
+    const parts = xf.split(',').map((s) => s.trim()).filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last && last.length < 80) return last;
   }
   return (req && req.socket && req.socket.remoteAddress) || 'unknown';
 }
@@ -130,18 +137,31 @@ function analyzeFlapPattern(flapLog, score) {
     varSum += d * d;
   }
   const stdev = Math.sqrt(varSum / gaps.length);
+  // Coefficient of variation is scale-free, so a metronome on a LONGER
+  // constant interval (e.g. gap 18-19 steps instead of the legal minimum)
+  // still trips it — stdev alone missed a ±1-step jittered solver.
+  const cv = mean > 0 ? stdev / mean : 0;
   const uniqueGaps = new Set(gaps).size;
 
   if (score >= 40 && atMinRatio > 0.88) {
-    return { ok: false, reason: 'inhuman tap cadence', atMinRatio, stdev, uniqueGaps };
+    return { ok: false, reason: 'inhuman tap cadence', atMinRatio, stdev, cv, uniqueGaps };
   }
   if (score >= 40 && stdev < 0.45 && gaps.length > 40) {
-    return { ok: false, reason: 'inhuman tap regularity', atMinRatio, stdev, uniqueGaps };
+    return { ok: false, reason: 'inhuman tap regularity', atMinRatio, stdev, cv, uniqueGaps };
   }
-  if (score >= 80 && uniqueGaps <= 2 && gaps.length > 50) {
-    return { ok: false, reason: 'metronome bot', atMinRatio, stdev, uniqueGaps };
+  // Almost perfectly regular timing at ANY interval: a jittered solver bot
+  // (e.g. flaps every 18-19 steps, stdev ~0.8 but only ~3 distinct gaps) is
+  // just as non-human as the minimum-gap metronome. Humans flick with
+  // jitter that grows with the length of the run.
+  if (score >= 60 && gaps.length > 60 && cv < 0.1 && uniqueGaps <= 4) {
+    return { ok: false, reason: 'machine-regular taps', atMinRatio, stdev, cv, uniqueGaps };
   }
-  return { ok: true, atMinRatio, stdev, uniqueGaps };
+  // Very few distinct inter-flap intervals over a long, high run = the
+  // tap stream came out of a script, not fingers.
+  if (score >= 80 && uniqueGaps <= 3 && gaps.length > 50) {
+    return { ok: false, reason: 'metronome bot', atMinRatio, stdev, cv, uniqueGaps };
+  }
+  return { ok: true, atMinRatio, stdev, cv, uniqueGaps };
 }
 
 function checkHeartbeats(heartbeats, startedAt, elapsedMs, totalSteps) {
@@ -178,12 +198,19 @@ function checkHeartbeats(heartbeats, startedAt, elapsedMs, totalSteps) {
     return { ok: false, reason: 'too few heartbeats', beatCount: beats.length, expectedMin };
   }
 
-  // Last reported step must be in the same ballpark as the submitted run.
-  // A script that idles (step=0 pings) then dumps a precomputed 10-minute
-  // flapLog will fail this.
+  // Last reported step must reach the END of the run. A legit client pings
+  // every ~3s while playing, so the final beat is within a few hundred
+  // steps of the crash. A script that idles (low-step pings to satisfy the
+  // "must have heartbeats" rule) and then dumps a precomputed 3-minute
+  // perfect flapLog fails this. Require either the loose fraction (short
+  // runs, where one missed beat matters) OR being within 8s (~480 steps)
+  // of the final step (long runs, where this is airtight).
   const lastStepReported = Number(last.step) | 0;
-  if (totalSteps > 180 && lastStepReported < totalSteps * 0.45) {
-    return { ok: false, reason: 'heartbeat steps do not match run', beatCount: beats.length };
+  if (totalSteps > 180) {
+    const required = Math.max(Math.floor(totalSteps * 0.45), totalSteps - 480);
+    if (lastStepReported < required) {
+      return { ok: false, reason: 'heartbeat steps do not match run', beatCount: beats.length, lastStepReported, required };
+    }
   }
   return { ok: true, beatCount: beats.length };
 }
