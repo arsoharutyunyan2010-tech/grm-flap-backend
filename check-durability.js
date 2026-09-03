@@ -36,6 +36,7 @@ const store = require('./store.js');
       console.log(red('!!! NOT SAFE — your player data may be wiped on the next deploy.') + '\n');
       if (persist.degraded) console.log(red('  Store is DEGRADED: ' + (persist.loadError || 'unknown')) + '\n');
       if (probe.error) console.log(red('  Probe error: ' + probe.error) + '\n');
+      if (probe.hint) console.log(red('  ' + probe.hint) + '\n');
       if (probe.warning) console.log(red('  ' + probe.warning) + '\n');
       console.log('  Fix: set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN, or mount a\n' +
         '  persistent volume at /data and set DATA_FILE=/data/store.json.\n');

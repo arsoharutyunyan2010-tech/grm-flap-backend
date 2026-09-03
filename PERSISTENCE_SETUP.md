@@ -165,3 +165,61 @@ ls -la /data            # /data/store.json տողը սկսվում է d-ով (dr
    `POST /internal/backup`՝ վերևում ներբեռնած JSON-ով։
 5. Համոզվիր, որ `/data/store.json-old-dir`-ի ներսում քեզ պետք եկող ոչինչ չկա
    (եթե դատարկ է՝ կարող ես ջնջել)։
+
+
+### «Ֆիքսից հետո էլ /data/store.json-ը մնում է թղթապանակ (Mount Path-ի սխալ)»
+
+**Ախտանիշը.** նախորդ ֆիքսը deploy արելուց հետո էլ `GET /internal/health`-ը շարունակում
+է ցույց տալ `"dataFileIsDirectory": true` և `"players": 0`, իսկ լոգերում կա
+`EISDIR`։ Ավելին՝ `mv /data/store.json …` հրամանը Railway shell-ում **ձախողվում է**
+(`Device or resource busy` / `Invalid argument`), և կոդի ինքնաբուժումն էլ է գրում
+`auto-rename FAILED`։
+
+**Պատճառը.** թղթապանակը պատահական `mkdir` չէ — **Volume-ը մոնտաժված է հենց
+`/data/store.json` հասցեում** (Railway-ում Volumes → Mount Path = `/data/store.json`)։
+Մոնտաժման կետը (mount point) **միշտ թղթապանակ է** և երբեք չի կարող դառնալ ֆայլ,
+իսկ վերանվանել էլ չի կարելի։ Ուստի ո՛չ `mv`-ն է օգնում, ո՛չ redeploy-ը — ամեն save
+մնում է ձախողված, backup-ները չեն պահպանվում, և ամեն deploy-ից հետո
+լիդերբորդը/բալանսը/ռեֆեռալները դատարկվում են։
+
+Կոդն այժմ ճիշտ այս դեպքի համար տալիս է պատրաստի հուշում — նույն տեքստը երևում է
+`/internal/health`-ի `dataFileHint` դաշտում, `/internal/durability`-ի `hint`
+դաշտում, `npm run check:durable`-ի ելքում և ադմինի կարմիր զգուշացման մեջ:
+
+**Որտեղ է գրված ճիշտ կարգավորումը (հուշումը).**
+
+```text
+On Railway this usually means the Volume is mounted DIRECTLY at /data/store.json
+(a mount point can never become a file). Fix: Service → Settings → Volumes → set
+the volume Mount Path to /data (NOT /data/store.json), keep the variable
+DATA_FILE=/data/store.json, then redeploy.
+```
+
+**Ինչ անել (միակ ճիշտ լուծումը — Mount Path-ը փոխել).**
+
+1. **Նախ** ներբեռնիր ընթացիկ վիճակը (ադմինից **Download backup** կամ
+   `curl -H "x-admin-key: <ADMIN_KEY>" https://քո-դոմեյնը.com/internal/backup -o flapy-backup.json`),
+   որովհետև ամենաթարմ տվյալները հիմա միայն աշխատող կոնտեյների հիշողության մեջ են։
+2. Railway → քո Service → **Settings** → **Volumes**:
+   * **Mount Path** դարձրու **`/data`** (ոչ `/data/store.json`):
+   * Volume-ի չափը/անունը թող նույնը մնա։
+3. **Variables** բաժնում **`DATA_FILE=/data/store.json` թող անփոփոխ մնա**
+   (ֆայլի ճանապարհը ճիշտ է, սխալ է միայն մոնտաժման կետը)։ `BACKUP_DIR` չլինելու
+   դեպքում backup-ները ինքնաբերաբար կգնան `/data/backups`։
+4. **Redeploy** արա (Deploy → Redeploy / նոր commit): Նոր կոնտեյները volume-ը
+   կտեսնի որպես **`/data` թղթապանակ**, իսկ `/data/store.json`-ը կդառնա սովորական
+   ֆայլ, որի մեջ կարելի է գրել։
+5. Ստուգիր.
+   ```bash
+   ls -la /data        # /data-ն է թղթապանակ, /data/store.json-ը՝ սովորական ֆայլ (-rw-…)
+   ```
+   * `GET /internal/health` → `"dataFileIsDirectory": false`, `"dataFileHint": null`,
+     `"lastSaveError": null`, `"players": <ոչ զրո>`:
+   * `GET /internal/durability` (կամ `npm run check:durable`) → `"ok": true`:
+   * Ադմինում կարմիր զգուշացումը անհետանում է։
+6. Եթե volume-ի մեջ պահպանվել էր հին տվյալ (`/data/store.json`-ի ներսում եղած
+   ֆայլեր, կամ `/data/backups`), ու դրանք ավելի ամբողջական են — վերականգնիր
+   ադմինում **Upload & restore**-ով կամ `POST /internal/backup`-ով։
+
+> **Կարճ.** `Mount Path = /data` + `DATA_FILE = /data/store.json`։ Երբեք մի՛ դիր
+> ֆայլի ամբողջական ճանապարհը Mount Path-ի մեջ։
