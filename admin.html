@@ -128,6 +128,16 @@
           hint.style.color = '#ff5d73';
           return;
         }
+        if (d.dataFileIsDirectory) {
+          hint.textContent = 'PROBLEM: ' + d.dataFile + ' is a DIRECTORY, not a file — every save fails (EISDIR) and each redeploy reverts player data to the last backup. In the Railway shell run: mv ' + d.dataFile + ' ' + d.dataFile + '.dir-bak   then restart. Last error: ' + (d.lastSaveError || 'n/a');
+          hint.style.color = '#ff5d73';
+          return;
+        }
+        if (d.lastSaveError) {
+          hint.textContent = 'WARNING — the last save to ' + d.dataFile + ' FAILED: ' + d.lastSaveError + '. Player data is not being durably saved right now; fix storage before the next deploy.';
+          hint.style.color = '#ff5d73';
+          return;
+        }
         if (d.redis || d.backend === 'upstash-redis') {
           hint.textContent = 'Redis save is ON. Leaderboard and FLAP will survive GitHub deploys.';
           hint.style.color = '#3ddc84';

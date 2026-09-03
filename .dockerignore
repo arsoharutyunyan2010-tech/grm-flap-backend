@@ -1,0 +1,12 @@
+# Keep local/dev artifacts out of the Docker image. Without this file the
+# whole repo folder is the build context, so a local data/store.json (which is
+# git-ignored but still on disk after `npm run dev`) would be COPIED into the
+# image and could then overwrite real player data on the next deploy.
+node_modules
+.git
+data
+*.log
+.env
+.env.*
+test
+.DS_Store
