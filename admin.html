@@ -29,6 +29,8 @@
   .banform button{ flex:0 0 auto; }
   tr.repeat td{ color:#ff5d73; }
   .repeat-x{ font-weight:800; color:#ff5d73; margin-left:4px; }
+  .user-id{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space:nowrap; }
+  .muted{ opacity:0.65; }
 </style>
 </head>
 <body>
@@ -49,6 +51,16 @@
     <div class="stat-card"><span>Save exists</span><b id="statExists">—</b></div>
   </div>
   <p id="persistHint" style="opacity:0.7;font-size:13px;max-width:720px;"></p>
+
+  <h2>Players / Telegram user IDs</h2>
+  <p class="muted" style="font-size:13px;max-width:720px;">
+    Use the numeric Telegram ID below in the Ban player form. Names are only a
+    lookup aid; the server always bans by the verified Telegram ID.
+  </p>
+  <table>
+    <thead><tr><th>Telegram user ID</th><th>Name</th><th>Username</th><th>Last seen</th><th></th></tr></thead>
+    <tbody id="uRows"><tr><td colspan="5">Enter admin key and press Load.</td></tr></tbody>
+  </table>
   <div class="keybox">
     <button onclick="downloadBackup()">Download backup</button>
     <button onclick="createBackup()">Create backup now</button>
@@ -122,11 +134,43 @@
     try { localStorage.setItem('grmflap_admin_key', key); } catch(e){}
     document.getElementById('err').textContent = '';
     loadStats(key);
+    loadUsers(key);
     loadDeposits(key);
     loadWithdrawals(key);
     loadBackups();
     loadBans(key);
     loadAntiCheat(key);
+  }
+
+  function loadUsers(key){
+    fetch(API_BASE + '/internal/users', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ renderUsers(d.users || []); })
+      .catch(function(e){ document.getElementById('err').textContent = 'Users error: ' + e.message; });
+  }
+
+  function renderUsers(list){
+    var tbody = document.getElementById('uRows');
+    tbody.innerHTML = '';
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="5">No players recorded yet.</td></tr>';
+      return;
+    }
+    list.forEach(function(u){
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td class="user-id">' + esc(u.userId) + '</td>' +
+        '<td>' + esc(u.name || 'Player') + '</td>' +
+        '<td>' + (u.username ? esc('@' + String(u.username).replace(/^@/, '')) : '—') + '</td>' +
+        '<td>' + (u.lastSeen ? new Date(u.lastSeen).toLocaleString() : (u.firstSeen ? new Date(u.firstSeen).toLocaleString() : '—')) + '</td>' +
+        '<td><button class="pay-btn">Use for ban</button></td>';
+      tr.querySelector('button').onclick = function(){
+        document.getElementById('banUserId').value = String(u.userId || '');
+        document.getElementById('banUserId').focus();
+        document.getElementById('banUserId').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+      tbody.appendChild(tr);
+    });
   }
 
   function loadBans(key){

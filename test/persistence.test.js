@@ -69,6 +69,7 @@ setTimeout(() => {
         balance: store.getBalance(process.env.T_U1),
         invited: store.getReferralInfo(process.env.T_U1).level1,
         found: (store.getLeaderboard('week', 500).allRanked || []).some(r => r.userId === process.env.T_U2),
+        directoryName: (store.listUsers(500).find(r => r.userId === process.env.T_U1) || {}).name,
       }));
       process.exit(0);
     })();
@@ -76,6 +77,7 @@ setTimeout(() => {
   check('balance survived restart', after.balance === 500, JSON.stringify(after.balance));
   check('referral survived restart', after.invited === 1);
   check('leaderboard survived restart', after.found === true);
+  check('user ID directory survived restart', after.directoryName === 'Ann', after.directoryName);
 
   console.log('\n2) storage outage => degraded mode, writes blocked (no wipe)');
   const degraded = runScenario(`

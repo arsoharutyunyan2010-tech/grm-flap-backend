@@ -75,6 +75,10 @@ const deposits = [];              // { id, userId, name, amount, txHash, status,
 let depositSeq = 1;
 
 const knownUsers = new Set();
+// Small admin-only directory used to map a Telegram user ID to the name that
+// was received from Telegram. The ID remains the source of truth for bans;
+// this is only a convenience so an admin does not have to guess it.
+const userDirectory = new Map(); // userId -> { name, username, firstSeen, lastSeen }
 const recentActivity = new Map();
 let totalRuns = 0;
 let saveTimer = null;
@@ -132,6 +136,8 @@ function snapshot() {
   for (const [uid, n] of balances) bals[String(uid)] = n;
   const cBals = {};
   for (const [uid, n] of cBalances) cBals[String(uid)] = n;
+  const users = {};
+  for (const [uid, row] of userDirectory) users[String(uid)] = row;
   return Object.assign({}, extraFields, {
     version: 2,
     savedAt: Date.now(),
@@ -145,6 +151,7 @@ function snapshot() {
     deposits,
     depositSeq,
     knownUsers: Array.from(knownUsers).map(String),
+    users,
     totalRuns,
     rewardHistory,
     pvpMatches: Array.from(pvpMatches.values()),
@@ -171,7 +178,7 @@ function snapshot() {
 
 const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
-  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'totalRuns',
+  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'users', 'totalRuns',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
   'bans', 'antiCheatEvents',
 ]);
@@ -252,6 +259,22 @@ function hydrate(data) {
   }
   for (const uid of allTimeBest.keys()) knownUsers.add(String(uid));
 
+  userDirectory.clear();
+  const usersIn = data.users || {};
+  if (usersIn && typeof usersIn === 'object' && !Array.isArray(usersIn)) {
+    for (const uid of Object.keys(usersIn)) {
+      const row = usersIn[uid];
+      if (!row || typeof row !== 'object') continue;
+      userDirectory.set(String(uid), {
+        name: String(row.name || 'Player').slice(0, 120),
+        username: String(row.username || '').slice(0, 64),
+        firstSeen: Number(row.firstSeen) || 0,
+        lastSeen: Number(row.lastSeen) || 0,
+      });
+      knownUsers.add(String(uid));
+    }
+  }
+
   totalRuns = Number(data.totalRuns) || 0;
 
   rewardHistory.length = 0;
@@ -319,6 +342,7 @@ function hydrate(data) {
       until: Number(row.until) || 0,
       reason: String(row.reason || 'cheat').slice(0, 120),
       strikes: Math.max(0, Number(row.strikes) || 0),
+      windowStart: Number(row.windowStart) || 0,
     });
   }
   antiCheatEvents.length = 0;
@@ -439,6 +463,7 @@ function countPlayers(snap) {
   for (const uid of Object.keys(snap.balances || {})) users.add(String(uid));
   for (const uid of Object.keys(snap.cBalances || {})) users.add(String(uid));
   for (const uid of Object.keys(snap.referrals || {})) users.add(String(uid));
+  for (const uid of Object.keys(snap.users || {})) users.add(String(uid));
   return users.size;
 }
 
@@ -511,6 +536,25 @@ function mergeSnapshots(base, other) {
 
   // users / counters
   const users = new Set([...(out.knownUsers || []), ...(other.knownUsers || [])].map(String));
+  out.knownUsers = Array.from(users);
+  out.users = out.users || {};
+  for (const [uid, row] of Object.entries(other.users || {})) {
+    const cur = out.users[uid];
+    if (!cur) {
+      out.users[uid] = row;
+      continue;
+    }
+    // Keep the freshest display data while retaining the earliest sighting.
+    if ((Number(row && row.lastSeen) || 0) >= (Number(cur.lastSeen) || 0)) {
+      if (row && row.name) cur.name = row.name;
+      if (row && row.username) cur.username = row.username;
+    }
+    if (!cur.firstSeen || (Number(row && row.firstSeen) || 0) < cur.firstSeen) {
+      cur.firstSeen = Number(row && row.firstSeen) || cur.firstSeen || 0;
+    }
+    cur.lastSeen = Math.max(Number(cur.lastSeen) || 0, Number(row && row.lastSeen) || 0);
+  }
+  for (const uid of Object.keys(out.users)) users.add(String(uid));
   out.knownUsers = Array.from(users);
   out.totalRuns = Math.max(Number(out.totalRuns) || 0, Number(other.totalRuns) || 0);
   out.pvpHouseC = Math.max(Number(out.pvpHouseC) || 0, Number(other.pvpHouseC) || 0);
@@ -1159,8 +1203,9 @@ function grantRevive(sessionId) {
 function isBanned(userId) {
   const row = bans.get(String(userId));
   if (!row) return false;
-  if (row.until && Date.now() > row.until) {
+  if (row.until && Date.now() >= row.until) {
     bans.delete(String(userId));
+    scheduleSave();
     return false;
   }
   return row.until ? Date.now() < row.until : false;
@@ -1208,7 +1253,7 @@ function listBans(limit) {
     // Only rows with a set, not-yet-expired until are ACTUAL bans. A user can
     // have strikes recorded (until:0) without being banned yet — they must not
     // appear in the "currently blocked" list.
-    if (!row.until || now > row.until) continue;
+    if (!row.until || now >= row.until) continue;
     out.push({
       userId,
       until: row.until,
@@ -1236,7 +1281,9 @@ function manualBan(userId, reason, minutes) {
 }
 
 function unban(userId) {
-  return bans.delete(String(userId));
+  const removed = bans.delete(String(userId));
+  if (removed) scheduleSave();
+  return removed;
 }
 
 setInterval(() => {
@@ -1441,12 +1488,49 @@ function rejectDeposit(id) {
   return d;
 }
 
-function trackUser(userId) {
+function trackUser(userId, profile) {
   userId = String(userId);
+  const now = Date.now();
   const wasNew = !knownUsers.has(userId);
+  const previous = userDirectory.get(userId) || {};
+  const details = typeof profile === 'string' ? { name: profile } : (profile || {});
+  const name = String(details.name || previous.name || 'Player').slice(0, 120);
+  const username = String(details.username || previous.username || '').slice(0, 64);
+  const firstSeen = Number(previous.firstSeen) || now;
+  // Persist identity changes immediately, but do not write the whole store
+  // on every page refresh. The in-memory lastSeen is still updated for the
+  // admin list; it is persisted at most once per minute per player.
+  const changed = wasNew || previous.name !== name || previous.username !== username ||
+    !previous.lastSeen || now - previous.lastSeen >= 60 * 1000 || previous.firstSeen !== firstSeen;
   knownUsers.add(userId);
-  recentActivity.set(userId, Date.now());
-  if (wasNew) scheduleSave();
+  userDirectory.set(userId, { name, username, firstSeen, lastSeen: now });
+  recentActivity.set(userId, now);
+  if (changed) scheduleSave();
+}
+function listUsers(limit) {
+  const ids = new Set([
+    ...knownUsers,
+    ...userDirectory.keys(),
+    ...allTimeBest.keys(),
+    ...balances.keys(),
+    ...cBalances.keys(),
+    ...referralByUser.keys(),
+  ]);
+  const out = [];
+  for (const uid of ids) {
+    const row = userDirectory.get(String(uid)) || {};
+    const best = allTimeBest.get(String(uid));
+    const referral = referralByUser.get(String(uid));
+    out.push({
+      userId: String(uid),
+      name: row.name || (best && best.name) || (referral && referral.name) || 'Player',
+      username: row.username || '',
+      firstSeen: row.firstSeen || 0,
+      lastSeen: row.lastSeen || 0,
+    });
+  }
+  out.sort((a, b) => (b.lastSeen || b.firstSeen || 0) - (a.lastSeen || a.firstSeen || 0));
+  return out.slice(0, Math.max(1, Math.min(1000, Number(limit) || 200)));
 }
 function getTotalUsers() {
   return Math.max(knownUsers.size, allTimeBest.size);
@@ -1999,7 +2083,7 @@ module.exports = {
   getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
-  trackUser, getTotalUsers, getActivePlayers, recordRun, getRunStats,
+  trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
   attachReferral, getReferralInfo, getReferralLeaderboardDay,
   dataFile: DATA_FILE,

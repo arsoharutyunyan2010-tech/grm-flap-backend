@@ -761,6 +761,14 @@
     </div>
   </div>
 
+  <div class="overlay hidden" id="accessCard">
+    <div class="card">
+      <div class="title" style="font-size:26px;" data-i18n="accessTitle">GAME ACCESS</div>
+      <div class="sub" id="accessMessage" data-i18n="accessChecking">Checking access…</div>
+      <button id="accessRetryBtn" data-i18n="accessRetry">TRY AGAIN</button>
+    </div>
+  </div>
+
   <div class="overlay hidden" id="overCard">
     <div class="card">
       <div id="crashMode">
@@ -792,6 +800,7 @@
       <img class="donut-img" src="" data-art="donut.png" alt="">
     </div>
     <div class="profile-name" id="profileName">Player</div>
+    <div class="stat-row"><span data-i18n="telegramId">Telegram ID</span><b id="profileUserId">—</b></div>
     <div class="stat-row"><span data-i18n="bestScore">Best score</span><b id="profileBest">0</b></div>
     <div class="stat-row"><span data-i18n="cBalance">balance C</span><b id="profileCBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="c-coin.png" alt="C"></b></div>
     <div class="stat-row"><span data-i18n="flapBalance">FLAPY balance</span><b id="profileBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="coin.png" alt="F"></b></div>
@@ -1283,6 +1292,8 @@ window.FLAPY_ART = {
       language:"LANGUAGE", languageSub:"Choose your language", close:"CLOSE",
       sound:"SOUND", soundSub:"Choose what you hear", soundMusic:"Music", soundButtons:"Buttons", soundFlap:"Flying", soundOn:"ON", soundOff:"OFF",
       tagline:"Tap to keep the coin flying", tapToStart:"TAP TO START",
+      accessTitle:"GAME ACCESS", accessChecking:"Checking access…", accessRetry:"TRY AGAIN",
+      telegramId:"Telegram ID",
       classic:"CLASSIC", pvp:"PVP 1 VS 1", modeSub:"Choose a mode", back:"BACK", cancel:"CANCEL",
       pvpSub:"Pick a stake. Highest score wins.", pvpFee:"Commission 10%",
       pvpFind:"FIND OPPONENT", pvpWaiting:"Waiting for opponent…", pvpYourTurn:"YOUR TURN — PLAY", pvpOppTurn:"Opponent is playing…", pvpNeedC:"Not enough C",
@@ -1618,6 +1629,12 @@ window.FLAPY_ART = {
   var newBestBadge = document.getElementById('newBestBadge');
   var verifyNote = document.getElementById('verifyNote');
   var syncBadge = document.getElementById('syncBadge');
+  var accessCard = document.getElementById('accessCard');
+  var accessMessage = document.getElementById('accessMessage');
+  var accessRetryBtn = document.getElementById('accessRetryBtn');
+  var accessLocked = false;
+  var accessCheckInFlight = null;
+  var accessRetryTimer = null;
 
   var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   var initData = tg ? tg.initData : "";
@@ -1863,9 +1880,94 @@ window.FLAPY_ART = {
     opts = opts || {};
     opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
     return fetch(API_BASE_URL + path, opts).then(function(r){
-      if(!r.ok) return r.json().catch(function(){return {};}).then(function(b){ throw new Error(b.error||('HTTP '+r.status)); });
+      if(!r.ok) return r.json().catch(function(){return {};}).then(function(b){
+        b = (b && typeof b === 'object') ? b : {};
+        var err = new Error(b.error || ('HTTP '+r.status));
+        // Keep moderation details so the UI cannot accidentally turn a ban
+        // response into an offline game.
+        err.status = r.status;
+        err.code = b.code || '';
+        err.until = b.until || null;
+        err.minutesLeft = b.minutesLeft == null ? null : b.minutesLeft;
+        err.reason = b.reason || '';
+        err.details = b;
+        throw err;
+      });
       return r.json();
     });
+  }
+  function accessErrorText(err){
+    if (err && err.code === 'PLAYER_BANNED') {
+      var left = err.minutesLeft != null ? err.minutesLeft : null;
+      var until = err.until ? new Date(err.until).toLocaleString() : '';
+      return 'Game access is blocked' + (until ? ' until ' + until : '') +
+        (left != null ? ' (' + left + ' min left).' : '.') +
+        (err.reason ? ' Reason: ' + err.reason : '');
+    }
+    if (err && err.status === 401) return 'Telegram authorization is missing or expired. Reopen the game from Telegram.';
+    return 'The game server could not verify access. Try again.';
+  }
+  function clearAccessRetry(){
+    if (accessRetryTimer) { clearTimeout(accessRetryTimer); accessRetryTimer = null; }
+  }
+  function showAccessChecking(){
+    accessLocked = true;
+    clearAccessRetry();
+    hideGameOverlays();
+    accessMessage.textContent = t('accessChecking');
+    accessRetryBtn.disabled = true;
+    accessCard.classList.remove('hidden');
+  }
+  function showAccessError(err){
+    accessLocked = true;
+    clearAccessRetry();
+    // A moderation response can arrive while a round is already running.
+    // Stop that local simulation too; otherwise the canvas would keep flying
+    // behind the lock card even though the server will reject its score.
+    if (typeof state !== 'undefined' && state === 'playing') {
+      state = 'ready';
+      pendingFlap = false;
+    }
+    session = null;
+    pvpPendingSubmit = null;
+    pvpMode = false;
+    pvpMatchLive = false;
+    if (typeof stopPvpPoll === 'function') stopPvpPoll();
+    if (typeof stopPvpHeartbeat === 'function') stopPvpHeartbeat();
+    if (typeof stopPvpConfirmTick === 'function') stopPvpConfirmTick();
+    hideGameOverlays();
+    accessMessage.textContent = accessErrorText(err);
+    accessRetryBtn.disabled = false;
+    accessRetryBtn.textContent = t('accessRetry');
+    accessCard.classList.remove('hidden');
+    // A timed ban unlocks automatically after its deadline; the player does
+    // not have to kill Telegram and reopen the Mini App.
+    if (err && err.code === 'PLAYER_BANNED' && err.until) {
+      var wait = Math.max(1000, Number(err.until) - Date.now() + 500);
+      accessRetryTimer = setTimeout(function(){
+        accessRetryTimer = null;
+        checkGameAccess().then(function(){ showMode(); }).catch(function(){});
+      }, wait);
+    }
+  }
+  function checkGameAccess(){
+    if (DEMO_MODE) { accessLocked = false; return Promise.resolve({ ok:true }); }
+    if (accessCheckInFlight) return accessCheckInFlight;
+    accessCheckInFlight = apiFetch('/api/access', {
+      method: 'POST',
+      body: JSON.stringify({ initData: initData })
+    }).then(function(result){
+      accessCheckInFlight = null;
+      accessLocked = false;
+      clearAccessRetry();
+      accessCard.classList.add('hidden');
+      return result;
+    }, function(err){
+      accessCheckInFlight = null;
+      showAccessError(err);
+      throw err;
+    });
+    return accessCheckInFlight;
   }
   function startSession(){
     if (DEMO_MODE) {
@@ -1881,12 +1983,14 @@ window.FLAPY_ART = {
       session = { sessionId: res.sessionId, seed: res.seed, token: res.token || '', startedAt: Date.now() };
       return session;
     }).catch(function(err){
-      session = { sessionId: null, seed: localSeed(), startedAt: Date.now(), offline: true };
-      return session;
+      // Never turn an auth/ban/server error into an offline round. Offline
+      // play is only available when the app is explicitly in DEMO_MODE.
+      session = null;
+      throw err;
     });
   }
   function submitScore(flapLog, reviveLog, totalSteps, clientScore){
-    if (DEMO_MODE || !session.sessionId) {
+    if (DEMO_MODE || !session || !session.sessionId) {
       return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false });
     }
     return apiFetch('/api/submit-score', {
@@ -1894,6 +1998,7 @@ window.FLAPY_ART = {
       body: JSON.stringify({ sessionId: session.sessionId, flapLog: flapLog, reviveLog: reviveLog, totalSteps: totalSteps, clientScore: clientScore, initData: initData, token: session.token || '' })
     }).then(function(res){ res.verified = true; return res; })
       .catch(function(err){
+        if (err && err.code === 'PLAYER_BANNED') showAccessError(err);
         return { score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false, error: String(err.message||err) };
       });
   }
@@ -1903,7 +2008,9 @@ window.FLAPY_ART = {
     apiFetch('/api/session-heartbeat', {
       method: 'POST',
       body: JSON.stringify({ initData: initData, sessionId: session.sessionId, step: stepIndex, token: session.token || '' })
-    }).catch(function(){});
+    }).catch(function(err){
+      if (err && err.code === 'PLAYER_BANNED') showAccessError(err);
+    });
   }
   function fetchLeaderboard(period){
     period = period || lbPeriod;
@@ -2078,6 +2185,7 @@ window.FLAPY_ART = {
     });
   }
   function beginRound(){
+    if (accessLocked) return;
     startCard.classList.remove('hidden');
     overCard.classList.add('hidden');
     gameStartCount++;
@@ -2087,17 +2195,20 @@ window.FLAPY_ART = {
     showStartAd(1);
   }
   function startGameAfterAds(){
+    if (accessLocked) return;
     awaitingPlayAfterAd = false;
     startAdStep = 0;
     startCard.classList.add('hidden');
     startBtn.disabled = true;
     startSession().then(function(){
+      if (accessLocked) return;
       startBtn.disabled = false;
       startBtn.textContent = t('tapToStart');
       actuallyStartGame();
-    }).catch(function(){
+    }).catch(function(err){
       startBtn.disabled = false;
       startBtn.textContent = t('tapToStart');
+      showAccessError(err);
     });
   }
   function handleCrash(){
@@ -2172,9 +2283,18 @@ window.FLAPY_ART = {
     if(e.code === 'Space' || e.code === 'ArrowUp'){ e.preventDefault(); flap(); }
   });
 
+  accessRetryBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    if (accessCheckInFlight) return;
+    showAccessChecking();
+    checkGameAccess().then(function(){
+      showMode();
+      resumePvpIfAny();
+    }).catch(function(){});
+  });
   startBtn.addEventListener('click', function(e){
     e.preventDefault();
-    if (startBtn.disabled) return;
+    if (startBtn.disabled || accessLocked) return;
     if (startAdStep === 2 || awaitingPlayAfterAd) {
       startGameAfterAds();
       return;
@@ -2187,6 +2307,7 @@ window.FLAPY_ART = {
   });
   restartBtn.addEventListener('click', function(e){
     e.preventDefault();
+    if (accessLocked) return;
     overCard.classList.add('hidden');
     startAdStep = 0;
     awaitingPlayAfterAd = false;
@@ -2207,6 +2328,7 @@ window.FLAPY_ART = {
   });
   document.getElementById('pvpBackBtn').addEventListener('click', function(){ showMode(); });
   document.getElementById('pvpPlayBtn').addEventListener('click', function(){
+    if (accessLocked) return;
     document.getElementById('pvpPlayBtn').disabled = true;
     apiFetch('/api/pvp/join', { method:'POST', body: JSON.stringify({ initData: initData, stake: pvpStake }) })
       .then(function(res){
@@ -2216,7 +2338,8 @@ window.FLAPY_ART = {
       })
       .catch(function(err){
         document.getElementById('pvpPlayBtn').disabled = false;
-        document.getElementById('pvpStakeHint').textContent = (err && err.message) ? err.message : t('pvpNeedC');
+        if (err && err.code === 'PLAYER_BANNED') showAccessError(err);
+        else document.getElementById('pvpStakeHint').textContent = (err && err.message) ? err.message : t('pvpNeedC');
       });
   });
   document.getElementById('pvpCancelBtn').addEventListener('click', function(){
@@ -2239,7 +2362,10 @@ window.FLAPY_ART = {
     document.getElementById('pvpReadyBtn').disabled = true;
     apiFetch('/api/pvp/ready', { method:'POST', body: JSON.stringify({ initData: initData }) })
       .then(function(res){ document.getElementById('pvpReadyBtn').disabled = false; applyPvpState(res); startPvpPoll(); })
-      .catch(function(){ document.getElementById('pvpReadyBtn').disabled = false; });
+      .catch(function(err){
+        document.getElementById('pvpReadyBtn').disabled = false;
+        if (err && err.code === 'PLAYER_BANNED') showAccessError(err);
+      });
   });
   document.getElementById('howBtn').addEventListener('click', function(){
     document.getElementById('howCard').classList.remove('hidden');
@@ -2300,6 +2426,8 @@ window.FLAPY_ART = {
       }
     }
     document.getElementById('profileName').textContent = tgUser ? (tgUser.username ? '@'+tgUser.username : (tgUser.first_name||'Player')) : 'Player';
+    var profileUserIdEl = document.getElementById('profileUserId');
+    if (profileUserIdEl) profileUserIdEl.textContent = myTelegramId() || '—';
     if (profileCache) { renderProfileFromCache(); return; }
     document.getElementById('profileHint').textContent = t('loading');
     fetchProfile().then(function(p){ profileCache = p; renderProfileFromCache(); })
@@ -2812,12 +2940,13 @@ window.FLAPY_ART = {
     el.innerHTML = '<span>'+v+'</span> ' + coinImg(kind);
   }
   function hideGameOverlays(){
-    ['modeCard','pvpCard','pvpWaitCard','pvpConfirmCard','pvpReadyCard','pvpInfoCard','pvpResultCard','startCard','overCard','howCard'].forEach(function(id){
+    ['modeCard','pvpCard','pvpWaitCard','pvpConfirmCard','pvpReadyCard','pvpInfoCard','pvpResultCard','startCard','accessCard','overCard','howCard'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.classList.add('hidden');
     });
   }
   function showMode(){
+    if (accessLocked) return;
     pvpMode = false;
     pvpMatchLive = false;
     pvpPendingSubmit = null;
@@ -2849,7 +2978,7 @@ window.FLAPY_ART = {
     pvpBeatTimer = setInterval(function(){
       if (!pvpMatchLive) return;
       apiFetch('/api/pvp/heartbeat', { method:'POST', body: JSON.stringify({ initData: initData }) })
-        .then(applyPvpState).catch(function(){});
+        .then(applyPvpState).catch(function(err){ if (err && err.code === 'PLAYER_BANNED') showAccessError(err); });
     }, 4000);
   }
   function stopPvpHeartbeat(){
@@ -2977,7 +3106,7 @@ window.FLAPY_ART = {
     stopPvpPoll();
     pvpPollTimer = setInterval(function(){
       apiFetch('/api/pvp/status', { method:'POST', body: JSON.stringify({ initData: initData }) })
-        .then(applyPvpState).catch(function(){});
+        .then(applyPvpState).catch(function(err){ if (err && err.code === 'PLAYER_BANNED') showAccessError(err); });
     }, 500);
   }
   function sendPvpSubmit(){
@@ -2999,7 +3128,11 @@ window.FLAPY_ART = {
         applyPvpState(res);
         startPvpPoll();
       })
-      .catch(function(){
+      .catch(function(err){
+        if (err && err.code === 'PLAYER_BANNED') {
+          showAccessError(err);
+          return;
+        }
         // Don't dump to mode (that used to let the player start a fresh flight).
         // If the match already moved on (forfeit / opponent finished), stop retrying.
         apiFetch('/api/pvp/status', { method:'POST', body: JSON.stringify({ initData: initData }) })
@@ -3012,7 +3145,11 @@ window.FLAPY_ART = {
             }
             startPvpPoll();
           })
-          .catch(function(){
+          .catch(function(err){
+            if (err && err.code === 'PLAYER_BANNED') {
+              showAccessError(err);
+              return;
+            }
             setTimeout(function(){ if (pvpPendingSubmit) sendPvpSubmit(); }, 1500);
           });
       });
@@ -3034,14 +3171,21 @@ window.FLAPY_ART = {
           applyPvpState(res);
           startPvpPoll();
         }
-      }).catch(function(){});
+      }).catch(function(err){ if (err && err.code === 'PLAYER_BANNED') showAccessError(err); });
   }
   function init(){
     applyI18n();
     renderStakes();
     document.getElementById('navbar').classList.remove('hidden');
-    showMode();
-    resumePvpIfAny();
+    if (DEMO_MODE) {
+      showMode();
+      return;
+    }
+    showAccessChecking();
+    checkGameAccess().then(function(){
+      showMode();
+      resumePvpIfAny();
+    }).catch(function(){});
   }
   resetGame();
   init();

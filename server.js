@@ -126,11 +126,30 @@ function displayName(user) {
   return AC.sanitizeName(raw);
 }
 
+function trackTelegramUser(user) {
+  if (!user || !user.id) return;
+  store.trackUser(String(user.id), {
+    name: displayName(user),
+    username: user.username || '',
+  });
+}
+
 function rejectBanned(user, res) {
   if (!user) return false;
-  if (!store.isBanned(String(user.id))) return false;
-  const info = store.banInfo(String(user.id));
-  res.status(403).json({ error: 'temporarily banned for cheating', until: info && info.until });
+  const userId = String(user.id);
+  // Read the row once: banInfo performs the expiry check and avoids a small
+  // race where isBanned() could expire the row between two calls.
+  const info = store.banInfo(userId);
+  if (!info) return false;
+  const until = Number(info.until);
+  res.status(403).json({
+    error: 'temporarily banned for cheating',
+    code: 'PLAYER_BANNED',
+    userId,
+    until: until || null,
+    minutesLeft: until ? Math.max(1, Math.ceil((until - Date.now()) / 60000)) : null,
+    reason: info && info.reason ? info.reason : 'manual ban',
+  });
   return true;
 }
 
@@ -155,6 +174,18 @@ function ranksFor(userId) {
   };
 }
 
+// Lightweight gate used when the Mini App opens. Static HTML cannot be
+// protected by a Telegram user ID, so the client must ask the API before it
+// enables the game. start-session still checks the ban again (the ban may be
+// created while the page is open).
+app.post('/api/access', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  trackTelegramUser(user);
+  res.json({ ok: true, userId: String(user.id), name: displayName(user) });
+});
+
 app.post('/api/start-session', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
@@ -173,7 +204,7 @@ app.post('/api/start-session', (req, res) => {
   }
 
   const name = displayName(user);
-  store.trackUser(String(user.id));
+  trackTelegramUser(user);
   store.attachReferral(String(user.id), name, startParamFrom(req));
 
   const sessionId = crypto.randomBytes(16).toString('hex');
@@ -369,7 +400,7 @@ app.post('/api/profile', (req, res) => {
   const userId = String(user.id);
   const ranks = ranksFor(userId);
 
-  store.trackUser(userId);
+  trackTelegramUser(user);
   store.attachReferral(userId, displayName(user), req.body.startParam || req.body.ref || '');
   const refInfo = store.getReferralInfo(userId, displayName(user));
   const appLink = (process.env.TELEGRAM_APP_LINK || process.env.MINI_APP_SHARE || 'https://t.me/FlapyGameBot/directlink').trim().replace(/\/$/, '');
@@ -537,6 +568,13 @@ app.get('/internal/stats', (req, res) => {
   }, store.persistInfo()));
 });
 
+// Admin-only directory: Telegram IDs are the value used by /internal/bans.
+// It intentionally contains no balances or wallet addresses.
+app.get('/internal/users', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ users: store.listUsers(req.query.limit) });
+});
+
 app.get('/internal/backup', (req, res) => {
   if (!requireAdmin(req, res)) return;
   const snap = store.getSnapshot();
@@ -660,6 +698,7 @@ app.post('/api/pvp/join', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
+  trackTelegramUser(user);
   if (!store.allowRequest('pvpjoin:' + user.id, 20, 60 * 1000)) {
     return res.status(429).json({ error: 'too many PvP requests, slow down' });
   }
@@ -675,6 +714,7 @@ app.post('/api/pvp/cancel', (req, res) => {
 app.post('/api/pvp/status', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   res.json(store.pvpStatus(String(user.id)));
 });
 app.post('/api/pvp/submit', (req, res) => {
@@ -723,11 +763,13 @@ app.post('/api/pvp/forfeit', (req, res) => {
 app.post('/api/pvp/heartbeat', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   res.json(store.pvpHeartbeat(String(user.id)));
 });
 app.post('/api/pvp/ready', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   const result = store.pvpReady(String(user.id));
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
