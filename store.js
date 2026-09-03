@@ -55,6 +55,7 @@ let lastRemoteSavedAt = 0;   // savedAt of the snapshot we know is in Redis
 let lastSaveOkAt = 0;
 let lastSaveError = null;
 let blockedSaves = 0;
+let fileSaveFailStreak = 0;   // consecutive failed writes to DATA_FILE (log throttling)
 // Unknown top-level fields from a snapshot written by a NEWER version of the
 // code are kept verbatim, so rolling back a deploy never deletes new data.
 let extraFields = {};
@@ -351,6 +352,30 @@ function writeJsonFile(filePath, data) {
   fs.renameSync(tmp, filePath);
 }
 
+/**
+ * Returns a human-readable description when DATA_FILE currently exists as a
+ * DIRECTORY instead of a file, or null when the path is fine.
+ *
+ * This is a classic Railway/volume mistake: if a folder accidentally appears
+ * at /data/store.json (an accidental mkdir / upload / archive extraction, a
+ * shell mistake, an old tool writing a directory layout, …), the atomic
+ * save (write store.json.tmp then rename to store.json) fails forever with
+ * "EISDIR: illegal operation on a directory, rename …". The container keeps
+ * working from memory + the ephemeral fallback file, so every redeploy then
+ * silently reverts player data to the last hourly backup — balances,
+ * referrals and leaderboard rows look "deleted".
+ */
+function dataFileProblem() {
+  try {
+    const st = fs.statSync(DATA_FILE);
+    if (st.isDirectory()) {
+      return 'DATA_FILE (' + DATA_FILE + ') is a DIRECTORY, not a file — every save fails with EISDIR. ' +
+        'Move it out of the way (e.g. `mv ' + DATA_FILE + ' ' + DATA_FILE + '.dir-bak`) so the app can write a normal file there.';
+    }
+  } catch (e) { /* path missing or unreadable — not the directory problem */ }
+  return null;
+}
+
 /* ------------------------------------------------------------------ *
  * Data-safety helpers
  * ------------------------------------------------------------------ */
@@ -500,16 +525,31 @@ function saveFile(force) {
     return false;
   }
   const json = JSON.stringify(snap);
+  // Returns whether the PRIMARY (durable) copy was written. A success on the
+  // ephemeral fallback file alone must NOT count — that file dies with the
+  // container on every redeploy (that is exactly how data used to get lost
+  // silently when DATA_FILE was misconfigured, e.g. pointed at a directory).
+  let primaryOk = false;
   try {
     writeJsonFile(DATA_FILE, json);
+    primaryOk = true;
+    fileSaveFailStreak = 0;
+    lastSaveError = null;
   } catch (err) {
+    fileSaveFailStreak++;
     lastSaveError = String(err.message || err);
-    console.error('store file save failed:', lastSaveError);
+    if (fileSaveFailStreak <= 3 || fileSaveFailStreak % 50 === 0) {
+      console.error('store file save failed:', lastSaveError);
+      const problem = dataFileProblem();
+      if (problem) console.error('store: ' + problem);
+    }
   }
   if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) {
-    try { writeJsonFile(FALLBACK_FILE, json); } catch (e) {}
+    try { writeJsonFile(FALLBACK_FILE, json); } catch (e) {
+      if (fileSaveFailStreak <= 3) console.error('store fallback file save failed:', e.message || e);
+    }
   }
-  return true;
+  return primaryOk;
 }
 
 async function redisCmd(cmd) {
@@ -571,6 +611,20 @@ async function probeDurability() {
   // File backend: confirm the directory is writable AND sits on a mount that
   // survives a redeploy (not the container's ephemeral root filesystem).
   try {
+    // A temp file next to store.json proves the folder is writable, but it
+    // would PASS even when store.json itself can never be written (e.g. it is
+    // a directory and every save dies with EISDIR). Fail loudly on that.
+    const pathProblem = dataFileProblem();
+    if (pathProblem) {
+      return {
+        ok: false,
+        backend: 'file',
+        dataFile: DATA_FILE,
+        durable: durableLooksOk(),
+        error: pathProblem,
+        ms: Date.now() - t0,
+      };
+    }
     const dir = path.dirname(DATA_FILE);
     fs.mkdirSync(dir, { recursive: true });
     const probePath = path.join(dir, '__durability_probe__' + INSTANCE_ID + '.tmp');
@@ -774,17 +828,17 @@ async function saveRedis(force) {
 }
 
 async function saveAll(force) {
-  saveFile(force);
+  const fileOk = saveFile(force);
   if (useRedis) await saveRedis(force);
-  else lastSaveOkAt = Date.now();
+  else if (fileOk) lastSaveOkAt = Date.now();
   maybeBackup();
 }
 
 function saveNow() {
-  saveFile(false);
+  const fileOk = saveFile(false);
   if (useRedis) {
     saveRedis(false).catch((err) => console.error('store redis save failed:', err.message || err));
-  } else {
+  } else if (fileOk) {
     lastSaveOkAt = Date.now();
   }
   maybeBackup();
@@ -812,6 +866,26 @@ function latestBackupFile() {
 }
 
 function loadFromDisk() {
+  // Self-heal the classic "store.json accidentally became a directory"
+  // mistake (see dataFileProblem): rename the directory aside — contents are
+  // preserved — so a real file can be created at DATA_FILE again. Without
+  // this, the directory lives on inside the volume and EVERY redeploy keeps
+  // reverting player data to the last backup.
+  const dirProblem = dataFileProblem();
+  if (dirProblem) {
+    const moved = DATA_FILE + '.dir-' + new Date().toISOString().replace(/[:.]/g, '-');
+    try {
+      fs.renameSync(DATA_FILE, moved);
+      console.error('store: ' + dirProblem);
+      console.error('store: auto-fixed — renamed the directory to ' + moved +
+        '\n       the app will now create a real file at ' + DATA_FILE + '.' +
+        '\n       check whether ' + moved + ' contains anything you need (old data / backups).');
+    } catch (err) {
+      console.error('store: ' + dirProblem);
+      console.error('store: auto-rename FAILED (' + (err.message || err) + ') — reads and writes to ' +
+        DATA_FILE + ' will keep failing until you move that directory out of the way.');
+    }
+  }
   const files = [DATA_FILE];
   if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) files.push(FALLBACK_FILE);
   const backup = latestBackupFile();
@@ -1829,11 +1903,22 @@ module.exports = {
   _countPlayers: countPlayers,
   listBackups,
   restoreBackup,
-  importSnapshot: function(data) {
+  importSnapshot: async function(data) {
     hydrate(data);
     peakKnownUsers = countPlayers(snapshot());
-    saveFile(true);
-    if (useRedis) saveRedis(true).catch((err) => console.error('store redis save failed:', err.message || err));
+    const fileOk = saveFile(true);
+    if (useRedis) {
+      try {
+        await saveRedis(true);
+      } catch (err) {
+        if (!fileOk) throw new Error('failed to persist restored snapshot: ' + String((err && err.message) || err));
+        console.error('store redis save failed:', err.message || err);
+      }
+    } else if (!fileOk) {
+      // Nothing durable was written (e.g. DATA_FILE is a directory and even
+      // the auto-fix could not help) — never report this restore as ok.
+      throw new Error('failed to persist restored snapshot: ' + (lastSaveError || 'file write failed'));
+    }
     return {
       players: allTimeBest.size,
       boards: periodBoards.size,
@@ -1855,6 +1940,7 @@ module.exports = {
       dataFile: DATA_FILE,
       exists,
       bytes,
+      dataFileIsDirectory: !!dataFileProblem(),
       redis: useRedis,
       backend: useRedis ? 'upstash-redis' : 'file',
       players: allTimeBest.size,

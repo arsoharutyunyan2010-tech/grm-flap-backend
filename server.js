@@ -469,13 +469,17 @@ app.get('/internal/backup', (req, res) => {
   res.send(JSON.stringify(snap, null, 2));
 });
 
-app.post('/internal/backup', (req, res) => {
+app.post('/internal/backup', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   if (!req.body || typeof req.body !== 'object' || !req.body.periodBoards) {
     return res.status(400).json({ error: 'invalid backup file' });
   }
-  const info = store.importSnapshot(req.body);
-  res.json({ ok: true, restored: info });
+  try {
+    const info = await store.importSnapshot(req.body);
+    res.json({ ok: true, restored: info });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String((err && err.message) || err) });
+  }
 });
 
 // --- rolling backups / disaster recovery ---------------------------------
