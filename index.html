@@ -289,6 +289,7 @@
     border-radius: 50%;
   }
   .rate-chip .tiny-coin{ width:28px; height:28px; }
+  .sub .tiny-coin{ width:18px; height:18px; margin:0 3px; }
   .coin-amt{
     display:inline-flex !important;
     align-items:center;
@@ -882,7 +883,7 @@
 <div class="page hidden" id="page-referral">
   <div class="page-inner">
     <div class="page-title-row"><img src="" data-art="nav-referral.png" alt=""><div class="title" data-i18n="referral">REFERRAL</div></div>
-    <div class="sub" data-i18n="refSub">Invite friends. Earn C when they top up.</div>
+    <div class="sub" data-i18n="refSub">Invite friends. Earn <img class="tiny-coin" src="" data-art="c-coin.png" alt="C"> when they top up.</div>
     <div class="rate-chip" style="flex-direction:column; gap:8px; align-items:stretch;">
       <div class="field-label" data-i18n="refLink">Your link</div>
       <div class="addr-row">
@@ -895,7 +896,6 @@
     <div class="stat-row"><span data-i18n="refL2">Level 2 · 3%</span><b id="refN2">0</b></div>
     <div class="stat-row"><span data-i18n="refL3">Level 3 · 1%</span><b id="refN3">0</b></div>
     <div class="stat-row"><span data-i18n="refEarned">Earned</span><b id="refEarned" class="coin-amt">0</b></div>
-    <div class="hint" data-i18n="refHint">Level 1 = your invites. Level 2 = their invites. Level 3 = the next line. Percents are paid in C on each approved top-up.</div>
     <div class="section-title" data-i18n="refPeople">Your invites</div>
     <div class="lb-list" id="refPeopleList"></div>
   </div>
@@ -1317,10 +1317,9 @@ window.FLAPY_ART = {
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
       lbNote:"Scores are verified on the server and cannot be forged from the browser.",
       tasks:"TASKS", comingSoon:"Coming soon.",
-      referral:"REFERRAL", refSub:"Invite friends. Earn C when they top up.",
+      referral:"REFERRAL", refSub:"Invite friends. Earn {c} when they top up.",
       refLink:"Your link", refL1:"Level 1 · 7%", refL2:"Level 2 · 3%", refL3:"Level 3 · 1%",
       refEarned:"Earned", refPeople:"Your invites",
-      refHint:"Level 1 = people you invited. Level 2 = people they invited. Level 3 = the next line. You get 7% / 3% / 1% in C when they top up.",
       refLbTitle:"Top inviters today", refLbSub:"Who invited the most people (level 1)",
       refEmpty:"No invites yet.", refCopied:"COPIED",
       
@@ -1376,10 +1375,9 @@ window.FLAPY_ART = {
       daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место", lbViewScore:"ОЧКИ", lbViewInvites:"ПРИГЛАШЕНИЯ",
       lbNote:"Счёт проверяется сервером и его нельзя подделать в браузере.",
       tasks:"ЗАДАНИЯ", comingSoon:"Скоро.",
-      referral:"РЕФЕРАЛЫ", refSub:"Приглашай друзей. Получай C с их пополнений.",
+      referral:"РЕФЕРАЛЫ", refSub:"Приглашай друзей. Получай {c} с их пополнений.",
       refLink:"Ваша ссылка", refL1:"Уровень 1 · 7%", refL2:"Уровень 2 · 3%", refL3:"Уровень 3 · 1%",
       refEarned:"Заработано", refPeople:"Ваши приглашённые",
-      refHint:"Уровень 1 — кого пригласили вы. Уровень 2 — кого пригласили они. Уровень 3 — следующая линия. 7% / 3% / 1% C с каждого одобренного пополнения.",
       refLbTitle:"Топ пригласивших сегодня", refLbSub:"Кто пригласил больше всех (уровень 1)",
       refEmpty:"Пока никого нет.", refCopied:"СКОПИРОВАНО",
       
@@ -1435,10 +1433,9 @@ window.FLAPY_ART = {
       daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце", lbViewScore:"БАЛИ", lbViewInvites:"ЗАПРОШЕННЯ",
       lbNote:"Рахунок перевіряється сервером і його не можна підробити в браузері.",
       tasks:"ЗАВДАННЯ", comingSoon:"Незабаром.",
-      referral:"РЕФЕРАЛИ", refSub:"Запрошуй друзів. Отримуй C з їх поповнень.",
+      referral:"РЕФЕРАЛИ", refSub:"Запрошуй друзів. Отримуй {c} з їх поповнень.",
       refLink:"Ваше посилання", refL1:"Рівень 1 · 7%", refL2:"Рівень 2 · 3%", refL3:"Рівень 3 · 1%",
       refEarned:"Зароблено", refPeople:"Ваші запрошені",
-      refHint:"Рівень 1 — кого запросили ви. Рівень 2 — кого запросили вони. Рівень 3 — наступна лінія. 7% / 3% / 1% C з кожного схваленого поповнення.",
       refLbTitle:"Топ запрошувачів сьогодні", refLbSub:"Хто запросив найбільше (рівень 1)",
       refEmpty:"Поки нікого немає.", refCopied:"СКОПІЙОВАНО",
       
@@ -1494,10 +1491,9 @@ window.FLAPY_ART = {
       daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名", lbViewScore:"分数", lbViewInvites:"邀请",
       lbNote:"分数由服务器验证，无法在浏览器中伪造。",
       tasks:"任务", comingSoon:"即将推出。",
-      referral:"推荐", refSub:"邀请好友。他们充值时你获得 C。",
+      referral:"推荐", refSub:"邀请好友。他们充值时你获得 {c}。",
       refLink:"你的链接", refL1:"一级 · 7%", refL2:"二级 · 3%", refL3:"三级 · 1%",
       refEarned:"已赚取", refPeople:"你邀请的人",
-      refHint:"一级是你邀请的人，二级是他们邀请的人，三级再下一层。他们充值审核后你获得 7% / 3% / 1% C。",
       refLbTitle:"今日邀请榜", refLbSub:"谁邀请最多（仅一级）",
       refEmpty:"还没有邀请。", refCopied:"已复制",
       
@@ -1553,10 +1549,9 @@ window.FLAPY_ART = {
       daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक", lbViewScore:"स्कोर", lbViewInvites:"आमंत्रण",
       lbNote:"स्कोर सर्वर पर सत्यापित होते हैं और ब्राउज़र से नकली नहीं किए जा सकते।",
       tasks:"कार्य", comingSoon:"जल्द आ रहा है।",
-      referral:"रेफरल", refSub:"दोस्तों को आमंत्रित करें। उनके टॉप-अप पर C पाएँ।",
+      referral:"रेफरल", refSub:"दोस्तों को आमंत्रित करें। उनके टॉप-अप पर {c} पाएँ।",
       refLink:"आपका लिंक", refL1:"लेवल 1 · 7%", refL2:"लेवल 2 · 3%", refL3:"लेवल 3 · 1%",
       refEarned:"कमाई", refPeople:"आपके आमंत्रित",
-      refHint:"लेवल 1 आपने बुलाए, लेवल 2 उन्होंने बुलाए, लेवल 3 अगली लाइन। टॉप-अप पर 7% / 3% / 1% C।",
       refLbTitle:"आज के टॉप आमंत्रक", refLbSub:"सबसे ज़्यादा आमंत्रण (लेवल 1)",
       refEmpty:"अभी कोई नहीं।", refCopied:"कॉपी हो गया",
       
@@ -1585,7 +1580,15 @@ window.FLAPY_ART = {
     document.documentElement.lang = lang;
     document.querySelectorAll("[data-i18n]").forEach(function(el){
       var k = el.getAttribute("data-i18n");
-      if (k) el.textContent = t(k);
+      if (!k) return;
+      var s = t(k);
+      if (s.indexOf("{c}") !== -1) {
+        var coinSrc = artBlobUrl("c-coin.png");
+        var coin = coinSrc ? '<img class="tiny-coin" src="' + coinSrc + '" alt="C">' : "C";
+        el.innerHTML = s.split("{c}").join(coin);
+      } else {
+        el.textContent = s;
+      }
     });
     document.getElementById("langBtn").textContent = LANG_FLAGS[lang] || "🌐";
     if (typeof refreshSoundUI === "function") refreshSoundUI();
