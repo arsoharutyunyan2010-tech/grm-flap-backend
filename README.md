@@ -100,6 +100,26 @@ None of this requires trusting the client for anything except *when it
 tapped* — everything that turns taps into a score happens on the server.
 Run `npm run test:anticheat` to exercise the checks.
 
+## Moderation and timed game bans
+
+Open `/admin.html`, enter `ADMIN_KEY`, and press **Load**. The **Players / Telegram
+user IDs** table lists every verified player. The numeric value in **Telegram user
+ID** is the value to paste into **Ban player**. A player's own ID is also shown on
+the in-game Profile page; it is the same ID Telegram sends in `initData`.
+
+Enter the duration in minutes (for example, `10`) and press **Ban player**. The
+server stores an absolute expiry time and checks it on the access gate, every new
+classic/PvP session, heartbeats, score submission, and PvP actions. The Mini App
+also displays the remaining time and retries automatically when the timed ban
+expires. An already-open round is stopped on its next heartbeat and cannot save
+its score.
+
+The HTML file itself can still be downloaded by a browser because Telegram must
+be able to load the Mini App before it sends `initData`. What is blocked is game
+access: a banned user cannot obtain a server session or start a verified round.
+The client must never fall back to offline play after an auth, server, or ban
+error.
+
 ## Setup
 
 ```bash
