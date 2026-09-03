@@ -23,6 +23,12 @@
     .status-rejected{ color:#ff5d73; }
   .pay-btn{ padding:4px 10px; font-size:12px; }
   .err{ color:#ff5d73; }
+  .banform{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .banform input{ min-width:120px; }
+  .banform .minutes{ flex:0 0 120px; }
+  .banform button{ flex:0 0 auto; }
+  tr.repeat td{ color:#ff5d73; }
+  .repeat-x{ font-weight:800; color:#ff5d73; margin-left:4px; }
 </style>
 </head>
 <body>
@@ -75,16 +81,40 @@
     <thead><tr><th>ID</th><th>Player</th><th>Address</th><th>Amount</th><th>Status</th><th></th></tr></thead>
     <tbody id="wRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
   </table>
-    <h2>Anti-cheat rejects</h2>
+
+  <h2>Cheaters &amp; bans</h2>
+  <div class="banform">
+    <input id="banUserId" type="text" placeholder="User ID">
+    <input id="banMinutes" class="minutes" type="number" min="1" value="600" placeholder="Minutes">
+    <input id="banReason" type="text" placeholder="Reason">
+    <button onclick="banPlayer()">Ban player</button>
+  </div>
   <table>
-    <thead><tr><th>When</th><th>User</th><th>Reason</th></tr></thead>
-    <tbody id="acRows"><tr><td colspan="3">Enter admin key and press Load.</td></tr></tbody>
+    <thead><tr><th>User ID</th><th>Reason</th><th>Strikes</th><th>Blocked until</th><th>Left</th><th></th></tr></thead>
+    <tbody id="banRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
+  </table>
+
+  <h2>Anti-cheat rejects</h2>
+  <table>
+    <thead><tr><th>When</th><th>User</th><th>Reason</th><th>Score</th><th></th></tr></thead>
+    <tbody id="acRows"><tr><td colspan="5">Enter admin key and press Load.</td></tr></tbody>
   </table>
 
 <script>
   var API_BASE = window.location.origin;
 
   function getKey(){ return document.getElementById('adminKey').value.trim(); }
+
+  // HTML-escape every untrusted value before it lands in innerHTML, so a
+  // stored name / txHash / address / reason / userId can never inject markup.
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
 
   function loadAll(){
     var key = getKey();
@@ -95,8 +125,92 @@
     loadDeposits(key);
     loadWithdrawals(key);
     loadBackups();
+    loadBans(key);
     loadAntiCheat(key);
   }
+
+  function loadBans(key){
+    fetch(API_BASE + '/internal/bans', { headers: { 'x-admin-key': key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ renderBans(d.bans || [], key); })
+      .catch(function(e){ document.getElementById('err').textContent = 'Bans error: ' + e.message; });
+  }
+
+  function renderBans(list, key){
+    var tbody = document.getElementById('banRows');
+    tbody.innerHTML = '';
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="6">No active bans.</td></tr>';
+      return;
+    }
+    list.forEach(function(b){
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + esc(b.userId) + '</td>' +
+        '<td>' + esc(b.reason) + '</td>' +
+        '<td>' + (Number(b.strikes) || 0) + '</td>' +
+        '<td>' + (b.until ? new Date(b.until).toLocaleString() : '—') + '</td>' +
+        '<td>' + (b.minutesLeft == null ? '—' : (b.minutesLeft + ' min')) + '</td>' +
+        '<td><button class="pay-btn">Unban</button></td>';
+      tr.querySelector('button').onclick = function(){ unbanPlayer(b.userId); };
+      tbody.appendChild(tr);
+    });
+  }
+
+  window.banPlayer = function(){
+    var key = getKey();
+    if (!key) return;
+    var userId = document.getElementById('banUserId').value.trim();
+    var minutes = parseInt(document.getElementById('banMinutes').value, 10);
+    if (!(minutes > 0)) minutes = 600;
+    var reason = document.getElementById('banReason').value.trim();
+    if (!userId) { document.getElementById('err').textContent = 'Ban error: user ID required'; return; }
+    fetch(API_BASE + '/internal/bans', {
+      method: 'POST',
+      headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: userId, minutes: minutes, reason: reason || 'manual ban' })
+    })
+      .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || ('HTTP '+r.status)); return d; }); })
+      .then(function(){
+        document.getElementById('err').textContent = '';
+        document.getElementById('banUserId').value = '';
+        document.getElementById('banReason').value = '';
+        loadBans(key);
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Ban error: ' + e.message; });
+  };
+
+  window.unbanPlayer = function(userId){
+    var key = getKey();
+    if (!key) return;
+    fetch(API_BASE + '/internal/bans/' + encodeURIComponent(userId) + '/unban', {
+      method: 'POST',
+      headers: { 'x-admin-key': key }
+    })
+      .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || ('HTTP '+r.status)); return d; }); })
+      .then(function(){
+        document.getElementById('err').textContent = '';
+        loadBans(key);
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Unban error: ' + e.message; });
+  };
+
+  window.quickBan = function(userId){
+    var key = getKey();
+    if (!key) return;
+    fetch(API_BASE + '/internal/bans', {
+      method: 'POST',
+      headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: userId, minutes: 1440, reason: 'cheat (quick ban)' })
+    })
+      .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || ('HTTP '+r.status)); return d; }); })
+      .then(function(){
+        document.getElementById('err').textContent = '';
+        loadBans(key);
+        loadAntiCheat(key);
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Ban error: ' + e.message; });
+  };
 
   function loadAntiCheat(key){
     fetch(API_BASE + '/internal/anticheat', { headers: { 'x-admin-key': key } })
@@ -104,14 +218,24 @@
       .then(function(d){
         var tb = document.getElementById('acRows');
         var list = d.events || [];
-        if (!list.length) { tb.innerHTML = '<tr><td colspan="3">No rejects yet.</td></tr>'; return; }
+        if (!list.length) { tb.innerHTML = '<tr><td colspan="5">No rejects yet.</td></tr>'; return; }
+        // Repeat offenders: the same userId appearing >= 2 times in the feed.
+        var counts = {};
+        list.forEach(function(ev){ var u = String(ev.userId || ''); counts[u] = (counts[u] || 0) + 1; });
         tb.innerHTML = '';
         list.forEach(function(ev){
+          var uid = String(ev.userId || '');
+          var n = counts[uid] || 1;
+          var score = (ev.details && ev.details.score != null) ? ev.details.score : '—';
           var tr = document.createElement('tr');
+          if (n >= 2) tr.className = 'repeat';
           tr.innerHTML =
             '<td>' + (ev.at ? new Date(ev.at).toLocaleString() : '—') + '</td>' +
-            '<td>' + String(ev.userId||'').replace(/</g,'&lt;') + '</td>' +
-            '<td>' + String(ev.reason||'').replace(/</g,'&lt;') + '</td>';
+            '<td>' + esc(ev.userId) + (n >= 2 ? '<span class="repeat-x">×' + n + '</span>' : '') + '</td>' +
+            '<td>' + esc(ev.reason) + '</td>' +
+            '<td>' + esc(score) + '</td>' +
+            '<td><button class="pay-btn">Ban</button></td>';
+          (function(u){ tr.querySelector('button').onclick = function(){ quickBan(u); }; })(uid);
           tb.appendChild(tr);
         });
       })
@@ -183,8 +307,8 @@
         : '';
       tr.innerHTML =
         '<td>#'+d.id+'</td>' +
-        '<td>'+ (d.name||'').replace(/</g,'&lt;') +'</td>' +
-        '<td style="word-break:break-all;max-width:180px;">'+ (d.txHash||'').replace(/</g,'&lt;') +'</td>' +
+        '<td>'+ esc(d.name) +'</td>' +
+        '<td style="word-break:break-all;max-width:180px;">'+ esc(d.txHash) +'</td>' +
         '<td>'+ d.amount +' FLAP ($'+(d.amount/100).toFixed(2)+')</td>' +
         '<td class="status-'+d.status+'">'+ d.status +'</td>' +
         '<td>'+ actions +'</td>';
@@ -228,8 +352,8 @@
         : '';
       tr.innerHTML =
         '<td>#'+w.id+'</td>' +
-        '<td>'+ (w.name||'').replace(/</g,'&lt;') +'</td>' +
-        '<td style="word-break:break-all;max-width:160px;">'+ String(w.address||'').replace(/</g,'&lt;') +'</td>' +
+        '<td>'+ esc(w.name) +'</td>' +
+        '<td style="word-break:break-all;max-width:160px;">'+ esc(w.address) +'</td>' +
         '<td>'+ w.amount +' FLAP</td>' +
         '<td class="status-'+w.status+'">'+ w.status +'</td>' +
         '<td>'+ payCell +'</td>';
@@ -314,9 +438,9 @@
           tr.innerHTML =
             '<td>' + (b.at ? new Date(b.at).toLocaleString() : '—') + '</td>' +
             '<td>' + (b.players == null ? '—' : b.players) + '</td>' +
-            '<td>' + b.source + '</td>' +
-            '<td>' + (b.label || '') + '</td>' +
-            '<td><button data-id="' + b.id + '">Restore</button></td>';
+            '<td>' + esc(b.source) + '</td>' +
+            '<td>' + esc(b.label) + '</td>' +
+            '<td><button data-id="' + esc(b.id) + '">Restore</button></td>';
           tr.querySelector('button').onclick = function(){ restoreBackup(b.id); };
           tb.appendChild(tr);
         });
