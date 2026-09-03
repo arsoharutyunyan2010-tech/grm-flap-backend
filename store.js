@@ -376,6 +376,58 @@ function dataFileProblem() {
   return null;
 }
 
+/**
+ * The Railway-specific recipe for the DATA_FILE-is-a-directory problem.
+ *
+ * The overwhelmingly common cause is not a stray `mkdir` at all: the Volume
+ * itself was mounted AT /data/store.json. A mount point is ALWAYS a directory
+ * and can never hold a file — and, unlike an ordinary directory, it cannot
+ * even be renamed aside. So the self-heal below will fail and every save will
+ * keep dying with EISDIR until the mount configuration is corrected. Spell the
+ * exact settings out, because "move it aside" is not actionable in that case.
+ */
+function dataFileMountHint() {
+  const parent = path.dirname(DATA_FILE);
+  // A bare filename (DATA_FILE=store.json) would otherwise tell the operator to
+  // mount the volume at "/", which is nonsense — recommend /data instead.
+  const mountPath = (parent === '/' || parent === '' || parent === '.') ? '/data' : parent;
+  return 'On Railway this usually means the Volume is mounted DIRECTLY at ' + DATA_FILE +
+    ' (a mount point can never become a file). Fix: Service → Settings → Volumes → ' +
+    'set the volume Mount Path to ' + mountPath + ' (NOT ' + DATA_FILE + '), keep the ' +
+    'variable DATA_FILE=' + DATA_FILE + ', then redeploy.';
+}
+
+/**
+ * Self-heal for the DATA_FILE-is-a-directory problem: rename the directory
+ * aside (its contents are preserved) so a real file can be written at
+ * DATA_FILE again.
+ *
+ * Returns:
+ *   string — the NEW path the directory was renamed to (healed),
+ *   false  — it IS a directory but could not be moved (e.g. it is the volume
+ *            mount point itself; the operator must fix the mount),
+ *   null   — nothing to heal.
+ */
+function relocateDataFileAside() {
+  const problem = dataFileProblem();
+  if (!problem) return null;
+  const moved = DATA_FILE + '.dir-' + new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    fs.renameSync(DATA_FILE, moved);
+    console.error('store: ' + problem);
+    console.error('store: auto-fixed — renamed the directory to ' + moved +
+      '\n       the app will now create a real file at ' + DATA_FILE + '.' +
+      '\n       check whether ' + moved + ' contains anything you need (old data / backups).');
+    return moved;
+  } catch (err) {
+    console.error('store: ' + problem);
+    console.error('store: auto-rename FAILED (' + (err.message || err) + ') — reads and writes to ' +
+      DATA_FILE + ' will keep failing until that path is a normal file.');
+    console.error('store: ' + dataFileMountHint());
+    return false;
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Data-safety helpers
  * ------------------------------------------------------------------ */
@@ -538,10 +590,27 @@ function saveFile(force) {
   } catch (err) {
     fileSaveFailStreak++;
     lastSaveError = String(err.message || err);
+    // Throttled: only the first few failures (and every 50th after that) are
+    // logged, otherwise a broken volume would spam the log on every save.
     if (fileSaveFailStreak <= 3 || fileSaveFailStreak % 50 === 0) {
       console.error('store file save failed:', lastSaveError);
-      const problem = dataFileProblem();
-      if (problem) console.error('store: ' + problem);
+      // Usual culprit: DATA_FILE sits on top of a directory (the volume got
+      // mounted AT the file). Try to self-heal it and immediately retry the
+      // write once — if that works this deploy is durable again without a
+      // restart, and the players who are online right now are not lost.
+      const moved = relocateDataFileAside();
+      if (moved) {
+        try {
+          writeJsonFile(DATA_FILE, json);
+          primaryOk = true;
+          fileSaveFailStreak = 0;
+          lastSaveError = null;
+          console.error('store: saved to ' + DATA_FILE + ' after the auto-fix — writes are durable again.');
+        } catch (err2) {
+          lastSaveError = String(err2.message || err2);
+          console.error('store file save still failed after the auto-fix:', lastSaveError);
+        }
+      }
     }
   }
   if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) {
@@ -613,7 +682,8 @@ async function probeDurability() {
   try {
     // A temp file next to store.json proves the folder is writable, but it
     // would PASS even when store.json itself can never be written (e.g. it is
-    // a directory and every save dies with EISDIR). Fail loudly on that.
+    // a directory and every save dies with EISDIR). Fail loudly on that — and
+    // hand the operator the exact Railway settings that cause it.
     const pathProblem = dataFileProblem();
     if (pathProblem) {
       return {
@@ -622,6 +692,7 @@ async function probeDurability() {
         dataFile: DATA_FILE,
         durable: durableLooksOk(),
         error: pathProblem,
+        hint: dataFileMountHint(),
         ms: Date.now() - t0,
       };
     }
@@ -870,22 +941,10 @@ function loadFromDisk() {
   // mistake (see dataFileProblem): rename the directory aside — contents are
   // preserved — so a real file can be created at DATA_FILE again. Without
   // this, the directory lives on inside the volume and EVERY redeploy keeps
-  // reverting player data to the last backup.
-  const dirProblem = dataFileProblem();
-  if (dirProblem) {
-    const moved = DATA_FILE + '.dir-' + new Date().toISOString().replace(/[:.]/g, '-');
-    try {
-      fs.renameSync(DATA_FILE, moved);
-      console.error('store: ' + dirProblem);
-      console.error('store: auto-fixed — renamed the directory to ' + moved +
-        '\n       the app will now create a real file at ' + DATA_FILE + '.' +
-        '\n       check whether ' + moved + ' contains anything you need (old data / backups).');
-    } catch (err) {
-      console.error('store: ' + dirProblem);
-      console.error('store: auto-rename FAILED (' + (err.message || err) + ') — reads and writes to ' +
-        DATA_FILE + ' will keep failing until you move that directory out of the way.');
-    }
-  }
+  // reverting player data to the last backup. If the path is the volume mount
+  // point itself the rename fails and relocateDataFileAside() logs the exact
+  // Railway setting that has to change.
+  relocateDataFileAside();
   const files = [DATA_FILE];
   if (path.resolve(FALLBACK_FILE) !== path.resolve(DATA_FILE)) files.push(FALLBACK_FILE);
   const backup = latestBackupFile();
@@ -1901,6 +1960,8 @@ module.exports = {
   probeDurability,
   _mergeSnapshots: mergeSnapshots,
   _countPlayers: countPlayers,
+  _dataFileMountHint: dataFileMountHint,
+  _relocateDataFileAside: relocateDataFileAside,
   listBackups,
   restoreBackup,
   importSnapshot: async function(data) {
@@ -1936,11 +1997,15 @@ module.exports = {
       }
     } catch (e) {}
     const durable = durableLooksOk();
+    const problem = dataFileProblem();
     return {
       dataFile: DATA_FILE,
       exists,
       bytes,
-      dataFileIsDirectory: !!dataFileProblem(),
+      dataFileIsDirectory: !!problem,
+      // Only set while DATA_FILE is broken: the copy-pasteable Railway fix, so
+      // /internal/health, the admin page and check:durable can all show it.
+      dataFileHint: problem ? dataFileMountHint() : null,
       redis: useRedis,
       backend: useRedis ? 'upstash-redis' : 'file',
       players: allTimeBest.size,

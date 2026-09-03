@@ -164,6 +164,69 @@ setTimeout(() => {
   check('persist flags it durable', durProbe.durable === true);
   check('probe did not error', durProbe.writeFailed !== true);
 
+  console.log('\\n6) DATA_FILE sitting on a DIRECTORY is healed, and the mount fix is explained');
+  // Railway mounts a volume AS a directory — if it is mounted at the data file
+  // itself, every save dies with EISDIR. The store must move it aside and write
+  // a real file instead, and tell the operator which setting to change.
+  const DIRFILE = path.join(TMP, 'dirstore.json');
+  fs.mkdirSync(DIRFILE);
+  fs.writeFileSync(path.join(DIRFILE, 'old-payload.txt'), 'keep me');
+  const healed = runScenario(`
+    const fs = require('fs'), path = require('path'), store = require(${STORE});
+    (async () => {
+      await store.ready;
+      store.trackUser(process.env.T_U1, 'Ann'); store.creditBalance(process.env.T_U1, 123);
+      store.flush();
+      await new Promise(r => setTimeout(r, 800));
+      const i = store.persistInfo();
+      const probe = await store.probeDurability();
+      const moved = fs.readdirSync(path.dirname(process.env.T_DIRFILE))
+        .filter(f => f.indexOf('dirstore.json.dir-') === 0);
+      console.log('RESULT ' + JSON.stringify({
+        moved, kept: moved.length ? fs.readFileSync(path.join(path.dirname(process.env.T_DIRFILE), moved[0], 'old-payload.txt'), 'utf8') : null,
+        isFile: fs.statSync(process.env.T_DIRFILE).isFile(),
+        isDir: i.dataFileIsDirectory, hint: i.dataFileHint, err: i.lastSaveError,
+        probeOk: probe.ok, probeHint: probe.hint || null,
+        mountHint: store._dataFileMountHint(),
+        nothingToHeal: store._relocateDataFileAside() === null,
+      }));
+      process.exit(0);
+    })();
+  `, { UPSTASH_REDIS_REST_URL: '', UPSTASH_REDIS_REST_TOKEN: '', T_DIRFILE: DIRFILE, DATA_FILE: DIRFILE });
+  check('directory renamed aside at boot', Array.isArray(healed.moved) && healed.moved.length === 1, JSON.stringify(healed.moved));
+  check('old directory contents preserved', healed.kept === 'keep me');
+  check('real file written at DATA_FILE afterwards', healed.isFile === true);
+  check('save no longer errors', healed.err == null, String(healed.err));
+  check('dataFileIsDirectory cleared', healed.isDir === false);
+  check('dataFileHint null while healthy', healed.hint === null);
+  check('probe ok once the path is a file', healed.probeOk === true);
+  check('relocate returns null when there is nothing to heal', healed.nothingToHeal === true);
+  check('hint names the parent dir as Mount Path',
+    String(healed.mountHint).indexOf('Mount Path to ' + TMP + ' (NOT ' + DIRFILE + ')') > 0);
+  check('hint keeps DATA_FILE unchanged', String(healed.mountHint).indexOf('DATA_FILE=' + DIRFILE + ', then redeploy.') > 0);
+
+  console.log('\\n7) an UNMOVABLE directory (real mount point) fails loudly with the fix');
+  const LOCK = fs.mkdtempSync(path.join(os.tmpdir(), 'flap-lock-'));
+  const LOCKFILE = path.join(LOCK, 'store.json');
+  fs.mkdirSync(LOCKFILE);
+  fs.chmodSync(LOCK, 0o555);        // the rename cannot happen — just like a mount point
+  const locked = runScenario(`
+    const store = require(${STORE});
+    (async () => {
+      await store.ready;
+      const i = store.persistInfo();
+      const probe = await store.probeDurability();
+      console.log('RESULT ' + JSON.stringify({ isDir: i.dataFileIsDirectory, hint: i.dataFileHint,
+        probeOk: probe.ok, probeHint: probe.hint || null, same: i.dataFileHint === (probe.hint || null) }));
+      process.exit(0);
+    })();
+  `, { UPSTASH_REDIS_REST_URL: '', UPSTASH_REDIS_REST_TOKEN: '', DATA_FILE: LOCKFILE });
+  check('still reported as a directory', locked.isDir === true);
+  check('probe fails (ok:false)', locked.probeOk === false);
+  check('probe carries the mount hint', String(locked.probeHint).indexOf('Mount Path to ' + LOCK + ' (NOT ' + LOCKFILE + ')') > 0);
+  check('persistInfo carries the same hint', locked.same === true);
+
+  try { fs.chmodSync(LOCK, 0o755); fs.rmSync(LOCK, { recursive: true, force: true }); } catch (e) {}
   mock.kill();
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {}
   console.log('\n' + (failures ? failures + ' CHECK(S) FAILED' : 'ALL CHECKS PASSED'));

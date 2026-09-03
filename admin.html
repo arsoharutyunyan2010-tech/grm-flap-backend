@@ -123,13 +123,15 @@
         document.getElementById('statFile').textContent = d.dataFile || '—';
         document.getElementById('statExists').textContent = d.exists ? ('yes · ' + (d.bytes||0) + ' B') : 'NO';
         var hint = document.getElementById('persistHint');
+        hint.style.whiteSpace = 'pre-line';   // so the multi-line mount hint renders on its own lines
         if (d.degraded) {
           hint.textContent = 'DEGRADED: the server could not load saved data at startup, so saving is BLOCKED to protect player balances. Reason: ' + (d.loadError || 'unknown') + '. Fix the storage config and restart.';
           hint.style.color = '#ff5d73';
           return;
         }
         if (d.dataFileIsDirectory) {
-          hint.textContent = 'PROBLEM: ' + d.dataFile + ' is a DIRECTORY, not a file — every save fails (EISDIR) and each redeploy reverts player data to the last backup. In the Railway shell run: mv ' + d.dataFile + ' ' + d.dataFile + '.dir-bak   then restart. Last error: ' + (d.lastSaveError || 'n/a');
+          hint.textContent = 'PROBLEM: ' + d.dataFile + ' is a DIRECTORY, not a file — every save fails (EISDIR) and each redeploy reverts player data to the last backup. In the Railway shell run: mv ' + d.dataFile + ' ' + d.dataFile + '.dir-bak   then restart. Last error: ' + (d.lastSaveError || 'n/a') +
+            (d.dataFileHint ? '\n\nFIX: ' + d.dataFileHint : '');
           hint.style.color = '#ff5d73';
           return;
         }
