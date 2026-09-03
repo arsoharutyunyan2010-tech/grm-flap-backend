@@ -1199,11 +1199,57 @@ function addStrike(userId, reason, details) {
 function listAntiCheatEvents(limit) {
   return antiCheatEvents.slice(-(limit || 50)).reverse();
 }
+
+// --- manual moderation ---------------------------------------------------
+function listBans(limit) {
+  const now = Date.now();
+  const out = [];
+  for (const [userId, row] of bans) {
+    if (row.until && now > row.until) continue; // expired
+    out.push({
+      userId,
+      until: row.until || 0,
+      reason: row.reason || 'cheat',
+      strikes: row.strikes || 0,
+      minutesLeft: row.until ? Math.max(0, Math.round((row.until - now) / 60000)) : 0,
+    });
+  }
+  out.sort((a, b) => (b.until || 0) - (a.until || 0));
+  return out.slice(0, limit || 100);
+}
+
+function manualBan(userId, reason, minutes) {
+  userId = String(userId);
+  const now = Date.now();
+  const row = bans.get(userId) || { until: 0, reason: '', strikes: 0, windowStart: now };
+  row.strikes = Math.max(row.strikes || 0, 5); // never below the auto-ban threshold
+  row.reason = String(reason || 'manual ban').slice(0, 120);
+  row.until = now + Math.max(1, Math.floor(Number(minutes) || 60)) * 60 * 1000;
+  bans.set(userId, row);
+  antiCheatEvents.push({ userId, reason: 'manual ban: ' + row.reason, at: now, details: { until: row.until } });
+  if (antiCheatEvents.length > 400) antiCheatEvents.splice(0, antiCheatEvents.length - 400);
+  scheduleSave();
+  return { userId, until: row.until, reason: row.reason, strikes: row.strikes };
+}
+
+function unban(userId) {
+  return bans.delete(String(userId));
+}
+
 setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
   for (const [id, s] of sessions) if (s.startedAt < cutoff) sessions.delete(id);
   const actCutoff = Date.now() - 10 * 60 * 1000;
   for (const [uid, ts] of recentActivity) if (ts < actCutoff) recentActivity.delete(uid);
+  // Rate-limit buckets live in memory forever otherwise; a long-running
+  // process would accumulate an entry per IP / user id it ever saw. Drop
+  // buckets whose newest timestamp is older than an hour.
+  const bucketCutoff = Date.now() - 60 * 60 * 1000;
+  for (const [key, times] of rateBuckets) {
+    const fresh = times.filter((t) => t > bucketCutoff);
+    if (fresh.length === 0) rateBuckets.delete(key);
+    else rateBuckets.set(key, fresh);
+  }
 }, 10 * 60 * 1000).unref();
 
 function upsertBoardScore(key, userId, name, score) {
@@ -1941,6 +1987,7 @@ module.exports = {
   weekAlreadyPaid,
   createSession, getSession, consumeSession, addHeartbeat, grantRevive,
   isBanned, banInfo, addStrike, listAntiCheatEvents,
+  manualBan, unban, listBans,
   submitPeriodScores, submitWeeklyScore, getLeaderboard, getUserRank,
   allowRequest,
   archiveWeek,

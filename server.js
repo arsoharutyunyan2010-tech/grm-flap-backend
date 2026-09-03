@@ -42,10 +42,40 @@ app.use(express.json({ limit: '256kb', strict: true }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  // The Mini App is framed INSIDE Telegram (web.telegram.org / t.me), so a
+  // SAMEORIGIN frame option would break it. Allow only Telegram origins to
+  // embed us (frame-ancestors replaces X-Frame-Options for modern browsers).
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors https://web.telegram.org https://*.telegram.org https://t.me https://*.t.me 'self'"
+  );
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // API/user data responses must never be cached by a shared proxy.
+  if (req.path.indexOf('/api/') === 0 || req.path.indexOf('/internal/') === 0) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
   next();
 });
+
+// --- Global per-IP request throttle -------------------------------------
+// Every authenticated endpoint already has per-user limits, but a script can
+// still rotate Telegram identities / hammer unauthenticated routes. This is
+// the coarse outer wall: keyed on the proxy-validated IP (see AC.clientIp),
+// sliding window, applied to every API/internal route.
+const GLOBAL_IP_LIMIT = Number(process.env.GLOBAL_IP_RATE_PER_MIN) || 480;
+function ipThrottle(limitPerMin) {
+  return (req, res, next) => {
+    const ip = AC.clientIp(req);
+    if (!store.allowRequest('ipg:' + ip, limitPerMin, 60 * 1000)) {
+      return res.status(429).json({ error: 'rate limited, slow down' });
+    }
+    next();
+  };
+}
+app.use('/api', ipThrottle(GLOBAL_IP_LIMIT));
+app.use('/internal', ipThrottle(Math.min(240, GLOBAL_IP_LIMIT)));
 
 // Never serve the whole repo: that used to leak server.js, store.js, .env and
 // data/store.json (every balance + TON address) to anyone who guessed the path.
@@ -59,6 +89,10 @@ app.get('/physics.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'physics.js'));
 });
 app.get('/admin.html', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('X-Frame-Options', 'DENY');
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
 const IMG_DIR = path.join(__dirname, 'img');
@@ -175,10 +209,14 @@ function replaySession(sessionId, flapLog, totalSteps, reviveLog, opts) {
   const peek = store.getSession(sessionId);
   if (!peek) return { ok: false, status: 404, error: 'unknown or expired session' };
   if (peek.used) return { ok: false, status: 409, error: 'session already submitted' };
+  // Submitting another player's session id (or a forged token) is an active
+  // forgery attempt, not a client bug — record a strike against the caller.
   if (opts.userId && String(peek.userId) !== String(opts.userId)) {
+    store.addStrike(String(opts.userId), 'foreign session attempt', { sessionOwner: String(peek.userId) });
     return { ok: false, status: 403, error: 'session belongs to another user' };
   }
   if (peek.token && !AC.tokensMatch(opts.token, peek.token)) {
+    store.addStrike(String(opts.userId || peek.userId), 'bad session token', {});
     return { ok: false, status: 403, error: 'bad session token' };
   }
 
@@ -190,7 +228,16 @@ function replaySession(sessionId, flapLog, totalSteps, reviveLog, opts) {
   const reviveAllowanceMs = revives.length * 4000;
   const timing = AC.checkTiming(totalSteps, elapsedRealMs, reviveAllowanceMs);
   if (!timing.ok) {
+    // Burn the session AND record the cheat attempt — a run that "lasted"
+    // longer in simulated steps than the wall clock that issued the seed
+    // cannot be a real client replay.
     store.consumeSession(sessionId);
+    store.addStrike(String(peek.userId), timing.reason, {
+      hard: [timing.reason],
+      totalSteps,
+      elapsedMs: elapsedRealMs,
+      claimedMs: timing.claimedMs,
+    });
     return { ok: false, status: 400, error: 'submission rejected: implausible timing' };
   }
 
@@ -283,13 +330,22 @@ app.post('/api/session-heartbeat', (req, res) => {
 });
 
 app.get('/api/leaderboard', (req, res) => {
+  // Unauthenticated, read-only, but still rate-limited per IP so a scraper
+  // script cannot flood it (it sorts the full board on every call).
+  const ip = AC.clientIp(req);
+  if (!store.allowRequest('lb:' + ip, 45, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
   const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'week';
   const { ranked, periodKey } = store.getLeaderboard(period, 50);
   const top = ranked.slice(0, 50).map(e => ({ rank: e.rank, name: e.name, score: e.score }));
 
   let me = null;
-  if (req.query.uid) {
-    const mine = store.getUserRank(String(req.query.uid), period);
+  // Normalize the uid: a 1-64 char numeric Telegram id only, so a junk or
+  // huge query string can never reach the store.
+  const uidRaw = String((req.query && req.query.uid) || '').trim();
+  if (uidRaw && /^[0-9]{1,32}$/.test(uidRaw)) {
+    const mine = store.getUserRank(uidRaw, period);
     if (mine) me = { rank: mine.rank, score: mine.score };
   }
 
@@ -365,8 +421,11 @@ app.post('/api/withdraw', (req, res) => {
 });
 
 // TADS widget "reward URL" / postback. Must return 200 or TADS may retry.
+// Revives are never granted from this widget — ads are client-side and
+// trivially spoofed, so a callback here proves nothing about a real view.
+// Keep the route cheap: no body logging (it used to dump untrusted input to
+// the log) and no state mutation.
 function tadsReward(req, res) {
-  console.log('TADS reward postback', req.method, req.query, req.body || {});
   res.status(200).json({ ok: true });
 }
 app.get('/api/tads-reward', tadsReward);
@@ -412,8 +471,25 @@ function requireAdmin(req, res) {
     res.status(403).json({ error: 'admin not configured' });
     return false;
   }
-  const got = req.headers['x-admin-key'];
-  if (!AC.safeEqual(got, expected)) {
+  // Brute-force lockout: at most 8 admin-key attempts per IP per 10 minutes.
+  // A correct key resets nothing (legit use needs far fewer), a wrong one is
+  // counted and the caller gets a 429 once the bucket is full.
+  const adminIp = 'adminauth:' + AC.clientIp(req);
+  if (req.headers['x-admin-key']) {
+    if (!AC.safeEqual(req.headers['x-admin-key'], expected)) {
+      if (!store.allowRequest(adminIp, 8, 10 * 60 * 1000)) {
+        console.warn('admin key brute-force throttled from', AC.clientIp(req));
+        res.status(429).json({ error: 'too many admin attempts, try again later' });
+        return false;
+      }
+      res.status(403).json({ error: 'forbidden' });
+      return false;
+    }
+  } else {
+    if (!store.allowRequest(adminIp, 8, 10 * 60 * 1000)) {
+      res.status(429).json({ error: 'too many admin attempts, try again later' });
+      return false;
+    }
     res.status(403).json({ error: 'forbidden' });
     return false;
   }
@@ -508,13 +584,16 @@ app.post('/internal/backups/restore', async (req, res) => {
   }
 });
 
-// Lightweight health probe: shows whether player data is safely persisted.
+// Lightweight health probe. Public (uptime monitors hit it) but must NOT
+// leak paths / instance ids / player counts; the full persist report is
+// only returned when a valid admin key is supplied.
 app.get('/internal/health', (req, res) => {
   const info = store.persistInfo();
-  res.status(info.degraded ? 503 : 200).json({
-    ok: !info.degraded && info.durable,
-    persist: info,
-  });
+  const ok = !info.degraded && info.durable;
+  if (req.headers['x-admin-key'] && AC.safeEqual(req.headers['x-admin-key'], process.env.ADMIN_KEY)) {
+    return res.status(info.degraded ? 503 : 200).json({ ok, persist: info });
+  }
+  res.status(info.degraded ? 503 : 200).json({ ok: ok ? true : false });
 });
 
 // REAL durability check: performs an actual write + read (and delete)
@@ -525,6 +604,37 @@ app.get('/internal/health', (req, res) => {
 app.get('/internal/anticheat', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ events: store.listAntiCheatEvents(80) });
+});
+
+// Manual moderation: ban a confirmed cheater / lift a ban / inspect bans.
+// Only reachable with a valid admin key; userId is validated server-side so
+// no arbitrary string can hit the store.
+app.get('/internal/bans', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ bans: store.listBans(100) });
+});
+
+app.post('/internal/bans', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const userId = String((req.body && req.body.userId) || '').trim();
+  // Accept numeric Telegram ids (production) and short alphanumeric/dev ids,
+  // but never path-ish or oversized strings that could hit storage weirdly.
+  if (!/^[A-Za-z0-9_-]{1,48}$/.test(userId)) {
+    return res.status(400).json({ error: 'invalid userId' });
+  }
+  const minutes = Math.max(1, Math.min(24 * 60 * 30, Math.floor(Number(req.body && req.body.minutes) || 60)));
+  const reason = String((req.body && req.body.reason) || 'manual ban').slice(0, 120);
+  const row = store.manualBan(userId, reason, minutes);
+  res.json({ ok: true, ban: row });
+});
+
+app.post('/internal/bans/:userId/unban', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const userId = String(req.params.userId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,48}$/.test(userId)) {
+    return res.status(400).json({ error: 'invalid userId' });
+  }
+  res.json({ ok: true, removed: store.unban(userId) });
 });
 
 app.get('/internal/durability', async (req, res) => {
@@ -626,6 +736,36 @@ app.post('/api/pvp/ack', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   res.json(store.pvpAck(String(user.id)));
+});
+
+// --- Error handling ------------------------------------------------------
+// Malformed JSON used to fall through to Express's default HTML error page
+// (and stack traces). Reply with a clean JSON 400 instead, so a scripted
+// client gets a deterministic answer and no internals leak.
+app.use((err, req, res, next) => {
+  if (err) {
+    const status = (err.type === 'entity.too.large') ? 413
+      : (err.type === 'entity.parse.failed' || err instanceof SyntaxError) ? 400
+      : (Number(err.status) || Number(err.statusCode) || 500);
+    if (status >= 500) console.error('unhandled request error:', err.message || err);
+    if (!res.headersSent) {
+      const body = (req.path.indexOf('/api/') === 0 || req.path.indexOf('/internal/') === 0)
+        ? { error: status >= 500 ? 'server error' : (status === 404 ? 'not found' : 'bad request') }
+        : 'Not found';
+      res.status(status).send(body);
+    }
+    return;
+  }
+  next();
+});
+
+// Catch-all: never expose directory listings or the repo. Anything not
+// explicitly routed gets a minimal 404.
+app.use((req, res) => {
+  if (req.path.indexOf('/api/') === 0 || req.path.indexOf('/internal/') === 0) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.status(404).send('Not found');
 });
 
 const PORT = process.env.PORT || 3000;
