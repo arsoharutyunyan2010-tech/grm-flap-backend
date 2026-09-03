@@ -1205,16 +1205,19 @@ function listBans(limit) {
   const now = Date.now();
   const out = [];
   for (const [userId, row] of bans) {
-    if (row.until && now > row.until) continue; // expired
+    // Only rows with a set, not-yet-expired until are ACTUAL bans. A user can
+    // have strikes recorded (until:0) without being banned yet — they must not
+    // appear in the "currently blocked" list.
+    if (!row.until || now > row.until) continue;
     out.push({
       userId,
-      until: row.until || 0,
+      until: row.until,
       reason: row.reason || 'cheat',
       strikes: row.strikes || 0,
-      minutesLeft: row.until ? Math.max(0, Math.round((row.until - now) / 60000)) : 0,
+      minutesLeft: Math.max(0, Math.round((row.until - now) / 60000)),
     });
   }
-  out.sort((a, b) => (b.until || 0) - (a.until || 0));
+  out.sort((a, b) => b.until - a.until);
   return out.slice(0, limit || 100);
 }
 
