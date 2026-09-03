@@ -19,6 +19,7 @@ const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
+const TW = require('./tonwallet.js');
 
 try {
   const art = require('./art-assets.js');
@@ -80,9 +81,23 @@ app.use('/internal', ipThrottle(Math.min(240, GLOBAL_IP_LIMIT)));
 // Never serve the whole repo: that used to leak server.js, store.js, .env and
 // data/store.json (every balance + TON address) to anyone who guessed the path.
 const INDEX_FILE = path.join(__dirname, 'index.html');
+// Local / sandbox-preview convenience ONLY (default off, ignored in
+// production): serve index.html with the API base rewritten to the host that
+// is serving it, so a plain browser preview exercises THIS backend instead of
+// the production URL baked into the page.
+const PREVIEW_SELF_API = process.env.FLAPY_PREVIEW_SELF_API === 'true' && process.env.NODE_ENV !== 'production';
 app.get(['/', '/index.html'], (req, res, next) => {
-  if (fs.existsSync(INDEX_FILE)) return res.sendFile(INDEX_FILE);
-  next();
+  if (!fs.existsSync(INDEX_FILE)) return next();
+  if (!PREVIEW_SELF_API) return res.sendFile(INDEX_FILE);
+  fs.readFile(INDEX_FILE, 'utf8', (err, html) => {
+    if (err) return res.sendFile(INDEX_FILE);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(html.replace(
+      /window\.GRM_FLAP_API_BASE\s*=\s*"[^"]*";/,
+      'window.GRM_FLAP_API_BASE = location.origin;'
+    ));
+  });
 });
 app.get('/physics.js', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store');
@@ -99,6 +114,39 @@ const IMG_DIR = path.join(__dirname, 'img');
 if (fs.existsSync(IMG_DIR)) {
   app.use('/img', express.static(IMG_DIR, { fallthrough: false, index: false }));
 }
+
+// --- TON Connect manifest -------------------------------------------------
+// Wallets (Tonkeeper / My Wallet) fetch this manifest and show its name +
+// icon in the connect request, and they bind the ton_proof domain to the
+// manifest's `url` host. It must be served from the Mini App origin.
+function appPublicOrigin(req) {
+  const fromEnv = process.env.APP_PUBLIC_URL || process.env.MINI_APP_URL || '';
+  if (fromEnv) {
+    try { return new URL(fromEnv).origin; } catch (e) { /* fall through */ }
+  }
+  const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol || 'https';
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return proto + '://' + host;
+}
+const TONCONNECT_ICON = (() => {
+  try { return fs.readFileSync(path.join(__dirname, 'tonconnect-icon.png')); } catch (e) { return null; }
+})();
+app.get('/tonconnect-icon.png', (req, res) => {
+  if (!TONCONNECT_ICON) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(TONCONNECT_ICON);
+});
+app.get('/tonconnect-manifest.json', (req, res) => {
+  const origin = appPublicOrigin(req);
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.json({
+    url: origin,
+    name: process.env.APP_PUBLIC_NAME || 'FLAPY',
+    iconUrl: origin + '/tonconnect-icon.png',
+  });
+});
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const NODE_ENV = process.env.NODE_ENV || '';
@@ -420,6 +468,7 @@ app.post('/api/profile', (req, res) => {
     monthKey: store.currentMonthKey(),
     referral: Object.assign({}, refInfo, { link: referralLink }),
     referralBoard: store.getReferralLeaderboardDay(20),
+    wallets: store.listWallets(userId),
   });
 });
 
@@ -437,15 +486,46 @@ app.post('/api/withdraw', (req, res) => {
 
   const address = String((req.body && req.body.address) || '').trim();
   const amount = Number(req.body && req.body.amount);
+  const provider = String((req.body && req.body.provider) || '').toLowerCase();
 
-  if (!TON_ADDRESS_RE.test(address)) {
-    return res.status(400).json({ error: 'invalid TON address format' });
+  const extra = {};
+  let destination = address;
+  if (provider === 'telegram') {
+    // Telegram Wallet (@wallet) is custodial: no on-chain address exists, so
+    // payouts go to the player's saved Telegram handle inside Telegram.
+    const handle = TW.normalizeTelegramHandle(address);
+    const saved = store.getWallet(userId, 'telegram');
+    if (!handle || !saved || saved.handle !== handle) {
+      return res.status(400).json({ error: 'connect your Telegram Wallet first' });
+    }
+    destination = handle;
+    extra.walletProvider = 'telegram';
+    extra.walletVerified = false;
+  } else {
+    const parsed = TW.parseTonAddress(address);
+    if (!parsed) {
+      return res.status(400).json({ error: 'invalid TON address format' });
+    }
+    if (parsed.testnet) {
+      return res.status(400).json({ error: 'testnet addresses are not accepted' });
+    }
+    // Store the user-friendly form (what admins paste into a wallet/explorer)
+    // while the raw form stays the canonical key for comparisons.
+    destination = TW.toFriendly(parsed.workchain, parsed.hashHex, { bounceable: false, testnet: parsed.testnet });
+    if (['tonkeeper', 'mytonwallet'].includes(provider)) {
+      const saved = store.getWallet(userId, provider);
+      if (!saved || saved.addressRaw !== parsed.raw) {
+        return res.status(400).json({ error: 'that wallet is not connected to your account' });
+      }
+      extra.walletProvider = provider;
+      extra.walletVerified = saved.proofVerified === true;
+    }
   }
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ error: 'invalid amount' });
   }
 
-  const result = store.requestWithdrawal(userId, displayName(user), address, amount);
+  const result = store.requestWithdrawal(userId, displayName(user), destination, amount, extra);
   if (!result.ok) return res.status(400).json({ error: result.error });
 
   res.json({ ok: true, requestId: result.request.id, flapBalance: result.balance, balance: result.balance });
@@ -493,6 +573,102 @@ app.post('/api/deposit', (req, res) => {
     flapBalance: store.getBalance(userId),
     cBalance: store.getCBalance(userId),
   });
+});
+
+// --- Wallet connections (Tonkeeper / My Wallet / Telegram Wallet) ---------
+// The client gets a one-shot challenge, the wallet signs it (ton_proof), and
+// only then is the connection stored against the Telegram account. Without a
+// valid proof the connection is still stored but flagged `proofVerified:false`
+// so admins can see which destinations were actually signed by the key.
+app.post('/api/wallet/challenge', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  const userId = String(user.id);
+  if (!store.allowRequest('walletChallenge:' + userId, 20, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, try again later' });
+  }
+  const ch = store.issueWalletChallenge(userId);
+  res.json({ ok: true, payload: ch.payload, expiresAt: ch.expiresAt, manifestUrl: appPublicOrigin(req) + '/tonconnect-manifest.json' });
+});
+
+app.post('/api/wallet/connect', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+
+  const userId = String(user.id);
+  if (!store.allowRequest('walletConnect:' + userId, 12, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many connect attempts, try again later' });
+  }
+
+  const body = req.body || {};
+  const provider = String(body.provider || '').toLowerCase();
+  if (!TW.PROVIDERS.includes(provider)) {
+    return res.status(400).json({ error: 'unknown wallet provider' });
+  }
+
+  if (provider === 'telegram') {
+    const handle = TW.normalizeTelegramHandle(body.handle || body.address);
+    if (!handle) return res.status(400).json({ error: 'invalid Telegram handle' });
+    const rec = store.saveWallet(userId, { provider, handle, label: 'Telegram Wallet' });
+    if (!rec) return res.status(400).json({ error: 'could not save wallet' });
+    return res.json({ ok: true, wallet: rec, wallets: store.listWallets(userId) });
+  }
+
+  const parsed = TW.parseTonAddress(body.address);
+  if (!parsed) return res.status(400).json({ error: 'invalid TON address' });
+  if (parsed.testnet) return res.status(400).json({ error: 'testnet wallets are not supported' });
+  const claimedChain = String(body.chain || '-239');
+  if (claimedChain !== '-239') {
+    return res.status(400).json({ error: 'only TON mainnet is supported' });
+  }
+
+  const expectedDomain = (() => {
+    try { return new URL(appPublicOrigin(req)).host; } catch (e) { return ''; }
+  })();
+
+  let proofVerified = false;
+  let proofReason = 'no proof provided';
+  const proof = body.proof;
+  if (proof && typeof proof === 'object') {
+    const payload = String(proof.payload || '');
+    if (!store.takeWalletChallenge(userId, payload)) {
+      proofReason = 'challenge missing or expired';
+    } else if (payload !== String(body.payload || payload)) {
+      proofReason = 'payload mismatch';
+    } else {
+      const verdict = TW.verifyTonProof(proof, parsed, body.publicKey, expectedDomain, payload, 600);
+      proofVerified = verdict.ok;
+      if (!verdict.ok) proofReason = verdict.reason || 'bad proof';
+    }
+  }
+  const requireProof = process.env.REQUIRE_WALLET_PROOF === 'true';
+  if (requireProof && !proofVerified) {
+    return res.status(400).json({ error: 'wallet ownership could not be verified: ' + proofReason });
+  }
+
+  const rec = store.saveWallet(userId, {
+    provider,
+    addressRaw: parsed.raw,
+    addressFriendly: TW.toFriendly(parsed.workchain, parsed.hashHex, { bounceable: false, testnet: false }),
+    publicKey: String(body.publicKey || ''),
+    chain: String(body.chain || '-239'),
+    label: String(body.label || provider).slice(0, 40),
+    proofVerified,
+  });
+  if (!rec) return res.status(400).json({ error: 'could not save wallet' });
+  res.json({ ok: true, wallet: rec, proofVerified, wallets: store.listWallets(userId) });
+});
+
+app.post('/api/wallet/disconnect', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  const userId = String(user.id);
+  const provider = String((req.body && req.body.provider) || '').toLowerCase();
+  if (!TW.PROVIDERS.includes(provider)) return res.status(400).json({ error: 'unknown wallet provider' });
+  const removed = store.removeWallet(userId, provider);
+  res.json({ ok: true, removed: !!removed, wallets: store.listWallets(userId) });
 });
 
 function requireAdmin(req, res) {
@@ -573,6 +749,13 @@ app.get('/internal/stats', (req, res) => {
 app.get('/internal/users', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ users: store.listUsers(req.query.limit) });
+});
+
+// Connected external wallets (Wallet page -> CONNECT WALLET) so payouts can be
+// matched to a proof-verified destination.
+app.get('/internal/wallets', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ wallets: store.listAllWallets(req.query.limit) });
 });
 
 app.get('/internal/backup', (req, res) => {

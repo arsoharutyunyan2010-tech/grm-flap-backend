@@ -14,6 +14,8 @@ Pipeline: **Telegram Bot → Mini App → Rewarded Ads → Game → Score → Se
 | `store.js` | Data layer (in-memory demo — swap for Redis/Postgres in production; see comments inside). |
 | `rewards.js` | Weekly GRM reward tiers + payout stub. |
 | `bot.js` | Minimal bot that sends a "Play" button opening the Mini App. |
+| `tonwallet.js` | TON address parsing / user-friendly encoding + TON Connect `ton_proof` verification (Wallet connect). |
+| `tonconnect-icon.png` | App icon served at `/tonconnect-icon.png` for the TON Connect manifest. |
 
 ## Why the score can't be faked from the browser console
 
@@ -173,6 +175,46 @@ cron.schedule('0 0 * * 1', () => runWeeklyRewardJob(store), { timezone: 'UTC' })
 
 or by calling `POST /internal/run-weekly-rewards` with header
 `x-admin-key: <ADMIN_KEY>` from your platform's own cron.
+
+## Wallet connect (Tonkeeper / My Wallet / Telegram Wallet)
+
+The Wallet page has a **CONNECT WALLET** block with three buttons:
+
+- **Tonkeeper** and **My Wallet** connect over **TON Connect**. The Mini App
+  loads `@tonconnect/sdk` lazily (jsDelivr, falling back to unpkg), asks the
+  server for a one-shot challenge (`POST /api/wallet/challenge`), passes it as
+  `ton_proof`, and the wallet signs it with the account key. If the page is
+  opened inside a wallet's own browser, the injected JS bridge
+  (`window.tonkeeper` / `window.mytonwallet`) is used instead of the universal
+  link.
+- **Telegram Wallet** (`@wallet`) is custodial — it has no on-chain address and
+  no TON Connect support — so the player saves their Telegram username and the
+  button deep-links to `t.me/wallet`. Payouts to it happen inside Telegram.
+
+Server side (`server.js` + `tonwallet.js`):
+
+- `GET /tonconnect-manifest.json` — manifest built from `APP_PUBLIC_URL`
+  (falls back to the request origin); wallets bind the `ton_proof` domain to
+  this host.
+- `POST /api/wallet/connect` — validates the address, re-verifies the Ed25519
+  `ton_proof` signature against the server-issued challenge (single use, 10
+  minute TTL) and stores `{provider, addressRaw, addressFriendly, publicKey,
+  proofVerified}` per Telegram user in `store.js` (survives restarts/backups).
+- `POST /api/wallet/disconnect`, and `/api/profile` returns `wallets` so the
+  page renders saved connections on load.
+- `POST /api/withdraw` accepts an optional `provider`: for `tonkeeper` /
+  `mytonwallet` the destination must equal the connected address, for
+  `telegram` the saved handle. The request then carries `walletProvider` +
+  `walletVerified` into the payout queue, and the admin page shows them.
+- `GET /internal/wallets` (admin) lists every stored connection.
+
+A connection is stored even when the proof is missing/invalid, but flagged
+`proofVerified:false` (UI badge "NO PROOF", admin "(no proof)"). Set
+`REQUIRE_WALLET_PROOF=true` to refuse unverified connections outright.
+
+Tests: `npm run test:wallet` (address CRC tampering, every proof tamper
+vector, restart persistence, and the full HTTP flow with a locally generated
+Ed25519 key).
 
 ## Production notes
 

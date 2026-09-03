@@ -666,6 +666,57 @@
   }
   .lb-block .section-title{ margin-top: 2px; color: var(--gold); opacity: 1; }
   .lb-block .sub{ margin-bottom: 10px; font-size: 12px; }
+  .wal-grid{ display:grid; grid-template-columns: repeat(3,1fr); gap:8px; margin: 10px 0 6px; }
+  .wal-btn{
+    all: unset;
+    display:flex; flex-direction:column; align-items:center; gap:7px;
+    padding:12px 6px 10px; border-radius:14px; cursor:pointer; text-align:center;
+    background: rgba(255,255,255,0.07);
+    border:1px solid rgba(244,197,66,0.30);
+    color:#fff7e6; font-size:11px; font-weight:800; letter-spacing:0.3px;
+  }
+  .wal-btn .wal-ico{
+    width:36px; height:36px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:900; color:#1b1033;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold));
+  }
+  .wal-btn[data-wal-provider="tonkeeper"] .wal-ico{ background: linear-gradient(180deg,#7fd4ff,#0098ea); color:#fff; }
+  .wal-btn[data-wal-provider="telegram"] .wal-ico{ background: linear-gradient(180deg,#72c6f2,#229ed9); color:#fff; }
+  .wal-btn.connected{ border-color: var(--green); box-shadow: 0 0 0 1px rgba(61,220,132,0.4) inset; }
+  .wal-btn.busy{ opacity:0.6; pointer-events:none; }
+  .wal-card{
+    display:flex; align-items:center; gap:9px;
+    background: rgba(255,255,255,0.06);
+    border:1px solid rgba(244,197,66,0.25);
+    border-radius:12px; padding:9px 10px; margin:7px 0; font-size:12px;
+  }
+  .wal-card .wal-ico{ width:26px; height:26px; font-size:13px; flex-shrink:0; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-weight:900; color:#1b1033;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold)); }
+  .wal-card .wal-ico.tonkeeper{ background: linear-gradient(180deg,#7fd4ff,#0098ea); color:#fff; }
+  .wal-card .wal-ico.telegram{ background: linear-gradient(180deg,#72c6f2,#229ed9); color:#fff; }
+  .wal-card .wal-main{ min-width:0; flex:1; }
+  .wal-card .wal-name{ font-weight:800; }
+  .wal-card .wal-addr{ opacity:0.72; font-size:11px; word-break: break-all; }
+  .wal-card .wal-actions{ display:flex; gap:6px; flex-shrink:0; }
+  .wal-mini{
+    all:unset; cursor:pointer; font-size:10px; font-weight:800; letter-spacing:0.4px;
+    padding:6px 8px; border-radius:9px; background:rgba(244,197,66,0.18); color:#ffe9a8;
+  }
+  .wal-mini.danger{ background:rgba(255,93,115,0.14); color:#ffb3bd; }
+  .wal-badge{
+    display:inline-block; font-size:9px; font-weight:900; letter-spacing:0.5px;
+    padding:2px 6px; border-radius:7px; margin-left:6px; vertical-align:middle;
+  }
+  .wal-badge.ok{ background:rgba(61,220,132,0.18); color:var(--green); }
+  .wal-badge.warn{ background:rgba(255,93,115,0.16); color:var(--accent); }
+  .wal-panel{
+    background: rgba(34,158,217,0.10);
+    border:1px solid rgba(34,158,217,0.35);
+    border-radius:14px; padding:12px; margin:8px 0 4px;
+  }
+  .wal-panel .field-label{ margin-top:0; }
 </style>
 </head>
 <body>
@@ -818,6 +869,24 @@
     <div class="stat-row"><span data-i18n="cBalance">balance C</span><b id="walletCBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="c-coin.png" alt="C"></b></div>
     <div class="stat-row"><span data-i18n="flapBalance">FLAPY balance</span><b id="walletBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="coin.png" alt="F"></b></div>
     <div class="stat-row"><span data-i18n="usdValue">USD value</span><b id="walletUsd">$0.00</b></div>
+    <div class="section-title" data-i18n="connectWallet">CONNECT WALLET</div>
+    <div class="sub" data-i18n="connectWalletSub">Link Tonkeeper, My Wallet or Telegram Wallet</div>
+    <div class="wal-grid">
+      <button type="button" class="wal-btn" data-wal-provider="tonkeeper"><span class="wal-ico">T</span><span>Tonkeeper</span></button>
+      <button type="button" class="wal-btn" data-wal-provider="mytonwallet"><span class="wal-ico">M</span><span>My Wallet</span></button>
+      <button type="button" class="wal-btn" data-wal-provider="telegram"><span class="wal-ico">✈</span><span>Telegram Wallet</span></button>
+    </div>
+    <div class="hint" id="walletConnectMsg"></div>
+    <div id="walletConnected"></div>
+    <div id="tgWalletPanel" class="wal-panel hidden">
+      <label class="field-label" data-i18n="tgHandleLabel">Your Telegram username (@wallet pays out to it)</label>
+      <div class="addr-row">
+        <input type="text" id="tgHandleInput" class="field-input" placeholder="@username" autocomplete="off">
+        <button type="button" id="tgHandleSave" class="copy-btn" data-i18n="save">SAVE</button>
+      </div>
+      <div class="hint" data-i18n="tgHandleNote">Open Telegram Wallet, copy your username and paste it here. Payouts arrive inside Telegram.</div>
+      <button type="button" id="tgWalletOpen" class="copy-btn" style="margin-top:10px;width:100%" data-i18n="openTgWallet">OPEN TELEGRAM WALLET</button>
+    </div>
     <div class="wallet-tabs lb-tabs">
       <button class="lb-tab active" data-wallet-tab="topup" data-i18n="topup">TOP UP</button>
       <button class="lb-tab" data-wallet-tab="withdraw" data-i18n="withdrawTab">WITHDRAW</button>
@@ -1345,6 +1414,17 @@ window.FLAPY_ART = {
       couldNotVerify:"Could not verify — score not saved.",
       enterTon:"Enter a TON wallet address.", enterAmount:"Enter a valid amount.",
       submitting:"Submitting…", withdrawOk:"Withdrawal request submitted. Balance: ",
+      connectWallet:"CONNECT WALLET", connectWalletSub:"Link Tonkeeper, My Wallet or Telegram Wallet",
+      walConnecting:"Connecting…", walApprove:"Approve the connection request in your wallet app.",
+      walWaiting:"Waiting for your wallet to answer…", walTimeout:"No response from the wallet. Try again.",
+      walConnectedOk:"Wallet connected ✓", walDisconnected:"Wallet unlinked.",
+      walSdkFailed:"Could not load TON Connect. You can still paste your address manually.",
+      walUse:"USE", walUnlink:"UNLINK", walVerified:"VERIFIED", walUnverified:"NO PROOF",
+      walNone:"No wallet connected yet.",
+      tgHandleLabel:"Your Telegram username (@wallet pays out to it)",
+      tgHandleNote:"Open Telegram Wallet, copy your username and paste it here. Payouts arrive inside Telegram.",
+      openTgWallet:"OPEN TELEGRAM WALLET", save:"SAVE", walTelegramSaved:"Telegram Wallet saved ✓",
+      walBadHandle:"Enter a Telegram username like @name.",
       pts:" pts", loading:"Loading…"
     },
     ru: {
@@ -1402,6 +1482,17 @@ window.FLAPY_ART = {
       couldNotVerify:"Не удалось проверить — счёт не сохранён.",
       enterTon:"Введите адрес TON-кошелька.", enterAmount:"Введите сумму.",
       submitting:"Отправка…", withdrawOk:"Заявка отправлена. Баланс: ",
+      connectWallet:"ПОДКЛЮЧИТЬ КОШЕЛЁК", connectWalletSub:"Tonkeeper, My Wallet или Telegram Wallet",
+      walConnecting:"Подключение…", walApprove:"Подтвердите запрос на подключение в вашем кошельке.",
+      walWaiting:"Ждём ответ кошелька…", walTimeout:"Кошелёк не ответил. Попробуйте снова.",
+      walConnectedOk:"Кошелёк подключён ✓", walDisconnected:"Кошелёк отключён.",
+      walSdkFailed:"Не удалось загрузить TON Connect. Адрес можно вставить вручную.",
+      walUse:"ИСПОЛЬЗ.", walUnlink:"ОТКЛ.", walVerified:"ПРОВЕРЕНО", walUnverified:"БЕЗ ПОДПИСИ",
+      walNone:"Кошелёк ещё не подключён.",
+      tgHandleLabel:"Ваш username в Telegram (на него платит @wallet)",
+      tgHandleNote:"Откройте Telegram Wallet, скопируйте username и вставьте сюда. Выплаты придут внутри Telegram.",
+      openTgWallet:"ОТКРЫТЬ TELEGRAM WALLET", save:"СОХРАНИТЬ", walTelegramSaved:"Telegram Wallet сохранён ✓",
+      walBadHandle:"Введите username вида @name.",
       pts:" оч.", loading:"Загрузка…"
     },
     uk: {
@@ -1459,6 +1550,17 @@ window.FLAPY_ART = {
       couldNotVerify:"Не вдалося перевірити — рахунок не збережено.",
       enterTon:"Введіть адресу TON-гаманця.", enterAmount:"Введіть суму.",
       submitting:"Надсилання…", withdrawOk:"Заявку надіслано. Баланс: ",
+      connectWallet:"ПІДКЛЮЧИТИ ГАМАНЕЦЬ", connectWalletSub:"Tonkeeper, My Wallet або Telegram Wallet",
+      walConnecting:"Підключення…", walApprove:"Підтвердіть запит на підключення у вашому гаманці.",
+      walWaiting:"Чекаємо на відповідь гаманця…", walTimeout:"Гаманець не відповів. Спробуйте ще раз.",
+      walConnectedOk:"Гаманець підключено ✓", walDisconnected:"Гаманець відключено.",
+      walSdkFailed:"Не вдалося завантажити TON Connect. Адресу можна вставити вручну.",
+      walUse:"ВИКОР.", walUnlink:"ВІДКЛ.", walVerified:"ПЕРЕВІРЕНО", walUnverified:"БЕЗ ПІДПИСУ",
+      walNone:"Гаманець ще не підключено.",
+      tgHandleLabel:"Ваш username у Telegram (на нього платить @wallet)",
+      tgHandleNote:"Відкрийте Telegram Wallet, скопіюйте username і вставте сюди. Виплати надійдуть усередині Telegram.",
+      openTgWallet:"ВІДКРИТИ TELEGRAM WALLET", save:"ЗБЕРЕГТИ", walTelegramSaved:"Telegram Wallet збережено ✓",
+      walBadHandle:"Введіть username виду @name.",
       pts:" оч.", loading:"Завантаження…"
     },
     zh: {
@@ -1516,6 +1618,17 @@ window.FLAPY_ART = {
       couldNotVerify:"验证失败 — 分数未保存。",
       enterTon:"请输入 TON 钱包地址。", enterAmount:"请输入有效数量。",
       submitting:"提交中…", withdrawOk:"提现申请已提交。余额：",
+      connectWallet:"连接钱包", connectWalletSub:"Tonkeeper、My Wallet 或 Telegram Wallet",
+      walConnecting:"连接中…", walApprove:"请在钱包应用中确认连接请求。",
+      walWaiting:"等待钱包回应…", walTimeout:"钱包未响应，请重试。",
+      walConnectedOk:"钱包已连接 ✓", walDisconnected:"钱包已解除绑定。",
+      walSdkFailed:"无法加载 TON Connect。您仍可手动粘贴地址。",
+      walUse:"使用", walUnlink:"解绑", walVerified:"已验证", walUnverified:"无签名",
+      walNone:"尚未连接钱包。",
+      tgHandleLabel:"您的 Telegram 用户名（@wallet 将向其付款）",
+      tgHandleNote:"打开 Telegram Wallet，复制用户名并粘贴到这里。付款将在 Telegram 内到账。",
+      openTgWallet:"打开 TELEGRAM WALLET", save:"保存", walTelegramSaved:"Telegram Wallet 已保存 ✓",
+      walBadHandle:"请输入形如 @name 的用户名。",
       pts:" 分", loading:"加载中…"
     },
     hi: {
@@ -1573,6 +1686,17 @@ window.FLAPY_ART = {
       couldNotVerify:"जाँच विफल — स्कोर सेव नहीं हुआ।",
       enterTon:"TON वॉलेट पता लिखें।", enterAmount:"सही राशि लिखें।",
       submitting:"भेजा जा रहा है…", withdrawOk:"निकासी अनुरोध भेजा गया। बैलेंस: ",
+      connectWallet:"वॉलेट जोड़ें", connectWalletSub:"Tonkeeper, My Wallet या Telegram Wallet",
+      walConnecting:"जोड़ा जा रहा है…", walApprove:"अपने वॉलेट ऐप में कनेक्शन अनुरोध स्वीकार करें।",
+      walWaiting:"वॉलेट के जवाब की प्रतीक्षा…", walTimeout:"वॉलेट ने जवाब नहीं दिया। फिर कोशिश करें।",
+      walConnectedOk:"वॉलेट जुड़ गया ✓", walDisconnected:"वॉलेट हटा दिया गया।",
+      walSdkFailed:"TON Connect लोड नहीं हो सका। आप पता मैन्युअल रूप से पेस्ट कर सकते हैं।",
+      walUse:"उपयोग", walUnlink:"हटाएँ", walVerified:"सत्यापित", walUnverified:"बिना हस्ताक्षर",
+      walNone:"अभी कोई वॉलेट नहीं जुड़ा।",
+      tgHandleLabel:"आपका Telegram यूज़रनेम (@wallet उसी पर भेजता है)",
+      tgHandleNote:"Telegram Wallet खोलें, यूज़रनेम कॉपी करके यहाँ पेस्ट करें। भुगतान Telegram के अंदर आएगा।",
+      openTgWallet:"TELEGRAM WALLET खोलें", save:"सहेजें", walTelegramSaved:"Telegram Wallet सहेजा गया ✓",
+      walBadHandle:"@name जैसा यूज़रनेम दर्ज करें।",
       pts:" अंक", loading:"लोड हो रहा है…"
     }
   };
@@ -1597,6 +1721,7 @@ window.FLAPY_ART = {
     });
     document.getElementById("langBtn").textContent = LANG_FLAGS[lang] || "🌐";
     if (typeof refreshSoundUI === "function") refreshSoundUI();
+    if (typeof renderWallets === "function") renderWallets();
     document.querySelectorAll(".lang-opt").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
     });
@@ -2035,9 +2160,9 @@ window.FLAPY_ART = {
     try { startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || ''; } catch(e){}
     return apiFetch('/api/profile', { method:'POST', body: JSON.stringify({ initData: initData, startParam: startParam }) });
   }
-  function requestWithdrawal(address, amount){
+  function requestWithdrawal(address, amount, provider){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
-    return apiFetch('/api/withdraw', { method:'POST', body: JSON.stringify({ initData: initData, address: address, amount: amount }) });
+    return apiFetch('/api/withdraw', { method:'POST', body: JSON.stringify({ initData: initData, address: address, amount: amount, provider: provider || '' }) });
   }
   function requestDeposit(amount, txHash){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
@@ -2442,6 +2567,7 @@ window.FLAPY_ART = {
     var addr = (p && p.depositAddress) || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd';
     var payTo = document.getElementById('depositPayTo');
     if (payTo && addr) payTo.value = addr;
+    renderWallets();
   }
   function updateDepositUsd(){
     var amt = parseFloat(document.getElementById('depositAmount').value);
@@ -2467,7 +2593,7 @@ window.FLAPY_ART = {
     if (!addr) { msg.textContent = t('enterTon'); return; }
     if (!(amt > 0)) { msg.textContent = t('enterAmount'); return; }
     msg.textContent = t('submitting');
-    requestWithdrawal(addr, amt).then(function(res){
+    requestWithdrawal(addr, amt, walletProviderFor(addr)).then(function(res){
       var bal = res.flapBalance != null ? res.flapBalance : res.balance;
       msg.textContent = t('withdrawOk') + bal + ' FLAPY (' + flapUsd(bal) + ')';
       setAmt('walletBalance', bal, 'f');
@@ -2546,6 +2672,276 @@ window.FLAPY_ART = {
     });
   });
   setWalletTab('topup');
+
+  // --- Connected external wallets: Tonkeeper / My Wallet / Telegram Wallet ---
+  // TON Connect SDK (loaded lazily, only when a connect button is tapped) does
+  // the wallet handshake; our server verifies the signed ton_proof and stores
+  // the connection against the Telegram account. Telegram Wallet (@wallet) is
+  // custodial and has no on-chain address, so it is saved as a handle instead.
+  var TON_SDK_URLS = [
+    'https://cdn.jsdelivr.net/npm/@tonconnect/sdk@2.2.0/dist/tonconnect-sdk.min.js',
+    'https://unpkg.com/@tonconnect/sdk@2.2.0/dist/tonconnect-sdk.min.js'
+  ];
+  var WAL_META = {
+    tonkeeper:   { jsBridgeKey: 'tonkeeper',   universalLink: 'https://app.tonkeeper.com/ton-connect', deepLink: 'tonkeeper-tc://',   bridgeUrl: 'https://bridge.tonapi.io/bridge' },
+    mytonwallet: { jsBridgeKey: 'mytonwallet', universalLink: 'https://connect.mytonwallet.org',      deepLink: 'mytonwallet-tc://', bridgeUrl: 'https://tonconnectbridge.mytonwallet.org/bridge/' }
+  };
+  var WAL_NAMES = { tonkeeper: 'Tonkeeper', mytonwallet: 'My Wallet', telegram: 'Telegram Wallet' };
+  var tonConnector = null;
+  var tonSdkLoad = null;
+  var walPending = null;        // { provider, payload } while a wallet approval is open
+  var walConnectTimer = null;
+
+  function walEsc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function walMsg(text){
+    var el = document.getElementById('walletConnectMsg');
+    if (el) el.textContent = text || '';
+  }
+  function walSetBusy(on){
+    document.querySelectorAll('.wal-btn').forEach(function(b){ b.classList.toggle('busy', !!on); });
+  }
+  function walManifestUrl(){ return API_BASE_URL.replace(/\/+$/, '') + '/tonconnect-manifest.json'; }
+  function walletList(){ return (profileCache && profileCache.wallets) || []; }
+  function findWallet(provider){
+    var list = walletList();
+    for (var i = 0; i < list.length; i++) if (list[i].provider === provider) return list[i];
+    return null;
+  }
+  function loadTonSdk(){
+    if (window.TON_CONNECT_SDK) return Promise.resolve(window.TON_CONNECT_SDK);
+    if (tonSdkLoad) return tonSdkLoad;
+    tonSdkLoad = new Promise(function(resolve, reject){
+      var i = 0;
+      function tryNext(){
+        if (i >= TON_SDK_URLS.length) return reject(new Error('sdk-unavailable'));
+        var s = document.createElement('script');
+        s.src = TON_SDK_URLS[i++];
+        s.async = true;
+        s.onload = function(){ window.TON_CONNECT_SDK ? resolve(window.TON_CONNECT_SDK) : tryNext(); };
+        s.onerror = function(){ if (s.parentNode) s.parentNode.removeChild(s); tryNext(); };
+        document.head.appendChild(s);
+      }
+      tryNext();
+    });
+    tonSdkLoad = tonSdkLoad.catch(function(err){ tonSdkLoad = null; throw err; });
+    return tonSdkLoad;
+  }
+  function walInjected(provider){
+    var meta = WAL_META[provider];
+    var br = meta && window[meta.jsBridgeKey];
+    return (br && br.tonconnect) ? br : null;
+  }
+  function ensureConnector(TC){
+    if (tonConnector) return Promise.resolve(tonConnector);
+    var c = new TC.TonConnect({ manifestUrl: walManifestUrl() });
+    c.onStatusChange(function(w){ if (w) walHandleConnected(w); });
+    tonConnector = c;
+    // Best effort: pick up a session this browser already approved earlier.
+    return Promise.resolve(c.restoreConnection()).then(function(){ return c; }, function(){ return c; });
+  }
+  function openConnectLink(link){
+    try {
+      if (tg && typeof tg.openLink === 'function') { tg.openLink(link); return; }
+    } catch (e) {}
+    try { window.open(link, '_blank'); return; } catch (e) {}
+    try { window.location.href = link; } catch (e) {}
+  }
+  function walHandleConnected(wallet){
+    if (!walPending) return;
+    var pending = walPending;
+    walPending = null;
+    if (walConnectTimer) { clearTimeout(walConnectTimer); walConnectTimer = null; }
+    var account = (wallet && wallet.account) || {};
+    var proofItem = wallet && wallet.connectItems && wallet.connectItems.tonProof;
+    submitWalletConnect({
+      provider: pending.provider,
+      address: account.address || '',
+      publicKey: account.publicKey || '',
+      chain: account.chain || '-239',
+      label: (wallet && wallet.device && wallet.device.appName) || WAL_NAMES[pending.provider],
+      proof: (proofItem && proofItem.proof) ? proofItem.proof : null,
+      payload: pending.payload
+    });
+  }
+  function submitWalletConnect(body){
+    walMsg(t('submitting'));
+    walSetBusy(true);
+    body.initData = initData;
+    return apiFetch('/api/wallet/connect', { method: 'POST', body: JSON.stringify(body) })
+      .then(function(res){
+        walSetBusy(false);
+        walMsg(t('walConnectedOk'));
+        if (profileCache) profileCache.wallets = res.wallets || [];
+        renderWallets();
+      })
+      .catch(function(err){
+        walSetBusy(false);
+        walMsg('Error: ' + (err.message || err));
+        renderWallets();
+      });
+  }
+  function connectTonProvider(provider){
+    if (DEMO_MODE) { walMsg('Demo mode'); return; }
+    if (!WAL_META[provider]) return;
+    walSetBusy(true);
+    walMsg(t('walConnecting'));
+    apiFetch('/api/wallet/challenge', { method: 'POST', body: JSON.stringify({ initData: initData }) })
+      .then(function(ch){
+        return loadTonSdk().then(function(TC){
+          return ensureConnector(TC).then(function(connector){
+            var meta = WAL_META[provider];
+            var info = {
+              appName: meta.jsBridgeKey,
+              name: WAL_NAMES[provider],
+              imageUrl: '',
+              aboutUrl: '',
+              platforms: ['ios', 'android', 'chrome']
+            };
+            if (walInjected(provider)) {
+              info.jsBridgeKey = meta.jsBridgeKey;
+              info.injected = true;
+              info.embedded = true;
+            } else {
+              info.universalLink = meta.universalLink;
+              info.deepLink = meta.deepLink;
+              info.bridgeUrl = meta.bridgeUrl;
+            }
+            walPending = { provider: provider, payload: ch.payload };
+            var link = null;
+            try { link = connector.connect(info, { tonProof: ch.payload }); } catch (e) { link = null; }
+            if (typeof link === 'string' && link) openConnectLink(link);
+            walMsg(t('walApprove'));
+            walConnectTimer = setTimeout(function(){
+              if (walPending && walPending.provider === provider) {
+                walPending = null;
+                walMsg(t('walTimeout'));
+                walSetBusy(false);
+              }
+            }, 180000);
+          });
+        });
+      })
+      .catch(function(){
+        walSetBusy(false);
+        walMsg(t('walSdkFailed'));
+      });
+  }
+  function toggleTgPanel(show){
+    var panel = document.getElementById('tgWalletPanel');
+    if (!panel) return;
+    var on = (typeof show === 'boolean') ? show : panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !on);
+    if (on) {
+      var saved = findWallet('telegram');
+      document.getElementById('tgHandleInput').value = (saved && saved.handle) || '';
+    }
+  }
+  function saveTelegramWallet(){
+    var handle = (document.getElementById('tgHandleInput').value || '').trim();
+    if (!/^@?[a-zA-Z0-9_]{4,32}$/.test(handle)) { walMsg(t('walBadHandle')); return; }
+    submitWalletConnect({ provider: 'telegram', handle: handle });
+  }
+  function walletProviderFor(addr){
+    var a = String(addr || '').trim().toLowerCase();
+    if (!a) return '';
+    var list = walletList();
+    for (var i = 0; i < list.length; i++) {
+      var w = list[i];
+      if (w.provider === 'telegram') {
+        if (w.handle && w.handle.toLowerCase() === a) return 'telegram';
+        continue;
+      }
+      if ((w.addressFriendly && w.addressFriendly.toLowerCase() === a) ||
+          (w.addressRaw && w.addressRaw.toLowerCase() === a)) return w.provider;
+    }
+    return '';
+  }
+  function renderWallets(){
+    var host = document.getElementById('walletConnected');
+    if (!host) return;
+    var list = walletList();
+    document.querySelectorAll('.wal-btn').forEach(function(b){
+      b.classList.toggle('connected', !!findWallet(b.getAttribute('data-wal-provider')));
+    });
+    if (!list.length) {
+      host.innerHTML = '<div class="hint">' + walEsc(t('walNone')) + '</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var w = list[i];
+      var ico = w.provider === 'tonkeeper' ? 'T' : (w.provider === 'mytonwallet' ? 'M' : '✈');
+      var addr = w.handle || w.addressFriendly || w.addressRaw || '';
+      var badge = '';
+      if (w.provider !== 'telegram') {
+        badge = w.proofVerified
+          ? '<span class="wal-badge ok">' + walEsc(t('walVerified')) + '</span>'
+          : '<span class="wal-badge warn">' + walEsc(t('walUnverified')) + '</span>';
+      }
+      html += '<div class="wal-card">'
+        + '<span class="wal-ico ' + walEsc(w.provider) + '">' + ico + '</span>'
+        + '<span class="wal-main"><span class="wal-name">' + walEsc(WAL_NAMES[w.provider] || w.provider) + badge + '</span>'
+        + '<div class="wal-addr">' + walEsc(addr) + '</div></span>'
+        + '<span class="wal-actions">'
+        + '<button type="button" class="wal-mini" data-wal-use="' + walEsc(w.provider) + '">' + walEsc(t('walUse')) + '</button>'
+        + '<button type="button" class="wal-mini danger" data-wal-drop="' + walEsc(w.provider) + '">' + walEsc(t('walUnlink')) + '</button>'
+        + '</span></div>';
+    }
+    host.innerHTML = html;
+  }
+  document.querySelectorAll('.wal-btn').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.preventDefault();
+      var p = b.getAttribute('data-wal-provider');
+      if (p === 'telegram') { toggleTgPanel(); return; }
+      connectTonProvider(p);
+    });
+  });
+  document.getElementById('walletConnected').addEventListener('click', function(e){
+    var target = e.target;
+    var useBtn = target && target.closest ? target.closest('[data-wal-use]') : null;
+    var dropBtn = target && target.closest ? target.closest('[data-wal-drop]') : null;
+    if (useBtn) {
+      var p = useBtn.getAttribute('data-wal-use');
+      var w = findWallet(p);
+      if (!w) return;
+      setWalletTab('withdraw');
+      document.getElementById('walletAddress').value = w.handle || w.addressFriendly || w.addressRaw || '';
+      document.getElementById('walletMsg').textContent = '';
+    } else if (dropBtn) {
+      var pr = dropBtn.getAttribute('data-wal-drop');
+      apiFetch('/api/wallet/disconnect', { method: 'POST', body: JSON.stringify({ initData: initData, provider: pr }) })
+        .then(function(res){
+          if (profileCache) profileCache.wallets = res.wallets || [];
+          walMsg(t('walDisconnected'));
+          renderWallets();
+        })
+        .catch(function(err){ walMsg('Error: ' + (err.message || err)); });
+    }
+  });
+  document.getElementById('tgHandleSave').addEventListener('click', function(e){
+    e.preventDefault();
+    saveTelegramWallet();
+  });
+  document.getElementById('tgWalletOpen').addEventListener('click', function(e){
+    e.preventDefault();
+    try {
+      if (tg && typeof tg.openTelegramLink === 'function') { tg.openTelegramLink('https://t.me/wallet'); return; }
+    } catch (err) {}
+    openConnectLink('https://t.me/wallet');
+  });
+  // Coming back from the wallet app: the bridge pauses while the tab is
+  // hidden, so resume it to pick up the approval.
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden && tonConnector && typeof tonConnector.unPauseConnection === 'function') {
+      try { tonConnector.unPauseConnection(); } catch (e) {}
+    }
+  });
+
 
   function applyLbViewState(){
     var viewTabs = document.getElementById('lbViewTabs');

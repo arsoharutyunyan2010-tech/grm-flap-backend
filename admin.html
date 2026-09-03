@@ -90,8 +90,8 @@
 
   <h2>Withdrawal requests</h2>
   <table>
-    <thead><tr><th>ID</th><th>Player</th><th>Address</th><th>Amount</th><th>Status</th><th></th></tr></thead>
-    <tbody id="wRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
+    <thead><tr><th>ID</th><th>Player</th><th>Address</th><th>Wallet</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+    <tbody id="wRows"><tr><td colspan="7">Enter admin key and press Load.</td></tr></tbody>
   </table>
 
   <h2>Cheaters &amp; bans</h2>
@@ -386,7 +386,7 @@
     var tbody = document.getElementById('wRows');
     tbody.innerHTML = '';
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6">No withdrawal requests yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7">No withdrawal requests yet.</td></tr>';
       return;
     }
     list.slice().reverse().forEach(function(w){
@@ -394,10 +394,14 @@
       var payCell = w.status === 'pending'
         ? '<button class="pay-btn" onclick="markPaid('+w.id+')">Mark paid</button>'
         : '';
+      var walletCell = w.walletProvider
+        ? esc(w.walletProvider) + (w.walletVerified ? ' ✓' : ' (no proof)')
+        : '—';
       tr.innerHTML =
         '<td>#'+w.id+'</td>' +
         '<td>'+ esc(w.name) +'</td>' +
         '<td style="word-break:break-all;max-width:160px;">'+ esc(w.address) +'</td>' +
+        '<td>'+ walletCell +'</td>' +
         '<td>'+ w.amount +' FLAP</td>' +
         '<td class="status-'+w.status+'">'+ w.status +'</td>' +
         '<td>'+ payCell +'</td>';

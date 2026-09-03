@@ -74,6 +74,16 @@ let withdrawalSeq = 1;
 const deposits = [];              // { id, userId, name, amount, txHash, status, requestedAt }
 let depositSeq = 1;
 
+// Connected external wallets per player (Wallet page -> "CONNECT WALLET"):
+// userId -> provider -> record. Providers: tonkeeper / mytonwallet (TON
+// Connect, on-chain address + optional ton_proof) and telegram (custodial
+// @wallet, stored as a handle because it has no on-chain address).
+const walletsByUser = new Map();
+// One-shot challenges for TON Connect ton_proof signing. Deliberately NOT
+// persisted: a challenge only has meaning while the connect flow is open.
+const walletChallenges = new Map(); // userId -> { payload, issuedAt }
+const WALLET_CHALLENGE_TTL_MS = 10 * 60 * 1000;
+
 const knownUsers = new Set();
 // Small admin-only directory used to map a Telegram user ID to the name that
 // was received from Telegram. The ID remains the source of truth for bans;
@@ -150,6 +160,7 @@ function snapshot() {
     withdrawalSeq,
     deposits,
     depositSeq,
+    wallets: Object.fromEntries(Array.from(walletsByUser.entries()).map(([uid, byProvider]) => [uid, byProvider])),
     knownUsers: Array.from(knownUsers).map(String),
     users,
     totalRuns,
@@ -178,7 +189,7 @@ function snapshot() {
 
 const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
-  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'users', 'totalRuns',
+  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'wallets', 'knownUsers', 'users', 'totalRuns',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
   'bans', 'antiCheatEvents',
 ]);
@@ -252,6 +263,19 @@ function hydrate(data) {
   }
   const maxDepId = deposits.reduce((m, d) => Math.max(m, Number(d.id) || 0), 0);
   depositSeq = Math.max(Number(data.depositSeq) || 1, maxDepId + 1);
+
+  walletsByUser.clear();
+  const walletsSrc = data.wallets || {};
+  for (const uid of Object.keys(walletsSrc)) {
+    const byProvider = walletsSrc[uid];
+    if (!byProvider || typeof byProvider !== 'object') continue;
+    const clean = {};
+    for (const provider of Object.keys(byProvider)) {
+      const rec = byProvider[provider];
+      if (rec && typeof rec === 'object' && rec.provider === provider) clean[provider] = rec;
+    }
+    if (Object.keys(clean).length) walletsByUser.set(String(uid), clean);
+  }
 
   knownUsers.clear();
   if (Array.isArray(data.knownUsers)) {
@@ -1412,7 +1436,7 @@ function creditCBalance(userId, amount) {
 
 const MIN_WITHDRAW_FLAP = Math.max(1, Math.floor(Number(process.env.MIN_WITHDRAW_FLAP) || 10));
 
-function requestWithdrawal(userId, name, address, amount) {
+function requestWithdrawal(userId, name, address, amount, extra) {
   userId = String(userId);
   amount = Math.floor(Number(amount));
   const bal = getBalance(userId);
@@ -1427,6 +1451,12 @@ function requestWithdrawal(userId, name, address, amount) {
     status: 'pending',
     requestedAt: Date.now(),
   };
+  // Optional provenance from the Wallet page: which connected wallet the
+  // destination came from, and whether its ownership was proof-verified.
+  if (extra && typeof extra === 'object') {
+    if (extra.walletProvider) request.walletProvider = String(extra.walletProvider).slice(0, 20);
+    if (extra.walletVerified === true) request.walletVerified = true;
+  }
   withdrawals.push(request);
   scheduleSave();
   return { ok: true, request, balance: bal - amount };
@@ -1487,6 +1517,108 @@ function rejectDeposit(id) {
   scheduleSave();
   return d;
 }
+
+// --- connected external wallets ------------------------------------------
+// A record never stores anything secret: address / handle / public key only.
+function sanitizeWalletRecord(rec, provider) {
+  const now = Date.now();
+  if (provider === 'telegram') {
+    return {
+      provider,
+      handle: String(rec.handle || '').slice(0, 33),
+      label: String(rec.label || 'Telegram Wallet').slice(0, 40),
+      proofVerified: false,
+      connectedAt: Number(rec.connectedAt) || now,
+    };
+  }
+  return {
+    provider,
+    addressRaw: String(rec.addressRaw || '').slice(0, 80),
+    addressFriendly: String(rec.addressFriendly || '').slice(0, 64),
+    publicKey: String(rec.publicKey || '').slice(0, 80),
+    chain: String(rec.chain || '-239').slice(0, 8),
+    label: String(rec.label || provider).slice(0, 40),
+    proofVerified: rec.proofVerified === true,
+    connectedAt: Number(rec.connectedAt) || now,
+  };
+}
+
+function saveWallet(userId, rec) {
+  userId = String(userId);
+  const provider = String((rec && rec.provider) || '');
+  if (!['tonkeeper', 'mytonwallet', 'telegram'].includes(provider)) return null;
+  const clean = sanitizeWalletRecord(rec || {}, provider);
+  if (provider === 'telegram' ? !clean.handle : !clean.addressRaw) return null;
+  let byProvider = walletsByUser.get(userId);
+  if (!byProvider) { byProvider = {}; walletsByUser.set(userId, byProvider); }
+  byProvider[provider] = clean;
+  scheduleSave();
+  return clean;
+}
+
+function removeWallet(userId, provider) {
+  userId = String(userId);
+  const byProvider = walletsByUser.get(userId);
+  if (!byProvider || !byProvider[provider]) return null;
+  const removed = byProvider[provider];
+  delete byProvider[provider];
+  if (!Object.keys(byProvider).length) walletsByUser.delete(userId);
+  scheduleSave();
+  return removed;
+}
+
+function getWallet(userId, provider) {
+  const byProvider = walletsByUser.get(String(userId));
+  return (byProvider && byProvider[provider]) || null;
+}
+
+function listWallets(userId) {
+  const byProvider = walletsByUser.get(String(userId));
+  if (!byProvider) return [];
+  return Object.keys(byProvider).map(k => byProvider[k]);
+}
+
+// Admin view: every stored connection, newest first.
+function listAllWallets(limit) {
+  const out = [];
+  for (const [uid, byProvider] of walletsByUser) {
+    for (const rec of Object.values(byProvider)) out.push(Object.assign({ userId: uid }, rec));
+  }
+  out.sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0));
+  const cap = Math.min(500, Math.max(1, Number(limit) || 200));
+  return out.slice(0, cap);
+}
+
+// --- TON Connect ton_proof challenges (transient) -------------------------
+function issueWalletChallenge(userId) {
+  const payload = crypto.randomBytes(24).toString('base64url');
+  walletChallenges.set(String(userId), { payload, issuedAt: Date.now() });
+  return { payload, expiresAt: Date.now() + WALLET_CHALLENGE_TTL_MS };
+}
+
+// Consumes the challenge so the same proof can never be replayed for another
+// user / second connect.
+function takeWalletChallenge(userId, payload) {
+  const key = String(userId);
+  const rec = walletChallenges.get(key);
+  walletChallenges.delete(key);
+  if (!rec) return false;
+  if (Date.now() - rec.issuedAt > WALLET_CHALLENGE_TTL_MS) return false;
+  if (typeof payload !== 'string' || !payload || payload.length > 512) return false;
+  const expected = Buffer.from(rec.payload, 'utf8');
+  const given = Buffer.from(payload, 'utf8');
+  if (given.length !== expected.length) return false;
+  return crypto.timingSafeEqual(expected, given);
+}
+
+function pruneWalletChallenges() {
+  const now = Date.now();
+  for (const [key, rec] of walletChallenges) {
+    if (now - rec.issuedAt > WALLET_CHALLENGE_TTL_MS) walletChallenges.delete(key);
+  }
+}
+const challengePruner = setInterval(pruneWalletChallenges, 5 * 60 * 1000);
+if (challengePruner.unref) challengePruner.unref();
 
 function trackUser(userId, profile) {
   userId = String(userId);
@@ -2083,6 +2215,8 @@ module.exports = {
   getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
+  saveWallet, removeWallet, getWallet, listWallets, listAllWallets,
+  issueWalletChallenge, takeWalletChallenge,
   trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
   attachReferral, getReferralInfo, getReferralLeaderboardDay,
