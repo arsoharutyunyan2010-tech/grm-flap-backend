@@ -174,6 +174,27 @@ cron.schedule('0 0 * * 1', () => runWeeklyRewardJob(store), { timezone: 'UTC' })
 or by calling `POST /internal/run-weekly-rewards` with header
 `x-admin-key: <ADMIN_KEY>` from your platform's own cron.
 
+## TON Connect wallet (Tonkeeper / Wallet / MyTonWallet)
+
+The Wallet page lets players link a real TON wallet via
+[`@tonconnect/ui`](https://github.com/ton-connect/sdk) (CDN script in
+`index.html`):
+
+- `GET /tonconnect-manifest.json` — the manifest wallet apps fetch when the
+  player taps **CONNECT WALLET**. Set `PUBLIC_URL` to your public HTTPS base
+  so the manifest is stable in production; without it the URL is derived from
+  the request's Host header.
+- **Withdraw tab** — the connected address auto-fills the "TON wallet
+  address" field (still editable).
+- **Top-up tab** — **PAY WITH CONNECTED WALLET** converts the C amount to
+  TON (live rate from tonapi.io, CoinGecko fallback), opens a native payment
+  confirmation in the connected wallet, and submits the resulting
+  transaction **BOC** to `POST /api/deposit` (`{ boc, sender }`). The server
+  hashes the BOC with `@ton/core` into a searchable message hash, so the
+  admin panel's pending list looks exactly like the manual hash-paste flow —
+  approval stays manual. The payer's wallet address is stored on the request
+  (`deposit.wallet`) and shown in `admin.html`.
+
 ## Production notes
 
 - Swap `store.js`'s in-memory `Map`s for Redis (sessions — short TTL) and a

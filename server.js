@@ -20,6 +20,25 @@ const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
 
+// TON Connect: when a player tops up by paying from a connected wallet
+// (Tonkeeper / Telegram Wallet / MyTonWallet...), the client sends the signed
+// transaction BOC instead of a hand-pasted hash. We hash the BOC server-side
+// so admins get a real, searchable message hash in the pending list.
+let TonCell = null;
+try { TonCell = require('@ton/core').Cell; } catch (err) {
+  console.warn('TON Connect top-up hashing disabled (@ton/core missing):', err.message || err);
+}
+function txHashFromBoc(boc) {
+  if (!TonCell) return '';
+  if (typeof boc !== 'string' || boc.length < 32 || boc.length > 40000) return '';
+  try {
+    const cell = TonCell.fromBoc(Buffer.from(boc, 'base64'))[0];
+    return cell.hash().toString('hex');
+  } catch (err) {
+    return '';
+  }
+}
+
 try {
   const art = require('./art-assets.js');
   const dir = path.join(__dirname, 'img');
@@ -99,6 +118,29 @@ const IMG_DIR = path.join(__dirname, 'img');
 if (fs.existsSync(IMG_DIR)) {
   app.use('/img', express.static(IMG_DIR, { fallthrough: false, index: false }));
 }
+
+// TON Connect manifest — wallet apps (Tonkeeper, Telegram Wallet, MyTonWallet…)
+// fetch this URL when a player taps "Connect wallet" in the mini app.
+// PUBLIC_URL pins the base URL in production; otherwise we derive it from the
+// incoming request so local/preview deployments still produce a valid manifest.
+function publicBaseUrl(req) {
+  const envUrl = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  if (envUrl) return envUrl;
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return host ? (proto + '://' + host) : '';
+}
+app.get('/tonconnect-manifest.json', (req, res) => {
+  const base = publicBaseUrl(req);
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(JSON.stringify({
+    url: base || 'https://localhost',
+    name: 'GRM FLAP',
+    iconUrl: (base || '') + '/img/tonconnect-icon.png',
+  }));
+});
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const NODE_ENV = process.env.NODE_ENV || '';
@@ -473,15 +515,26 @@ app.post('/api/deposit', (req, res) => {
   }
 
   const amount = Number(req.body && req.body.amount);
-  const txHash = AC.sanitizeTxHash(req.body && req.body.txHash);
+  let txHash = AC.sanitizeTxHash(req.body && req.body.txHash);
+  const sender = typeof (req.body && req.body.sender) === 'string'
+    ? req.body.sender.trim().slice(0, 80)
+    : '';
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ error: 'invalid amount' });
+  }
+  // Paid straight from a connected TON wallet? The client sends the signed
+  // transaction BOC — derive its message hash here instead of trusting input.
+  if (!txHash && req.body && req.body.boc) {
+    txHash = txHashFromBoc(req.body.boc);
+    if (!txHash) {
+      return res.status(400).json({ error: 'invalid transaction payload' });
+    }
   }
   if (!txHash) {
     return res.status(400).json({ error: 'invalid transaction hash' });
   }
 
-  const result = store.requestDeposit(userId, displayName(user), amount, txHash);
+  const result = store.requestDeposit(userId, displayName(user), amount, txHash, sender);
   if (!result.ok) return res.status(400).json({ error: result.error });
 
   res.json({

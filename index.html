@@ -7,6 +7,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://yoszi.com/sdk.js" data-zone="11662362" data-sdk="show_11662362"></script>
 <script src="https://w.tads.me/widget.js"></script>
+<script src="https://unpkg.com/@tonconnect/ui@2.4.4/dist/tonconnect-ui.min.js"></script>
 <style>
   :root{
     --gold: #f4c542;
@@ -638,6 +639,8 @@
   }
   .pvp-vs{ font-size:13px; opacity:0.85; margin: 8px 0; }
   .wallet-tabs{ display:flex; gap:6px; margin: 14px 0 8px; }
+  .tc-wrap{ display:flex; justify-content:center; margin: 2px 0 10px; min-height: 40px; }
+  .tc-wrap button{ border-radius: 14px !important; font-weight: 700 !important; }
   .addr-row{ display:flex; gap:8px; align-items:stretch; }
   .addr-row .field-input{ flex:1; }
   .copy-btn{
@@ -818,6 +821,9 @@
     <div class="stat-row"><span data-i18n="cBalance">balance C</span><b id="walletCBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="c-coin.png" alt="C"></b></div>
     <div class="stat-row"><span data-i18n="flapBalance">FLAPY balance</span><b id="walletBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="coin.png" alt="F"></b></div>
     <div class="stat-row"><span data-i18n="usdValue">USD value</span><b id="walletUsd">$0.00</b></div>
+    <div class="section-title" data-i18n="connectWallet">CONNECT WALLET</div>
+    <div id="tonConnectBtnWrap" class="tc-wrap"></div>
+    <div class="hint" id="tonConnectMsg"></div>
     <div class="wallet-tabs lb-tabs">
       <button class="lb-tab active" data-wallet-tab="topup" data-i18n="topup">TOP UP</button>
       <button class="lb-tab" data-wallet-tab="withdraw" data-i18n="withdrawTab">WITHDRAW</button>
@@ -839,6 +845,7 @@
       <label class="field-label" data-i18n="txHash">Transaction hash</label>
       <input type="text" id="depositTx" class="field-input" placeholder="…" autocomplete="off">
       <button id="depositSubmitBtn" data-i18n="requestTopup">REQUEST TOP-UP</button>
+      <button id="depositPayWalletBtn" data-i18n="payWithWallet">PAY WITH CONNECTED WALLET</button>
       <div class="hint" id="depositMsg"></div>
       <div class="reward-note" data-i18n="topupNote">Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit FLAP after checking.</div>
     </div>
@@ -1345,7 +1352,14 @@ window.FLAPY_ART = {
       couldNotVerify:"Could not verify — score not saved.",
       enterTon:"Enter a TON wallet address.", enterAmount:"Enter a valid amount.",
       submitting:"Submitting…", withdrawOk:"Withdrawal request submitted. Balance: ",
-      pts:" pts", loading:"Loading…"
+      pts:" pts", loading:"Loading…",
+      connectWallet:"CONNECT WALLET", walletConnected:"Wallet connected",
+      payWithWallet:"PAY WITH CONNECTED WALLET", connectFirst:"Connect your wallet first.",
+      sendingTx:"Confirm the payment in your wallet…", txCancelled:"Payment cancelled.",
+      payError:"Payment failed — try the manual transfer above.",
+      rateError:"Could not fetch the TON rate — try again soon.",
+      wrongNetwork:"Switch your wallet to the TON mainnet.",
+      topupPaid:"Payment sent. Top-up request submitted "
     },
     ru: {
       language:"ЯЗЫК", languageSub:"Выберите язык", close:"ЗАКРЫТЬ",
@@ -1402,7 +1416,14 @@ window.FLAPY_ART = {
       couldNotVerify:"Не удалось проверить — счёт не сохранён.",
       enterTon:"Введите адрес TON-кошелька.", enterAmount:"Введите сумму.",
       submitting:"Отправка…", withdrawOk:"Заявка отправлена. Баланс: ",
-      pts:" оч.", loading:"Загрузка…"
+      pts:" оч.", loading:"Загрузка…",
+      connectWallet:"ПОДКЛЮЧИТЬ КОШЕЛЁК", walletConnected:"Кошелёк подключён",
+      payWithWallet:"ОПЛАТИТЬ С ПОДКЛЮЧЁННОГО КОШЕЛЬКА", connectFirst:"Сначала подключите кошелёк.",
+      sendingTx:"Подтвердите оплату в кошельке…", txCancelled:"Платёж отменён.",
+      payError:"Платёж не прошёл — воспользуйтесь ручным переводом выше.",
+      rateError:"Не удалось получить курс TON — попробуйте позже.",
+      wrongNetwork:"Переключите кошелёк на основную сеть TON.",
+      topupPaid:"Платёж отправлен. Заявка на пополнение №"
     },
     uk: {
       language:"МОВА", languageSub:"Оберіть мову", close:"ЗАКРИТИ",
@@ -1459,7 +1480,14 @@ window.FLAPY_ART = {
       couldNotVerify:"Не вдалося перевірити — рахунок не збережено.",
       enterTon:"Введіть адресу TON-гаманця.", enterAmount:"Введіть суму.",
       submitting:"Надсилання…", withdrawOk:"Заявку надіслано. Баланс: ",
-      pts:" оч.", loading:"Завантаження…"
+      pts:" оч.", loading:"Завантаження…",
+      connectWallet:"ПІДКЛЮЧИТИ ГАМАНЕЦЬ", walletConnected:"Гаманець підключено",
+      payWithWallet:"СПЛАТИТИ З ПІДКЛЮЧЕНОГО ГАМАНЦЯ", connectFirst:"Спочатку підключіть гаманець.",
+      sendingTx:"Підтвердьте оплату в гаманці…", txCancelled:"Платіж скасовано.",
+      payError:"Платіж не вдався — скористайтеся ручним переказом вище.",
+      rateError:"Не вдалося отримати курс TON — спробуйте пізніше.",
+      wrongNetwork:"Переключіть гаманець на основну мережу TON.",
+      topupPaid:"Платіж надіслано. Заявка на поповнення №"
     },
     zh: {
       language:"语言", languageSub:"选择语言", close:"关闭",
@@ -1516,7 +1544,14 @@ window.FLAPY_ART = {
       couldNotVerify:"验证失败 — 分数未保存。",
       enterTon:"请输入 TON 钱包地址。", enterAmount:"请输入有效数量。",
       submitting:"提交中…", withdrawOk:"提现申请已提交。余额：",
-      pts:" 分", loading:"加载中…"
+      pts:" 分", loading:"加载中…",
+      connectWallet:"连接钱包", walletConnected:"钱包已连接",
+      payWithWallet:"使用已连接的钱包支付", connectFirst:"请先连接钱包。",
+      sendingTx:"请在钱包中确认付款…", txCancelled:"支付已取消。",
+      payError:"支付失败——请使用上方手动转账。",
+      rateError:"无法获取 TON 汇率——请稍后再试。",
+      wrongNetwork:"请将钱包切换到 TON 主网。",
+      topupPaid:"付款已发送。充值申请编号 "
     },
     hi: {
       language:"भाषा", languageSub:"अपनी भाषा चुनें", close:"बंद करें",
@@ -1573,7 +1608,14 @@ window.FLAPY_ART = {
       couldNotVerify:"जाँच विफल — स्कोर सेव नहीं हुआ।",
       enterTon:"TON वॉलेट पता लिखें।", enterAmount:"सही राशि लिखें।",
       submitting:"भेजा जा रहा है…", withdrawOk:"निकासी अनुरोध भेजा गया। बैलेंस: ",
-      pts:" अंक", loading:"लोड हो रहा है…"
+      pts:" अंक", loading:"लोड हो रहा है…",
+      connectWallet:"वॉलेट कनेक्ट करें", walletConnected:"वॉलेट कनेक्ट हो गया",
+      payWithWallet:"कनेक्ट किए गए वॉलेट से भुगतान करें", connectFirst:"पहले अपना वॉलेट कनेक्ट करें।",
+      sendingTx:"अपने वॉलेट में भुगतान की पुष्टि करें…", txCancelled:"भुगतान रद्द किया गया।",
+      payError:"भुगतान विफल — ऊपर दिए गए मैन्युअल ट्रांसफर का उपयोग करें।",
+      rateError:"TON की दर प्राप्त नहीं हो सकी — बाद में प्रयास करें।",
+      wrongNetwork:"अपने वॉलेट को TON मेननेट पर स्विच करें।",
+      topupPaid:"भुगतान भेजा गया। टॉप-अप अनुरोध क्रमांक "
     }
   };
 
@@ -2042,6 +2084,10 @@ window.FLAPY_ART = {
   function requestDeposit(amount, txHash){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
     return apiFetch('/api/deposit', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, txHash: txHash }) });
+  }
+  function requestDepositBoc(amount, boc, sender){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    return apiFetch('/api/deposit', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, boc: boc, sender: sender }) });
   }
 
   var profileCache = null;
@@ -2546,6 +2592,108 @@ window.FLAPY_ART = {
     });
   });
   setWalletTab('topup');
+
+  // ── TON Connect: link Tonkeeper / Telegram Wallet / MyTonWallet ──
+  var tonConnectUI = null;
+  var tonWalletAddr = '';
+  var tonWalletAutoFilled = false;
+  function tonShortAddr(a){ return a && a.length > 14 ? (a.slice(0, 6) + '…' + a.slice(-6)) : a; }
+  function tonConnected(){ return !!(tonConnectUI && tonConnectUI.wallet && tonConnectUI.wallet.account); }
+  function renderTonConnectMsg(){
+    var m = document.getElementById('tonConnectMsg');
+    if (m) m.textContent = tonWalletAddr ? (t('walletConnected') + ' · ' + tonShortAddr(tonWalletAddr)) : '';
+  }
+  if (window.TON_CONNECT_UI) {
+    try {
+      tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+        manifestUrl: location.origin + '/tonconnect-manifest.json',
+        buttonRootId: 'tonConnectBtnWrap',
+        uiPreferences: { theme: TON_CONNECT_UI.THEME.DARK }
+      });
+      tonConnectUI.onStatusChange(function(w){
+        var raw = w && w.account && w.account.address;
+        tonWalletAddr = raw ? TON_CONNECT_UI.toUserFriendlyAddress(raw) : '';
+        if (tonWalletAddr) {
+          var wa = document.getElementById('walletAddress');
+          if (wa && (!wa.value.trim() || tonWalletAutoFilled)) {
+            wa.value = tonWalletAddr;
+            tonWalletAutoFilled = true;
+          }
+        }
+        renderTonConnectMsg();
+      });
+    } catch (e) {
+      console.warn('TON Connect init failed:', e);
+      tonConnectUI = null;
+    }
+  } else {
+    console.warn('TON Connect library not loaded — wallet connect unavailable.');
+  }
+  function fetchTonUsdPrice(){
+    function tonapi(){
+      return fetch('https://tonapi.io/v2/rates?tokens=ton&currencies=usd')
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          var p = d && d.rates && d.rates.TON && d.rates.TON.prices && d.rates.TON.prices.USD;
+          if (!(p > 0)) throw new Error('no tonapi rate');
+          return p;
+        });
+    }
+    function gecko(){
+      return fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd')
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          var p = d && d['the-open-network'] && d['the-open-network'].usd;
+          if (!(p > 0)) throw new Error('no coingecko rate');
+          return p;
+        });
+    }
+    return tonapi().catch(gecko);
+  }
+  var payWalletBtn = document.getElementById('depositPayWalletBtn');
+  if (payWalletBtn) payWalletBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    var msg = document.getElementById('depositMsg');
+    if (DEMO_MODE) { msg.textContent = 'Demo mode'; return; }
+    var amt = parseFloat(document.getElementById('depositAmount').value);
+    if (!(amt > 0)) { msg.textContent = t('enterAmount'); return; }
+    if (!tonConnectUI) { msg.textContent = t('rateError'); return; }
+    if (!tonConnected()) {
+      msg.textContent = t('connectFirst');
+      try { tonConnectUI.openModal(); } catch (e2) {}
+      return;
+    }
+    var acc = tonConnectUI.wallet.account;
+    if (acc && acc.chain && acc.chain !== TON_CONNECT_UI.CHAIN.MAINNET) {
+      msg.textContent = t('wrongNetwork');
+      return;
+    }
+    var payTo = (document.getElementById('depositPayTo').value || '').trim();
+    if (!payTo) { msg.textContent = t('rateError'); return; }
+    msg.textContent = t('sendingTx');
+    fetchTonUsdPrice().then(function(price){
+      var nano = Math.max(1, Math.round((amt / FLAP_PER_USD / price) * 1e9));
+      return tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        network: TON_CONNECT_UI.CHAIN.MAINNET,
+        messages: [{ address: payTo, amount: String(nano) }]
+      }).catch(function(err){
+        var m = String((err && (err.message || err.code)) || err || '');
+        if (/reject|cancel/i.test(m)) throw new Error('cancelled');
+        throw err;
+      });
+    }, function(){ throw new Error('rate'); }).then(function(res){
+      var boc = res && res.boc;
+      if (!boc) throw new Error('no-boc');
+      msg.textContent = t('submitting');
+      return requestDepositBoc(amt, boc, tonWalletAddr).then(function(r){
+        msg.textContent = t('topupPaid') + (r && r.requestId != null ? ('#' + r.requestId) : '');
+      });
+    }).catch(function(err){
+      var m = String((err && err.message) || '');
+      msg.textContent = m === 'rate' ? t('rateError') : (m === 'cancelled' ? t('txCancelled') : t('payError'));
+    });
+  });
 
   function applyLbViewState(){
     var viewTabs = document.getElementById('lbViewTabs');
