@@ -71,7 +71,7 @@ const balances = new Map();       // userId -> number (FLAP coins; withdraw only
 const cBalances = new Map();      // userId -> number (C coins; top-up; 100 C = $1)
 const withdrawals = [];           // { id, userId, name, address, amount, status, requestedAt, paidAt? }
 let withdrawalSeq = 1;
-const deposits = [];              // { id, userId, name, amount, txHash, status, requestedAt }
+const deposits = [];              // { id, userId, name, amount, txHash, wallet?, status, requestedAt }
 let depositSeq = 1;
 
 const knownUsers = new Set();
@@ -1444,7 +1444,7 @@ function markWithdrawalPaid(id) {
   return w;
 }
 
-function requestDeposit(userId, name, amount, txHash) {
+function requestDeposit(userId, name, amount, txHash, walletAddress) {
   userId = String(userId);
   amount = Math.floor(Number(amount));
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: 'invalid amount' };
@@ -1462,6 +1462,10 @@ function requestDeposit(userId, name, amount, txHash) {
     status: 'pending',
     requestedAt: Date.now(),
   };
+  // Wallet the player paid from (TON Connect top-ups) — helps the admin match
+  // the on-chain transfer to this request.
+  const wallet = String(walletAddress || '').trim().slice(0, 80);
+  if (wallet) request.wallet = wallet;
   deposits.push(request);
   scheduleSave();
   return { ok: true, request };
