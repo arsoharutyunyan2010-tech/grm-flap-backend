@@ -639,8 +639,60 @@
   }
   .pvp-vs{ font-size:13px; opacity:0.85; margin: 8px 0; }
   .wallet-tabs{ display:flex; gap:6px; margin: 14px 0 8px; }
-  .tc-wrap{ display:flex; justify-content:center; margin: 2px 0 10px; min-height: 40px; }
-  .tc-wrap button{ border-radius: 14px !important; font-weight: 700 !important; }
+  /* Custom TON wallet picker (filtered list, no gold accent) */
+  .wallet-picker{ display:flex; flex-direction:column; gap:8px; margin: 10px 0 4px; }
+  .wallet-opt{
+    all: unset; box-sizing:border-box;
+    display:flex; align-items:center; gap:10px;
+    width:100%; padding: 11px 12px;
+    border-radius: 12px;
+    background: #1b1033;
+    border: 1px solid rgba(255,255,255,0.14);
+    color:#fff7e6; font-size:14px; font-weight:700; letter-spacing:0.4px;
+    cursor:pointer;
+  }
+  .wallet-opt:active{ background:#241543; border-color: rgba(255,255,255,0.30); }
+  .wallet-opt img{
+    width:26px; height:26px; border-radius:8px; display:block; flex-shrink:0;
+    background:rgba(255,255,255,0.06); object-fit:cover;
+  }
+  .wallet-opt .w-ph{
+    display:none; width:26px; height:26px; border-radius:8px; flex-shrink:0;
+    background:rgba(255,255,255,0.10); color:#fff7e6;
+    align-items:center; justify-content:center; font-size:12px; font-weight:800;
+  }
+  .ton-disconnect{
+    all: unset; box-sizing:border-box;
+    display:block; width:100%; text-align:center;
+    padding: 10px 12px; margin: 8px 0 2px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.16);
+    color:#fff7e6; font-size:12px; font-weight:800; letter-spacing:0.6px;
+    cursor:pointer;
+  }
+  @keyframes pickerFlash{
+    0%,100%{ box-shadow:none; }
+    50%{ box-shadow: 0 0 0 2px rgba(255,255,255,0.65); }
+  }
+  .wallet-picker.flash{ animation: pickerFlash 0.8s ease 2; }
+  /* Collapsible blocks (wallet top-up) */
+  .acc{
+    border:1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    border-radius: 14px;
+    margin: 12px 0 0;
+    overflow: hidden;
+  }
+  .acc-head{
+    all: unset; box-sizing:border-box;
+    display:flex; width:100%; align-items:center; justify-content:space-between; gap:8px;
+    padding: 13px 14px; cursor:pointer;
+    color:#fff7e6; font-size:13px; font-weight:800; letter-spacing:0.6px;
+  }
+  .acc-chev{ display:inline-block; font-size:12px; opacity:0.7; transition: transform .18s ease; }
+  .acc.open .acc-chev{ transform: rotate(180deg); }
+  .acc-body{ padding: 0 14px 14px; }
   .addr-row{ display:flex; gap:8px; align-items:stretch; }
   .addr-row .field-input{ flex:1; }
   .copy-btn{
@@ -822,7 +874,29 @@
     <div class="stat-row"><span data-i18n="flapBalance">FLAPY balance</span><b id="walletBalance" class="coin-amt"><span>0</span><img class="tiny-coin" src="" data-art="coin.png" alt="F"></b></div>
     <div class="stat-row"><span data-i18n="usdValue">USD value</span><b id="walletUsd">$0.00</b></div>
     <div class="section-title" data-i18n="connectWallet">CONNECT WALLET</div>
-    <div id="tonConnectBtnWrap" class="tc-wrap"></div>
+    <div id="tonWalletPicker" class="wallet-picker">
+      <button type="button" class="wallet-opt" data-ton-wallet="telegram-wallet">
+        <img src="https://wallet.tg/images/logo-288.png" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">
+        <span class="w-ph">T</span><span>Telegram Wallet</span>
+      </button>
+      <button type="button" class="wallet-opt" data-ton-wallet="tonkeeper">
+        <img src="https://tonkeeper.com/assets/tonconnect-icon.png" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">
+        <span class="w-ph">K</span><span>Tonkeeper</span>
+      </button>
+      <button type="button" class="wallet-opt" data-ton-wallet="mytonwallet">
+        <img src="https://static.mywallet.io/mywallet/icon-288.png" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">
+        <span class="w-ph">M</span><span>My Wallet</span>
+      </button>
+      <button type="button" class="wallet-opt" data-ton-wallet="gramwallet">
+        <img src="https://static.gramwallet.io/gramwallet/icon-288.png" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">
+        <span class="w-ph">G</span><span>Gram Wallet</span>
+      </button>
+      <button type="button" class="wallet-opt" data-ton-wallet="tonhub">
+        <img src="https://tonhub.com/tonconnect_logo.png" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">
+        <span class="w-ph">H</span><span>Ton Hub</span>
+      </button>
+    </div>
+    <button type="button" id="tonDisconnectBtn" class="ton-disconnect hidden" data-i18n="disconnectWallet">DISCONNECT WALLET</button>
     <div class="hint" id="tonConnectMsg"></div>
     <div class="wallet-tabs lb-tabs">
       <button class="lb-tab active" data-wallet-tab="topup" data-i18n="topup">TOP UP</button>
@@ -831,23 +905,42 @@
 
     <div id="walletTopup">
       <div class="rate-chip">100 <img class="tiny-coin" src="" data-art="c-coin.png" alt="C"> = $1</div>
-      <div class="section-title" data-i18n="topup">TOP UP</div>
-      <label class="field-label">Amount <img class="tiny-coin" src="" data-art="c-coin.png" alt="C"></label>
-      <input type="number" id="depositAmount" class="field-input" placeholder="100" min="1" step="1">
-      <div class="stat-row"><span data-i18n="youPay">You pay</span><b id="depositUsd">$0.00</b></div>
-      <div id="depositAddrWrap">
-        <label class="field-label" data-i18n="payToAddress">Send TON to this address</label>
-        <div class="addr-row">
-          <input type="text" id="depositPayTo" class="field-input" readonly value="UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd" placeholder="UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd" autocomplete="off">
-          <button type="button" id="depositCopyBtn" class="copy-btn" data-i18n="copy">COPY</button>
+
+      <div class="acc open" id="accPayWallet">
+        <button type="button" class="acc-head" data-acc="accPayWallet">
+          <span data-i18n="payWalletTitle">PAY VIA CONNECTED WALLET</span><span class="acc-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="acc-body" data-acc-body="accPayWallet">
+          <label class="field-label">Amount <img class="tiny-coin" src="" data-art="c-coin.png" alt="C"></label>
+          <input type="number" id="depositAmount" class="field-input" placeholder="100" min="1" step="1">
+          <div class="stat-row"><span data-i18n="youPay">You pay</span><b id="depositUsd">$0.00</b></div>
+          <button id="depositPayWalletBtn" data-i18n="payWithWallet">PAY WITH CONNECTED WALLET</button>
+          <div class="hint" id="depositMsg"></div>
         </div>
       </div>
-      <label class="field-label" data-i18n="txHash">Transaction hash</label>
-      <input type="text" id="depositTx" class="field-input" placeholder="…" autocomplete="off">
-      <button id="depositSubmitBtn" data-i18n="requestTopup">REQUEST TOP-UP</button>
-      <button id="depositPayWalletBtn" data-i18n="payWithWallet">PAY WITH CONNECTED WALLET</button>
-      <div class="hint" id="depositMsg"></div>
-      <div class="reward-note" data-i18n="topupNote">Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit FLAP after checking.</div>
+
+      <div class="acc" id="accManualTopup">
+        <button type="button" class="acc-head" data-acc="accManualTopup">
+          <span data-i18n="manualTopup">MANUAL TOP-UP</span><span class="acc-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="acc-body hidden" data-acc-body="accManualTopup">
+          <label class="field-label">Amount <img class="tiny-coin" src="" data-art="c-coin.png" alt="C"></label>
+          <input type="number" id="depositAmountManual" class="field-input" placeholder="100" min="1" step="1">
+          <div class="stat-row"><span data-i18n="youPay">You pay</span><b id="depositUsdManual">$0.00</b></div>
+          <div id="depositAddrWrap">
+            <label class="field-label" data-i18n="payToAddress">Send TON to this address</label>
+            <div class="addr-row">
+              <input type="text" id="depositPayTo" class="field-input" readonly value="UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd" placeholder="UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd" autocomplete="off">
+              <button type="button" id="depositCopyBtn" class="copy-btn" data-i18n="copy">COPY</button>
+            </div>
+          </div>
+          <label class="field-label" data-i18n="txHash">Transaction hash</label>
+          <input type="text" id="depositTx" class="field-input" placeholder="…" autocomplete="off">
+          <button id="depositSubmitBtn" data-i18n="requestTopup">REQUEST TOP-UP</button>
+          <div class="hint" id="depositMsgManual"></div>
+          <div class="reward-note" data-i18n="topupNote">Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit C after checking.</div>
+        </div>
+      </div>
     </div>
 
     <div id="walletWithdraw" class="hidden">
@@ -1355,6 +1448,7 @@ window.FLAPY_ART = {
       pts:" pts", loading:"Loading…",
       connectWallet:"CONNECT WALLET", walletConnected:"Wallet connected",
       payWithWallet:"PAY WITH CONNECTED WALLET", connectFirst:"Connect your wallet first.",
+      payWalletTitle:"PAY VIA CONNECTED WALLET", manualTopup:"MANUAL TOP-UP", disconnectWallet:"DISCONNECT WALLET",
       sendingTx:"Confirm the payment in your wallet…", txCancelled:"Payment cancelled.",
       payError:"Payment failed — try the manual transfer above.",
       rateError:"Could not fetch the TON rate — try again soon.",
@@ -1419,6 +1513,7 @@ window.FLAPY_ART = {
       pts:" оч.", loading:"Загрузка…",
       connectWallet:"ПОДКЛЮЧИТЬ КОШЕЛЁК", walletConnected:"Кошелёк подключён",
       payWithWallet:"ОПЛАТИТЬ С ПОДКЛЮЧЁННОГО КОШЕЛЬКА", connectFirst:"Сначала подключите кошелёк.",
+      payWalletTitle:"ОПЛАТА ПОДКЛЮЧЁННЫМ КОШЕЛЬКОМ", manualTopup:"ПОПОЛНЕНИЕ ВРУЧНУЮ", disconnectWallet:"ОТКЛЮЧИТЬ КОШЕЛЁК",
       sendingTx:"Подтвердите оплату в кошельке…", txCancelled:"Платёж отменён.",
       payError:"Платёж не прошёл — воспользуйтесь ручным переводом выше.",
       rateError:"Не удалось получить курс TON — попробуйте позже.",
@@ -1483,6 +1578,7 @@ window.FLAPY_ART = {
       pts:" оч.", loading:"Завантаження…",
       connectWallet:"ПІДКЛЮЧИТИ ГАМАНЕЦЬ", walletConnected:"Гаманець підключено",
       payWithWallet:"СПЛАТИТИ З ПІДКЛЮЧЕНОГО ГАМАНЦЯ", connectFirst:"Спочатку підключіть гаманець.",
+      payWalletTitle:"ОПЛАТА ПІДКЛЮЧЕНИМ ГАМАНЦЕМ", manualTopup:"ПОПОВНЕННЯ ВРУЧНУ", disconnectWallet:"ВІДКЛЮЧИТИ ГАМАНЕЦЬ",
       sendingTx:"Підтвердьте оплату в гаманці…", txCancelled:"Платіж скасовано.",
       payError:"Платіж не вдався — скористайтеся ручним переказом вище.",
       rateError:"Не вдалося отримати курс TON — спробуйте пізніше.",
@@ -1547,6 +1643,7 @@ window.FLAPY_ART = {
       pts:" 分", loading:"加载中…",
       connectWallet:"连接钱包", walletConnected:"钱包已连接",
       payWithWallet:"使用已连接的钱包支付", connectFirst:"请先连接钱包。",
+      payWalletTitle:"使用已连接钱包支付", manualTopup:"手动充值", disconnectWallet:"断开钱包",
       sendingTx:"请在钱包中确认付款…", txCancelled:"支付已取消。",
       payError:"支付失败——请使用上方手动转账。",
       rateError:"无法获取 TON 汇率——请稍后再试。",
@@ -1611,6 +1708,7 @@ window.FLAPY_ART = {
       pts:" अंक", loading:"लोड हो रहा है…",
       connectWallet:"वॉलेट कनेक्ट करें", walletConnected:"वॉलेट कनेक्ट हो गया",
       payWithWallet:"कनेक्ट किए गए वॉलेट से भुगतान करें", connectFirst:"पहले अपना वॉलेट कनेक्ट करें।",
+      payWalletTitle:"कनेक्टेड वॉलेट से भुगतान", manualTopup:"मैन्युअल टॉप-अप", disconnectWallet:"वॉलेट डिस्कनेक्ट करें",
       sendingTx:"अपने वॉलेट में भुगतान की पुष्टि करें…", txCancelled:"भुगतान रद्द किया गया।",
       payError:"भुगतान विफल — ऊपर दिए गए मैन्युअल ट्रांसफर का उपयोग करें।",
       rateError:"TON की दर प्राप्त नहीं हो सकी — बाद में प्रयास करें।",
@@ -2492,12 +2590,17 @@ window.FLAPY_ART = {
   function updateDepositUsd(){
     var amt = parseFloat(document.getElementById('depositAmount').value);
     document.getElementById('depositUsd').textContent = flapUsd(amt > 0 ? amt : 0);
+    var amtM = parseFloat(document.getElementById('depositAmountManual').value);
+    var usdM = document.getElementById('depositUsdManual');
+    if (usdM) usdM.textContent = flapUsd(amtM > 0 ? amtM : 0);
   }
   function loadWalletPage(){
     var msg = document.getElementById('walletMsg');
     var dmsg = document.getElementById('depositMsg');
+    var dmsgM = document.getElementById('depositMsgManual');
     if (msg) msg.textContent = DEMO_MODE ? 'Demo mode' : '';
     if (dmsg && DEMO_MODE) dmsg.textContent = 'Demo mode';
+    if (dmsgM && DEMO_MODE) dmsgM.textContent = 'Demo mode';
     updateDepositUsd();
     if (profileCache) { fillWalletFromProfile(profileCache); return; }
     fetchProfile().then(function(p){
@@ -2525,6 +2628,8 @@ window.FLAPY_ART = {
   });
 
   document.getElementById('depositAmount').addEventListener('input', updateDepositUsd);
+  var depositAmountManualEl = document.getElementById('depositAmountManual');
+  if (depositAmountManualEl) depositAmountManualEl.addEventListener('input', updateDepositUsd);
   document.getElementById('depositCopyBtn').addEventListener('click', function(e){
     e.preventDefault();
     e.stopPropagation();
@@ -2555,9 +2660,9 @@ window.FLAPY_ART = {
   });
   document.getElementById('depositSubmitBtn').addEventListener('click', function(e){
     e.preventDefault();
-    var amt = parseFloat(document.getElementById('depositAmount').value);
+    var amt = parseFloat(document.getElementById('depositAmountManual').value);
     var tx = document.getElementById('depositTx').value.trim();
-    var msg = document.getElementById('depositMsg');
+    var msg = document.getElementById('depositMsgManual');
     if (!(amt > 0)) { msg.textContent = t('enterAmount'); return; }
     if (!tx) { msg.textContent = t('enterTx'); return; }
     msg.textContent = t('submitting');
@@ -2565,6 +2670,18 @@ window.FLAPY_ART = {
       msg.textContent = t('topupOk');
       document.getElementById('depositTx').value = '';
     }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
+  });
+  document.querySelectorAll('.acc-head').forEach(function(head){
+    head.addEventListener('click', function(e){
+      e.preventDefault();
+      var accId = head.getAttribute('data-acc');
+      if (!accId) return;
+      var acc = document.getElementById(accId);
+      var body = document.querySelector('[data-acc-body="' + accId + '"]');
+      if (!acc || !body) return;
+      var open = acc.classList.toggle('open');
+      body.classList.toggle('hidden', !open);
+    });
   });
   function setWalletTab(which){
     document.querySelectorAll('[data-wallet-tab]').forEach(function(x){
@@ -2603,11 +2720,19 @@ window.FLAPY_ART = {
     var m = document.getElementById('tonConnectMsg');
     if (m) m.textContent = tonWalletAddr ? (t('walletConnected') + ' · ' + tonShortAddr(tonWalletAddr)) : '';
   }
+  function updateTonPicker(){
+    var picker = document.getElementById('tonWalletPicker');
+    var disc = document.getElementById('tonDisconnectBtn');
+    var connected = tonConnected();
+    if (picker) picker.classList.toggle('hidden', connected);
+    if (disc) disc.classList.toggle('hidden', !connected);
+  }
   if (window.TON_CONNECT_UI) {
     try {
       tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
         manifestUrl: location.origin + '/tonconnect-manifest.json',
-        buttonRootId: 'tonConnectBtnWrap',
+        // Custom picker below — the stock button opens the FULL (unfiltered) wallet list.
+        buttonRootId: null,
         uiPreferences: { theme: TON_CONNECT_UI.THEME.DARK }
       });
       tonConnectUI.onStatusChange(function(w){
@@ -2620,6 +2745,7 @@ window.FLAPY_ART = {
             tonWalletAutoFilled = true;
           }
         }
+        updateTonPicker();
         renderTonConnectMsg();
       });
     } catch (e) {
@@ -2629,6 +2755,27 @@ window.FLAPY_ART = {
   } else {
     console.warn('TON Connect library not loaded — wallet connect unavailable.');
   }
+  // Only these wallets are offered (kept in sync with the TON Connect registry app_names).
+  document.querySelectorAll('.wallet-opt').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      if (!tonConnectUI || tonConnected()) return;
+      var app = btn.getAttribute('data-ton-wallet');
+      function tryOpen(){
+        var p = tonConnectUI.openSingleWalletModal(app);
+        if (p && p.catch) p.catch(function(){ setTimeout(tryOpen, 1200); });
+      }
+      try { tryOpen(); } catch (err) { setTimeout(function(){ try { tryOpen(); } catch (e2) {} }, 1200); }
+    });
+  });
+  var tonDiscBtn = document.getElementById('tonDisconnectBtn');
+  if (tonDiscBtn) tonDiscBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    if (tonConnectUI && tonConnected()) {
+      try { tonConnectUI.disconnect(); } catch (err) {}
+    }
+  });
+  updateTonPicker();
   function fetchTonUsdPrice(){
     function tonapi(){
       return fetch('https://tonapi.io/v2/rates?tokens=ton&currencies=usd')
@@ -2660,7 +2807,13 @@ window.FLAPY_ART = {
     if (!tonConnectUI) { msg.textContent = t('rateError'); return; }
     if (!tonConnected()) {
       msg.textContent = t('connectFirst');
-      try { tonConnectUI.openModal(); } catch (e2) {}
+      var picker = document.getElementById('tonWalletPicker');
+      if (picker) {
+        picker.classList.remove('flash');
+        void picker.offsetWidth;
+        picker.classList.add('flash');
+        if (picker.scrollIntoView) { try { picker.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e2) {} }
+      }
       return;
     }
     var acc = tonConnectUI.wallet.account;
