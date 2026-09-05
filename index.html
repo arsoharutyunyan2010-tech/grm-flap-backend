@@ -315,7 +315,7 @@
   .hidden{ display:none !important; }
 
   .lb-my-card{
-    display:flex; justify-content:space-between; align-items:center;
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
     background: rgba(244,197,66,0.1);
     border: 1px solid rgba(244,197,66,0.4);
     border-radius: 14px;
@@ -324,6 +324,7 @@
     font-size: 14px;
   }
   .lb-my-card b{ color: var(--gold); font-size:18px; }
+  .lb-my-right{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
   .lb-row{
     display:flex; align-items:center;
     font-size: 14px; padding: 10px 12px; border-radius: 12px;
@@ -344,7 +345,38 @@
   .lb-name{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lb-score-row{ display:flex; justify-content:space-between; align-items:center; margin-top:2px; }
   .lb-score{ color: var(--gold); font-weight:800; font-size:13px; }
+  .lb-prize-badge{
+    display:inline-flex; align-items:center; justify-content:center; gap:3px;
+    flex-shrink:0;
+    min-width: 52px;
+    padding: 5px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(244,197,66,0.45);
+    background: rgba(244,197,66,0.13);
+    color: var(--gold);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .lb-prize-badge.no-prize{
+    opacity:0.55;
+    border-color: rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,247,230,0.72);
+  }
+  .lb-prize-badge .tiny-coin{ width:16px; height:16px; margin:0; }
   .lb-list{ max-height: 52vh; overflow-y:auto; margin: 10px 0; }
+  .lb-locked{
+    margin: 14px 0 0;
+    padding: 22px 16px;
+    border-radius: 18px;
+    text-align:center;
+    border: 1px dashed rgba(244,197,66,0.48);
+    background: linear-gradient(180deg, rgba(244,197,66,0.13), rgba(255,255,255,0.04));
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+  }
+  .lb-lock-icon{ font-size: 38px; line-height:1; margin-bottom: 10px; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.35)); }
   .reward-note{ font-size: 11px; opacity:0.6; margin-top: 10px; line-height:1.4; }
 
   .lb-tabs{
@@ -377,6 +409,13 @@
     color:#1b1033 !important;
     background: linear-gradient(180deg, #ffe9a8, #f4c542) !important;
   }
+  button.lb-tab.locked{ position:relative; }
+  button.lb-tab.locked.active{
+    color:#fff7e6 !important;
+    background: rgba(255,255,255,0.10) !important;
+    box-shadow: inset 0 0 0 1px rgba(244,197,66,0.45) !important;
+  }
+  .lb-lock{ font-size: 12px; margin-left: 3px; vertical-align: -1px; }
   .lb-view-tabs{ margin-top: 2px; }
   .lb-view-tabs button.lb-tab{ padding: 7px 4px !important; font-size: 11px !important; }
 
@@ -403,16 +442,16 @@
   }
   .nav-btn{
     all: unset;
-    display:flex; align-items:center; justify-content:center;
-    width: 58px; height: 58px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    width: 64px; height: 64px;
     border-radius: 16px;
     cursor:pointer;
-    color: rgba(255,247,230,0.55);
+    color: rgba(255,247,230,0.62);
     transition: color 0.15s ease, background 0.15s ease;
   }
   .nav-btn svg{ width:28px; height:28px; }
   .nav-btn img{
-    width:44px; height:44px;
+    width:36px; height:36px;
     object-fit: contain;
     display:block;
     background: transparent;
@@ -421,6 +460,18 @@
     box-sizing: content-box;
   }
   .nav-btn.active img{ background: #160b2c; }
+  .nav-label{
+    display:block;
+    max-width: 60px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.15px;
+    text-align:center;
+  }
   .nav-btn.active{
     color:#f4c542;
     background: rgba(244,197,66,0.12);
@@ -837,7 +888,7 @@
         <div class="title" style="font-size:26px;" data-i18n="gameOver">GAME OVER</div>
         <div class="stat-row"><span data-i18n="score">Score</span><b id="finalScore">0</b></div>
         <div class="stat-row"><span data-i18n="best">Best</span><b id="finalBest">0</b></div>
-        <div class="stat-row"><span data-i18n="weekRank">Weekly rank</span><b id="finalRank">—</b></div>
+        <div class="stat-row"><span data-i18n="dayRank">Today's rank</span><b id="finalRank">—</b></div>
         <div id="newBestBadge" class="new-badge hidden" data-i18n="newBest">NEW BEST!</div>
         <div id="verifyNote" class="hint">Verifying score with server…</div>
         <button id="restartBtn" data-i18n="playAgain">PLAY AGAIN</button>
@@ -964,19 +1015,23 @@
     <div class="page-title-row"><img src="" data-art="coin.png" alt=""><div class="title" data-i18n="leaderboard">LEADERBOARD</div></div>
     <div class="lb-tabs">
       <button class="lb-tab active" data-period="day" data-i18n="daily">DAILY</button>
-      <button class="lb-tab" data-period="week" data-i18n="weekly">WEEKLY</button>
-      <button class="lb-tab" data-period="month" data-i18n="monthly">MONTHLY</button>
+      <button class="lb-tab locked" data-period="month" aria-label="Monthly leaderboard locked"><span data-i18n="monthly">MONTHLY</span><span class="lb-lock" aria-hidden="true">🔒</span></button>
     </div>
     <div class="lb-tabs lb-view-tabs" id="lbViewTabs">
       <button class="lb-tab active" data-lb-view="score" data-i18n="lbViewScore">SCORE</button>
       <button class="lb-tab" data-lb-view="invites" data-i18n="lbViewInvites">INVITES</button>
     </div>
+    <div class="lb-locked hidden" id="lbMonthLocked" role="status">
+      <div class="lb-lock-icon" aria-hidden="true">🔒</div>
+      <div class="section-title" data-i18n="monthLockedTitle">Monthly leaderboard locked</div>
+      <div class="sub" data-i18n="monthLockedSub">Opens when there are 1000 online players.</div>
+    </div>
     <div class="lb-block" id="lbScoreWrap">
       <div class="section-title" data-i18n="lbRecordsTitle">Score records</div>
-      <div class="sub" id="lbPagePeriod" data-i18n="lbSub">Best score this period — points only</div>
+      <div class="sub" id="lbPagePeriod" data-i18n="lbSub">Daily score leaders — prizes are shown by place</div>
       <div class="lb-my-card hidden" id="lbMyCard">
         <span><span data-i18n="myRank">My rating</span>: <b id="lbMyRank">—</b></span>
-        <b id="lbMyScore">0</b>
+        <span class="lb-my-right"><b id="lbMyScore">0</b><span id="lbMyPrize"></span></span>
       </div>
       <div class="lb-list" id="lbPageList"></div>
     </div>
@@ -1059,18 +1114,23 @@
 <div class="navbar" id="navbar">
   <button class="nav-btn" data-page="profile" title="Profile">
     <img src="" data-art="nav-profile.png" alt="">
+    <span class="nav-label" data-i18n="profile">PROFILE</span>
   </button>
   <button class="nav-btn" data-page="wallet" title="Wallet">
     <img src="" data-art="nav-wallet.png" alt="">
+    <span class="nav-label" data-i18n="wallet">WALLET</span>
   </button>
   <button class="nav-btn active" data-page="home" title="Home">
     <img src="" data-art="nav-home.png" alt="">
+    <span class="nav-label" data-i18n="home">HOME</span>
   </button>
   <button class="nav-btn" data-page="leaderboard" title="Leaderboard">
     <img src="" data-art="nav-leaderboard.png" alt="">
+    <span class="nav-label" data-i18n="leaderboard">LEADERBOARD</span>
   </button>
   <button class="nav-btn" data-page="referral" title="Referral">
     <img src="" data-art="nav-referral.png" alt="">
+    <span class="nav-label" data-i18n="referral">REFERRAL</span>
   </button>
 </div>
 
@@ -1411,7 +1471,7 @@ window.FLAPY_ART = {
       watchContinue:"▶ WATCH AD & CONTINUE", tapContinue:"▶ TAP TO CONTINUE",
       loadingAd:"LOADING AD…", watchAd2:"1/2", play:"PLAY", continuesLeft:" continue(s) left",
       adUnavailable:"Ad unavailable — try again", tapToContinueRun:"Tap to continue your run",
-      profile:"PROFILE", bestScore:"Best score", flapBalance:"FLAPY balance",
+      profile:"PROFILE", home:"HOME", bestScore:"Best score", flapBalance:"FLAPY balance",
       dayRank:"Today's rank", monthRank:"Monthly rank",
       wallet:"WALLET", walletSub:"Top up C · withdraw FLAPY", usdValue:"USD value",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1423,8 +1483,9 @@ window.FLAPY_ART = {
       enterTx:"Paste the TON transaction hash.",
       topupOk:"Top-up request submitted. We will credit C after review.",
       topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit C after checking.",
-      leaderboard:"LEADERBOARD", lbSub:"Best score this period — points only", lbRecordsTitle:"Score records",
+      leaderboard:"LEADERBOARD", lbSub:"Daily score leaders — prizes are shown by place", lbRecordsTitle:"Score records",
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
+      dailyPrize:"Daily prize", monthLockedTitle:"MONTHLY LEADERBOARD LOCKED", monthLockedSub:"Opens when there are 1000 online players.",
       tasks:"TASKS", comingSoon:"Coming soon.",
       referral:"REFERRAL", refSub:"Invite friends. Earn {c} when they top up.",
       refLink:"Your link", refL1:"Level 1 · 7%", refL2:"Level 2 · 3%", refL3:"Level 3 · 1%",
@@ -1476,7 +1537,7 @@ window.FLAPY_ART = {
       watchContinue:"▶ РЕКЛАМА И ПРОДОЛЖИТЬ", tapContinue:"▶ НАЖМИТЕ, ЧТОБЫ ПРОДОЛЖИТЬ",
       loadingAd:"РЕКЛАМА…", watchAd2:"1/2", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
       adUnavailable:"Реклама недоступна — попробуйте ещё", tapToContinueRun:"Нажмите, чтобы продолжить",
-      profile:"ПРОФИЛЬ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAPY",
+      profile:"ПРОФИЛЬ", home:"ГЛАВНАЯ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAPY",
       dayRank:"Место сегодня", monthRank:"Место за месяц",
       wallet:"КОШЕЛЁК", walletSub:"Пополнение C · вывод FLAPY", usdValue:"В долларах",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1488,8 +1549,9 @@ window.FLAPY_ART = {
       enterTx:"Вставьте хэш TON-транзакции.",
       topupOk:"Заявка на пополнение отправлена. C начислим после проверки.",
       topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции. Админ начислит C после проверки.",
-      leaderboard:"ЛИДЕРЫ", lbSub:"Лучший счёт за период — только очки", lbRecordsTitle:"Рекорды",
+      leaderboard:"ЛИДЕРЫ", lbSub:"Лидеры дня по очкам — призы указаны по местам", lbRecordsTitle:"Рекорды",
       daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место", lbViewScore:"ОЧКИ", lbViewInvites:"ПРИГЛАШЕНИЯ",
+      dailyPrize:"Дневной приз", monthLockedTitle:"МЕСЯЧНЫЙ РЕЙТИНГ ЗАКРЫТ", monthLockedSub:"Откроется, когда онлайн будет 1000 игроков.",
       tasks:"ЗАДАНИЯ", comingSoon:"Скоро.",
       referral:"РЕФЕРАЛЫ", refSub:"Приглашай друзей. Получай {c} с их пополнений.",
       refLink:"Ваша ссылка", refL1:"Уровень 1 · 7%", refL2:"Уровень 2 · 3%", refL3:"Уровень 3 · 1%",
@@ -1541,7 +1603,7 @@ window.FLAPY_ART = {
       watchContinue:"▶ РЕКЛАМА І ПРОДОВЖИТИ", tapContinue:"▶ НАТИСНІТЬ, ЩОБ ПРОДОВЖИТИ",
       loadingAd:"РЕКЛАМА…", watchAd2:"1/2", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
       adUnavailable:"Реклама недоступна — спробуйте ще", tapToContinueRun:"Натисніть, щоб продовжити",
-      profile:"ПРОФІЛЬ", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAPY",
+      profile:"ПРОФІЛЬ", home:"ГОЛОВНА", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAPY",
       dayRank:"Місце сьогодні", monthRank:"Місце за місяць",
       wallet:"ГАМАНЕЦЬ", walletSub:"Поповнення C · вивід FLAPY", usdValue:"У доларах",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1553,8 +1615,9 @@ window.FLAPY_ART = {
       enterTx:"Вставте хеш TON-транзакції.",
       topupOk:"Заявку на поповнення надіслано. C нарахуємо після перевірки.",
       topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції. Адмін нарахує C після перевірки.",
-      leaderboard:"ЛІДЕРИ", lbSub:"Найкращий рахунок за період — лише очки", lbRecordsTitle:"Рекорди",
+      leaderboard:"ЛІДЕРИ", lbSub:"Лідери дня за балами — призи вказані по місцях", lbRecordsTitle:"Рекорди",
       daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце", lbViewScore:"БАЛИ", lbViewInvites:"ЗАПРОШЕННЯ",
+      dailyPrize:"Денний приз", monthLockedTitle:"МІСЯЧНИЙ РЕЙТИНГ ЗАКРИТО", monthLockedSub:"Відкриється, коли онлайн буде 1000 гравців.",
       tasks:"ЗАВДАННЯ", comingSoon:"Незабаром.",
       referral:"РЕФЕРАЛИ", refSub:"Запрошуй друзів. Отримуй {c} з їх поповнень.",
       refLink:"Ваше посилання", refL1:"Рівень 1 · 7%", refL2:"Рівень 2 · 3%", refL3:"Рівень 3 · 1%",
@@ -1606,7 +1669,7 @@ window.FLAPY_ART = {
       watchContinue:"▶ 看广告继续", tapContinue:"▶ 点击继续",
       loadingAd:"广告加载中…", watchAd2:"1/2", play:"开始", continuesLeft:" 次续命剩余",
       adUnavailable:"广告不可用，请重试", tapToContinueRun:"点击继续本局",
-      profile:"个人", bestScore:"最高分", flapBalance:"FLAPY 余额",
+      profile:"个人", home:"主页", bestScore:"最高分", flapBalance:"FLAPY 余额",
       dayRank:"今日排名", monthRank:"本月排名",
       wallet:"钱包", walletSub:"充值 C · 提现 FLAPY", usdValue:"美元价值",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1618,8 +1681,9 @@ window.FLAPY_ART = {
       enterTx:"请粘贴 TON 交易哈希。",
       topupOk:"充值申请已提交，审核后将到账 C。",
       topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希。管理员核对后会充值 C。",
-      leaderboard:"排行榜", lbSub:"本周期最高分 — 仅计分数", lbRecordsTitle:"分数纪录",
+      leaderboard:"排行榜", lbSub:"今日分数排行 — 奖励按名次显示", lbRecordsTitle:"分数纪录",
       daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名", lbViewScore:"分数", lbViewInvites:"邀请",
+      dailyPrize:"每日奖励", monthLockedTitle:"月榜已锁定", monthLockedSub:"在线玩家达到 1000 人时开放。",
       tasks:"任务", comingSoon:"即将推出。",
       referral:"推荐", refSub:"邀请好友。他们充值时你获得 {c}。",
       refLink:"你的链接", refL1:"一级 · 7%", refL2:"二级 · 3%", refL3:"三级 · 1%",
@@ -1671,7 +1735,7 @@ window.FLAPY_ART = {
       watchContinue:"▶ विज्ञापन देखकर जारी रखें", tapContinue:"▶ जारी रखने के लिए टैप करें",
       loadingAd:"विज्ञापन लोड…", watchAd2:"1/2", play:"खेलें", continuesLeft:" जारी मौके बाकी",
       adUnavailable:"विज्ञापन उपलब्ध नहीं — फिर कोशिश करें", tapToContinueRun:"जारी रखने के लिए टैप करें",
-      profile:"प्रोफ़ाइल", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAPY बैलेंस",
+      profile:"प्रोफ़ाइल", home:"होम", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAPY बैलेंस",
       dayRank:"आज की रैंक", monthRank:"मासिक रैंक",
       wallet:"वॉलेट", walletSub:"C जमा करें · FLAPY निकालें", usdValue:"USD मूल्य",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1683,8 +1747,9 @@ window.FLAPY_ART = {
       enterTx:"TON लेनदेन हैश चिपकाएँ।",
       topupOk:"जमा अनुरोध भेज दिया गया। जाँच के बाद C जुड़ जाएगा।",
       topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ। एडमिन जाँचकर C जोड़ देगा।",
-      leaderboard:"लीडरबोर्ड", lbSub:"इस अवधि का सर्वश्रेष्ठ स्कोर — केवल अंक", lbRecordsTitle:"स्कोर रिकॉर्ड",
+      leaderboard:"लीडरबोर्ड", lbSub:"दैनिक स्कोर लीडर — इनाम रैंक के साथ दिखेगा", lbRecordsTitle:"स्कोर रिकॉर्ड",
       daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक", lbViewScore:"स्कोर", lbViewInvites:"आमंत्रण",
+      dailyPrize:"दैनिक इनाम", monthLockedTitle:"मासिक लीडरबोर्ड लॉक है", monthLockedSub:"1000 ऑनलाइन खिलाड़ी होने पर खुलेगा।",
       tasks:"कार्य", comingSoon:"जल्द आ रहा है।",
       referral:"रेफरल", refSub:"दोस्तों को आमंत्रित करें। उनके टॉप-अप पर {c} पाएँ।",
       refLink:"आपका लिंक", refL1:"लेवल 1 · 7%", refL2:"लेवल 2 · 3%", refL3:"लेवल 3 · 1%",
@@ -1824,7 +1889,7 @@ window.FLAPY_ART = {
   var awaitingContinueTap = false;
   var lbPeriod = 'day';
   var lbView = 'score';
-  var leaderboardCache = { day:null, week:null, month:null };
+  var leaderboardCache = { day:null, month:null };
 
   function setSyncBadge(text, cls){
     syncBadge.textContent = text;
@@ -2196,6 +2261,28 @@ window.FLAPY_ART = {
     return '$' + ((c + f) / FLAP_PER_USD).toFixed(2);
   }
   function fmtRank(r){ return r ? ('#'+r) : '—'; }
+  var DAILY_PRIZE_TIERS = [
+    { from: 1, to: 1, amount: 1000 },
+    { from: 2, to: 2, amount: 700 },
+    { from: 3, to: 3, amount: 500 },
+    { from: 4, to: 4, amount: 300 },
+    { from: 5, to: 6, amount: 200 },
+    { from: 7, to: 10, amount: 100 },
+    { from: 11, to: 13, amount: 50 },
+    { from: 14, to: 20, amount: 25 }
+  ];
+  function dailyPrizeForRank(rank){
+    rank = Math.floor(Number(rank) || 0);
+    for (var i = 0; i < DAILY_PRIZE_TIERS.length; i++) {
+      var tier = DAILY_PRIZE_TIERS[i];
+      if (rank >= tier.from && rank <= tier.to) return tier.amount;
+    }
+    return 0;
+  }
+  function dailyPrizeBadge(rank){
+    var amount = dailyPrizeForRank(rank);
+    return '<span class="lb-prize-badge '+(amount ? '' : 'no-prize')+'" title="'+t('dailyPrize')+'">'+amount+' F'+coinImg('f')+'</span>';
+  }
   function renderProfileFromCache(){
     if (!profileCache) { document.getElementById('profileHint').textContent = t('loading'); return; }
     document.getElementById('profileBest').textContent = profileCache.best;
@@ -2214,6 +2301,15 @@ window.FLAPY_ART = {
   function renderLeaderboardFromCache(){
     var list = document.getElementById('lbPageList');
     var myCard = document.getElementById('lbMyCard');
+    var lockedCard = document.getElementById('lbMonthLocked');
+    var isMonthLocked = lbPeriod === 'month';
+    if (lockedCard) lockedCard.classList.toggle('hidden', !isMonthLocked);
+    applyLbViewState();
+    if (isMonthLocked) {
+      if (list) list.innerHTML = '';
+      if (myCard) myCard.classList.add('hidden');
+      return;
+    }
     var data = leaderboardCache[lbPeriod];
     if (!data) { list.innerHTML = '<div class="hint">'+t('loading')+'</div>'; return; }
     list.innerHTML = '';
@@ -2221,7 +2317,6 @@ window.FLAPY_ART = {
     if (entries.length === 0) list.innerHTML = '<div class="hint">'+t('noScores')+'</div>';
     var refWrap = document.getElementById('lbRefWrap');
     var refList = document.getElementById('lbRefList');
-    applyLbViewState();
     if (refList) {
       if (lbPeriod === 'day') {
         refList.innerHTML = '';
@@ -2247,13 +2342,16 @@ window.FLAPY_ART = {
         '<div class="lb-body">' +
           '<div class="lb-name">'+ (e.name||'Player').replace(/</g,'&lt;') +'</div>' +
           '<div class="lb-score-row"><span class="lb-score">'+e.score+t('pts')+'</span></div>' +
-        '</div>';
+        '</div>' +
+        (lbPeriod === 'day' ? dailyPrizeBadge(e.rank) : '');
       list.appendChild(row);
     });
     if (data.me) {
       myCard.classList.remove('hidden');
       document.getElementById('lbMyRank').textContent = data.me.rank ? ('#'+data.me.rank) : '—';
       document.getElementById('lbMyScore').textContent = data.me.score + t('pts');
+      var myPrize = document.getElementById('lbMyPrize');
+      if (myPrize) myPrize.innerHTML = lbPeriod === 'day' ? dailyPrizeBadge(data.me.rank) : '';
     } else myCard.classList.add('hidden');
   }
   function refreshStatsAfterRun(profileResult){
@@ -2263,7 +2361,7 @@ window.FLAPY_ART = {
       if (profileResult.ranks) profileCache.ranks = profileResult.ranks;
       profileCache.rank = profileResult.rank != null ? profileResult.rank : profileCache.rank;
     }
-    leaderboardCache = { day:null, week:null, month:null };
+    leaderboardCache = { day:null, month:null };
     if(!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache();
     if(!document.getElementById('page-leaderboard').classList.contains('hidden')) loadLeaderboardPage(true);
   }
@@ -2404,8 +2502,8 @@ window.FLAPY_ART = {
         if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
         finalBestEl.textContent = Math.max(best, verifiedScore);
       }
-      var weekRank = (res.ranks && res.ranks.week) || res.rank;
-      finalRankEl.textContent = weekRank ? ('#'+weekRank) : '—';
+      var dayRank = (res.ranks && res.ranks.day) || null;
+      finalRankEl.textContent = dayRank ? ('#'+dayRank) : '—';
       if (res.verified) {
         verifyNote.classList.add('hidden');
         refreshStatsAfterRun(res);
@@ -2852,17 +2950,21 @@ window.FLAPY_ART = {
     var viewTabs = document.getElementById('lbViewTabs');
     var scoreWrap = document.getElementById('lbScoreWrap');
     var refWrap = document.getElementById('lbRefWrap');
+    var lockedCard = document.getElementById('lbMonthLocked');
+    var isMonthLocked = lbPeriod === 'month';
     // The invites (referral) board is only available for the daily period.
     if (lbPeriod !== 'day') lbView = 'score';
     if (viewTabs) viewTabs.classList.toggle('hidden', lbPeriod !== 'day');
-    if (scoreWrap) scoreWrap.classList.toggle('hidden', lbView !== 'score');
-    if (refWrap) refWrap.classList.toggle('hidden', lbView !== 'invites');
+    if (scoreWrap) scoreWrap.classList.toggle('hidden', isMonthLocked || lbView !== 'score');
+    if (refWrap) refWrap.classList.toggle('hidden', isMonthLocked || lbView !== 'invites');
+    if (lockedCard) lockedCard.classList.toggle('hidden', !isMonthLocked);
     document.querySelectorAll('[data-lb-view]').forEach(function(x){
       x.classList.toggle('active', x.getAttribute('data-lb-view') === lbView);
     });
   }
   function loadLeaderboardPage(force){
     applyLbViewState();
+    if (lbPeriod === 'month') { renderLeaderboardFromCache(); return; }
     if (!force && leaderboardCache[lbPeriod]) { renderLeaderboardFromCache(); return; }
     document.getElementById('lbPageList').innerHTML = '<div class="hint">'+t('loading')+'</div>';
     fetchLeaderboard(lbPeriod).then(function(data){
