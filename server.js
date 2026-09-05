@@ -19,6 +19,7 @@ const P = require('./physics.js');
 const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
+const BOTS = require('./bots.js');
 
 // TON Connect: when a player tops up by paying from a connected wallet
 // (Tonkeeper / Telegram Wallet / MyTonWallet...), the client sends the signed
@@ -410,8 +411,16 @@ app.get('/api/leaderboard', (req, res) => {
     return res.status(429).json({ error: 'too many requests, slow down' });
   }
   const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'day';
-  const { ranked, periodKey } = store.getLeaderboard(period, 50);
-  const top = ranked.slice(0, 50).map(e => ({ rank: e.rank, name: e.name, score: e.score }));
+  const { ranked, allRanked, periodKey } = store.getLeaderboard(period, 50);
+  let list = ranked;
+  if (period === 'day') {
+    // Pad the daily board with low-record filler bots. Every real player that
+    // appears pushes the lowest-scoring bot out; when 25 real players are on
+    // the board no bot is left. The set is regenerated on the next day key.
+    list = BOTS.padDailyBoard(allRanked, store.currentDayKey())
+      .map((e, i) => Object.assign({}, e, { rank: i + 1 }));
+  }
+  const top = list.slice(0, 50).map(e => ({ rank: e.rank, name: e.name, score: e.score }));
 
   let me = null;
   // Normalize the uid: a 1-64 char numeric Telegram id only, so a junk or
@@ -419,7 +428,12 @@ app.get('/api/leaderboard', (req, res) => {
   const uidRaw = String((req.query && req.query.uid) || '').trim();
   if (uidRaw && /^[0-9]{1,32}$/.test(uidRaw)) {
     const mine = store.getUserRank(uidRaw, period);
-    if (mine) me = { rank: mine.rank, score: mine.score };
+    if (mine) {
+      // On the daily board the visible rank includes the filler bots, so read
+      // the rank back from the merged list to stay consistent with the rows.
+      const row = period === 'day' ? list.find((e) => e.userId === uidRaw) : null;
+      me = { rank: (row && row.rank) || mine.rank, score: mine.score };
+    }
   }
 
   res.json({

@@ -429,6 +429,41 @@
   #rotateLock.hidden{ display:none !important; }
   .rotate-card{ max-width: 320px; }
   .rotate-phone{ font-size: 54px; margin-bottom: 12px; }
+  .tasks-title-row{ position:relative; padding-right: 48px; }
+  .burger-btn{
+    all: unset;
+    position:absolute; top:0; right:0;
+    width: 40px; height: 40px;
+    border-radius: 12px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+    cursor:pointer;
+    background: rgba(244,197,66,0.12);
+    box-shadow: inset 0 0 0 2px rgba(244,197,66,0.55);
+  }
+  .burger-btn span{
+    display:block; width:20px; height:3px; border-radius:2px;
+    background:#f4c542;
+  }
+  .burger-menu{
+    position:absolute; top: 46px; right: 0; z-index: 60;
+    min-width: 170px;
+    background: rgba(15,8,28,0.97);
+    border: 1px solid rgba(244,197,66,0.35);
+    border-radius: 14px;
+    padding: 6px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.55);
+  }
+  .burger-menu.hidden{ display:none !important; }
+  .burger-item{
+    all: unset;
+    display:block; box-sizing:border-box; width:100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    text-align:left;
+    font-weight: 800; font-size: 13px; letter-spacing: 0.4px;
+    color:#ffe9a8; cursor:pointer;
+  }
+  .burger-item:hover, .burger-item:active{ background: rgba(244,197,66,0.16); }
   .navbar{
     position:fixed; left:10px; right:10px; bottom: max(12px, env(safe-area-inset-bottom));
     z-index:50;
@@ -444,6 +479,9 @@
     all: unset;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
     width: 64px; height: 64px;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: visible;
     border-radius: 16px;
     cursor:pointer;
     color: rgba(255,247,230,0.62);
@@ -451,15 +489,19 @@
   }
   .nav-btn svg{ width:28px; height:28px; }
   .nav-btn img{
-    width:36px; height:36px;
+    width:34px; height:34px;
     object-fit: contain;
     display:block;
     background: transparent;
-    border-radius: 12px;
-    padding: 0;
+    /* No border-radius / overflow clipping here: the artwork already has a
+       golden frame right at its edge and rounding cut the corners off. */
+    border-radius: 0;
+    padding: 1px;
+    flex: none;
     box-sizing: content-box;
+    overflow: visible;
   }
-  .nav-btn.active img{ background: #160b2c; }
+  .nav-btn.active img{ background: transparent; }
   .nav-label{
     display:block;
     max-width: 60px;
@@ -788,6 +830,7 @@
       <div class="sub" data-i18n="modeSub">Choose a mode</div>
       <button id="classicBtn" class="mode-btn"><img class="mode-ico" src="" data-art="classic-icon.png" alt=""><span data-i18n="classic">CLASSIC</span></button>
       <button id="pvpMenuBtn" class="mode-btn secondary"><img class="mode-ico" src="" data-art="pvp-icon.png" alt=""><span data-i18n="pvp">PVP 1 VS 1</span></button>
+      <button id="menuReferralBtn" class="mode-btn secondary"><img class="mode-ico" src="" data-art="nav-referral.png" alt=""><span data-i18n="referral">REFERRAL</span></button>
     </div>
   </div>
 
@@ -1043,6 +1086,25 @@
   </div>
 </div>
 
+<div class="page hidden" id="page-tasks">
+  <div class="page-inner">
+    <div class="page-title-row tasks-title-row">
+      <img src="" data-art="nav-tasks.png" alt="">
+      <div class="title" data-i18n="tasks">TASKS</div>
+      <button type="button" class="burger-btn" id="tasksBurgerBtn" aria-label="Menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="burger-menu hidden" id="tasksBurgerMenu" role="menu">
+        <button type="button" class="burger-item" id="tasksGoReferralBtn" role="menuitem" data-i18n="referral">REFERRAL</button>
+      </div>
+    </div>
+    <div class="sub" data-i18n="tasksSub">Complete tasks and earn rewards.</div>
+    <div class="lb-list" id="tasksList">
+      <div class="hint" data-i18n="comingSoon">Coming soon.</div>
+    </div>
+  </div>
+</div>
+
 <div class="page hidden" id="page-referral">
   <div class="page-inner">
     <div class="page-title-row"><img src="" data-art="nav-referral.png" alt=""><div class="title" data-i18n="referral">REFERRAL</div></div>
@@ -1128,9 +1190,9 @@
     <img src="" data-art="nav-leaderboard.png" alt="">
     <span class="nav-label" data-i18n="leaderboard">LEADERBOARD</span>
   </button>
-  <button class="nav-btn" data-page="referral" title="Referral">
-    <img src="" data-art="nav-referral.png" alt="">
-    <span class="nav-label" data-i18n="referral">REFERRAL</span>
+  <button class="nav-btn" data-page="tasks" title="Tasks">
+    <img src="" data-art="nav-tasks.png" alt="">
+    <span class="nav-label" data-i18n="tasks">TASKS</span>
   </button>
 </div>
 
@@ -1486,7 +1548,7 @@ window.FLAPY_ART = {
       leaderboard:"LEADERBOARD", lbSub:"Daily score leaders — prizes are shown by place", lbRecordsTitle:"Score records",
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
       dailyPrize:"Daily prize", monthLockedTitle:"MONTHLY LEADERBOARD LOCKED", monthLockedSub:"Opens when there are 1000 online players.",
-      tasks:"TASKS", comingSoon:"Coming soon.",
+      tasks:"TASKS", comingSoon:"Coming soon.", tasksSub:"Complete tasks and earn rewards.",
       referral:"REFERRAL", refSub:"Invite friends. Earn {c} when they top up.",
       refLink:"Your link", refL1:"Level 1 · 7%", refL2:"Level 2 · 3%", refL3:"Level 3 · 1%",
       refEarned:"Earned", refPeople:"Your invites",
@@ -1552,7 +1614,7 @@ window.FLAPY_ART = {
       leaderboard:"ЛИДЕРЫ", lbSub:"Лидеры дня по очкам — призы указаны по местам", lbRecordsTitle:"Рекорды",
       daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место", lbViewScore:"ОЧКИ", lbViewInvites:"ПРИГЛАШЕНИЯ",
       dailyPrize:"Дневной приз", monthLockedTitle:"МЕСЯЧНЫЙ РЕЙТИНГ ЗАКРЫТ", monthLockedSub:"Откроется, когда онлайн будет 1000 игроков.",
-      tasks:"ЗАДАНИЯ", comingSoon:"Скоро.",
+      tasks:"ЗАДАНИЯ", comingSoon:"Скоро.", tasksSub:"Выполняй задания и получай награды.",
       referral:"РЕФЕРАЛЫ", refSub:"Приглашай друзей. Получай {c} с их пополнений.",
       refLink:"Ваша ссылка", refL1:"Уровень 1 · 7%", refL2:"Уровень 2 · 3%", refL3:"Уровень 3 · 1%",
       refEarned:"Заработано", refPeople:"Ваши приглашённые",
@@ -1618,7 +1680,7 @@ window.FLAPY_ART = {
       leaderboard:"ЛІДЕРИ", lbSub:"Лідери дня за балами — призи вказані по місцях", lbRecordsTitle:"Рекорди",
       daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце", lbViewScore:"БАЛИ", lbViewInvites:"ЗАПРОШЕННЯ",
       dailyPrize:"Денний приз", monthLockedTitle:"МІСЯЧНИЙ РЕЙТИНГ ЗАКРИТО", monthLockedSub:"Відкриється, коли онлайн буде 1000 гравців.",
-      tasks:"ЗАВДАННЯ", comingSoon:"Незабаром.",
+      tasks:"ЗАВДАННЯ", comingSoon:"Незабаром.", tasksSub:"Виконуй завдання та отримуй нагороди.",
       referral:"РЕФЕРАЛИ", refSub:"Запрошуй друзів. Отримуй {c} з їх поповнень.",
       refLink:"Ваше посилання", refL1:"Рівень 1 · 7%", refL2:"Рівень 2 · 3%", refL3:"Рівень 3 · 1%",
       refEarned:"Зароблено", refPeople:"Ваші запрошені",
@@ -1684,7 +1746,7 @@ window.FLAPY_ART = {
       leaderboard:"排行榜", lbSub:"今日分数排行 — 奖励按名次显示", lbRecordsTitle:"分数纪录",
       daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名", lbViewScore:"分数", lbViewInvites:"邀请",
       dailyPrize:"每日奖励", monthLockedTitle:"月榜已锁定", monthLockedSub:"在线玩家达到 1000 人时开放。",
-      tasks:"任务", comingSoon:"即将推出。",
+      tasks:"任务", comingSoon:"即将推出。", tasksSub:"完成任务，赢取奖励。",
       referral:"推荐", refSub:"邀请好友。他们充值时你获得 {c}。",
       refLink:"你的链接", refL1:"一级 · 7%", refL2:"二级 · 3%", refL3:"三级 · 1%",
       refEarned:"已赚取", refPeople:"你邀请的人",
@@ -1750,7 +1812,7 @@ window.FLAPY_ART = {
       leaderboard:"लीडरबोर्ड", lbSub:"दैनिक स्कोर लीडर — इनाम रैंक के साथ दिखेगा", lbRecordsTitle:"स्कोर रिकॉर्ड",
       daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक", lbViewScore:"स्कोर", lbViewInvites:"आमंत्रण",
       dailyPrize:"दैनिक इनाम", monthLockedTitle:"मासिक लीडरबोर्ड लॉक है", monthLockedSub:"1000 ऑनलाइन खिलाड़ी होने पर खुलेगा।",
-      tasks:"कार्य", comingSoon:"जल्द आ रहा है।",
+      tasks:"कार्य", comingSoon:"जल्द आ रहा है।", tasksSub:"कार्य पूरे करें और इनाम पाएँ।",
       referral:"रेफरल", refSub:"दोस्तों को आमंत्रित करें। उनके टॉप-अप पर {c} पाएँ।",
       refLink:"आपका लिंक", refL1:"लेवल 1 · 7%", refL2:"लेवल 2 · 3%", refL3:"लेवल 3 · 1%",
       refEarned:"कमाई", refPeople:"आपके आमंत्रित",
@@ -2992,22 +3054,66 @@ window.FLAPY_ART = {
     });
   });
 
+  var PAGES = ['profile','wallet','leaderboard','tasks','referral'];
+  // The referral page has no nav button any more (it lives behind the Tasks
+  // burger menu and the main-menu button), so it highlights the TASKS tab.
+  function navTabFor(page){ return page === 'referral' ? 'tasks' : page; }
+  function showPage(page){
+    var tab = navTabFor(page);
+    document.querySelectorAll('.nav-btn').forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-page') === tab);
+    });
+    wrap.classList.toggle('hidden', page !== 'home');
+    PAGES.forEach(function(p){
+      var el = document.getElementById('page-'+p);
+      if (el) el.classList.toggle('hidden', page !== p);
+    });
+    closeTasksMenu();
+    if (page !== 'profile' && soundCard) soundCard.classList.add('hidden');
+    if (page === 'profile') loadProfilePage();
+    if (page === 'wallet') loadWalletPage();
+    if (page === 'leaderboard') loadLeaderboardPage(false);
+    if (page === 'referral') loadReferralPage();
+  }
   document.querySelectorAll('.nav-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
-      var page = btn.getAttribute('data-page');
-      document.querySelectorAll('.nav-btn').forEach(function(b){
-        b.classList.toggle('active', b.getAttribute('data-page') === page);
-      });
-      wrap.classList.toggle('hidden', page !== 'home');
-      ['profile','wallet','leaderboard','referral'].forEach(function(p){
-        document.getElementById('page-'+p).classList.toggle('hidden', page !== p);
-      });
-      if (page !== 'profile' && soundCard) soundCard.classList.add('hidden');
-      if (page === 'profile') loadProfilePage();
-      if (page === 'wallet') loadWalletPage();
-      if (page === 'leaderboard') loadLeaderboardPage(false);
-      if (page === 'referral') loadReferralPage();
+      showPage(btn.getAttribute('data-page'));
     });
+  });
+
+  // Tasks page burger menu -> referral
+  function closeTasksMenu(){
+    var menu = document.getElementById('tasksBurgerMenu');
+    var btn = document.getElementById('tasksBurgerBtn');
+    if (menu) menu.classList.add('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  var tasksBurgerBtn = document.getElementById('tasksBurgerBtn');
+  if (tasksBurgerBtn) tasksBurgerBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    var menu = document.getElementById('tasksBurgerMenu');
+    if (!menu) return;
+    var open = menu.classList.toggle('hidden') === false;
+    tasksBurgerBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  var tasksGoRef = document.getElementById('tasksGoReferralBtn');
+  if (tasksGoRef) tasksGoRef.addEventListener('click', function(e){
+    e.stopPropagation();
+    showPage('referral');
+  });
+  document.addEventListener('click', function(e){
+    var menu = document.getElementById('tasksBurgerMenu');
+    if (!menu || menu.classList.contains('hidden')) return;
+    if (menu.contains(e.target) || (tasksBurgerBtn && tasksBurgerBtn.contains(e.target))) return;
+    closeTasksMenu();
+  });
+
+  // Main menu (CLASSIC / PVP) shortcut to the referral page.
+  var menuReferralBtn = document.getElementById('menuReferralBtn');
+  if (menuReferralBtn) menuReferralBtn.addEventListener('click', function(){
+    // Keep the mode card as-is underneath: #wrap is hidden while the referral
+    // page is open, and the HOME tab brings the menu straight back.
+    showPage('referral');
   });
   fillReferralFields({});
   setTimeout(function(){ fillReferralFields(profileCache || {}); }, 400);

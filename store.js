@@ -1345,7 +1345,7 @@ function getLeaderboard(periodOrWeekKey = 'week', limit = 20) {
   }
   const board = periodBoards.get(key) || new Map();
   const entries = Array.from(board.entries())
-    .map(([userId, v]) => ({ userId, name: v.name, score: v.score }))
+    .map(([userId, v]) => ({ userId, name: bestKnownName(userId, v && v.name), score: v.score }))
     .sort((a, b) => b.score - a.score);
   const ranked = entries.map((e, i) => Object.assign({ rank: i + 1 }, e));
   return { period, periodKey: key, ranked: ranked.slice(0, limit === Infinity ? ranked.length : limit), allRanked: ranked };
@@ -1968,7 +1968,7 @@ function attachReferral(userId, name, startParam) {
     const board = dailyInvites.get(day);
     const prev = board.get(String(referrerId)) || { name: parent.name, count: 0 };
     prev.count += 1;
-    prev.name = parent.name || prev.name;
+    prev.name = bestKnownName(referrerId, parent.name);
     board.set(String(referrerId), prev);
   }
   scheduleSave();
@@ -2000,14 +2000,50 @@ function getReferralInfo(userId, name) {
   };
 }
 
+// Best known display name for a user id: the Telegram directory first, then
+// the score board / referral record. Avoids showing everybody as "Player".
+function bestKnownName(userId, fallback) {
+  userId = String(userId);
+  const dir = userDirectory.get(userId);
+  if (dir && dir.name && dir.name !== 'Player') return dir.name;
+  if (dir && dir.username) return '@' + dir.username;
+  const best = allTimeBest.get(userId);
+  if (best && best.name && best.name !== 'Player') return best.name;
+  const ref = referralByUser.get(userId);
+  if (ref && ref.name && ref.name !== 'Player') return ref.name;
+  const fb = String(fallback || '').trim();
+  if (fb && fb !== 'Player') return fb;
+  return 'Player';
+}
+
+// Stable pseudo-random value in [0,1) for a user on a given day. Used to break
+// ties on the invite board so two players with the same invite count still get
+// two different places (one always one step above the other) instead of
+// sharing a place — and the order stays stable while the day lasts.
+function tieBreakSeed(userId, dayKey) {
+  let h = 2166136261 >>> 0;
+  const str = String(dayKey) + ':' + String(userId);
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return (h >>> 0) / 4294967296;
+}
+
 function getReferralLeaderboardDay(limit) {
-  const board = dailyInvites.get(currentDayKey()) || new Map();
+  const day = currentDayKey();
+  const board = dailyInvites.get(day) || new Map();
   const entries = Array.from(board.entries())
-    .map(([userId, v]) => ({ userId, name: v.name || 'Player', invites: v.count || 0 }))
+    .map(([userId, v]) => ({
+      userId,
+      name: bestKnownName(userId, v && v.name),
+      invites: (v && v.count) || 0,
+      _tb: tieBreakSeed(userId, day),
+    }))
     .filter((e) => e.invites > 0)
-    .sort((a, b) => b.invites - a.invites)
+    .sort((a, b) => (b.invites - a.invites) || (a._tb - b._tb))
     .slice(0, limit || 20)
-    .map((e, i) => Object.assign({ rank: i + 1 }, e));
+    .map((e, i) => ({ rank: i + 1, userId: e.userId, name: e.name, invites: e.invites }));
   return entries;
 }
 
@@ -2087,6 +2123,7 @@ module.exports = {
   getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, listDeposits, approveDeposit, rejectDeposit,
+  bestKnownName,
   trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
   attachReferral, getReferralInfo, getReferralLeaderboardDay,
