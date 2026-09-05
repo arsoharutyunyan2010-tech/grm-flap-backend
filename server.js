@@ -409,7 +409,7 @@ app.get('/api/leaderboard', (req, res) => {
   if (!store.allowRequest('lb:' + ip, 45, 60 * 1000)) {
     return res.status(429).json({ error: 'too many requests, slow down' });
   }
-  const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'week';
+  const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'day';
   const { ranked, periodKey } = store.getLeaderboard(period, 50);
   const top = ranked.slice(0, 50).map(e => ({ rank: e.rank, name: e.name, score: e.score }));
 
