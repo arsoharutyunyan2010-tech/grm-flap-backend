@@ -20,6 +20,14 @@ const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
 const BOTS = require('./bots.js');
+const { verifyDepositClaim } = require('./verifyDeposit.js');
+
+// Optional on-chain deposit verification (see verifyDeposit.js). OFF by default
+// so existing manual-approval deployments are unaffected; turn on by setting
+// DEPOSIT_ONCHAIN_ENABLED=true plus a real DEPOSIT_TON_ADDRESS.
+const DEPOSIT_ONCHAIN_ENABLED = process.env.DEPOSIT_ONCHAIN_ENABLED === 'true';
+const TON_RPC_URL = (process.env.TON_RPC_URL || '').trim();
+const TON_API_KEY = (process.env.TON_API_KEY || '').trim();
 
 // TON Connect: when a player tops up by paying from a connected wallet
 // (Tonkeeper / Telegram Wallet / MyTonWallet...), the client sends the signed
@@ -151,6 +159,13 @@ if (NODE_ENV === 'production' && ALLOW_INSECURE_DEV) {
   ALLOW_INSECURE_DEV = false;
 }
 const INIT_DATA_MAX_AGE_SECONDS = 12 * 60 * 60;
+// Money-moving / staking calls need a MUCH fresher initData than ordinary
+// play. The normal 12h window exists so a player isn't asked to re-auth while
+// idling, but a stolen/leaked initData that is up to 12h old must not be able
+// to withdraw funds, claim a deposit or stake money in PvP. When the caller
+// has to prove identity again anyway, we just demand a freshly-signed token.
+const SENSITIVE_MAX_AGE_SECONDS =
+  Math.max(60, Math.floor(Number(process.env.SENSITIVE_AUTH_MAX_AGE_SECONDS) || (20 * 60)));
 if (process.env.SESSION_SECRET || BOT_TOKEN) {
   AC.setSessionSecret(process.env.SESSION_SECRET || BOT_TOKEN);
 }
@@ -160,6 +175,19 @@ function authenticate(initData) {
     return { id: 'dev-user', first_name: 'Dev', username: 'dev_tester' };
   }
   const result = verifyInitData(initData, BOT_TOKEN, INIT_DATA_MAX_AGE_SECONDS);
+  if (!result.ok) return null;
+  return result.user;
+}
+
+// Same as authenticate() but enforces the tighter sensitive window. If a
+// leaked initData is older than SENSITIVE_MAX_AGE_SECONDS the Telegram client
+// will simply re-open and mint a fresh one, so this only ever blocks an
+// attacker who captured an old token — never a legit user.
+function authenticateFresh(initData) {
+  if (ALLOW_INSECURE_DEV && !initData) {
+    return { id: 'dev-user', first_name: 'Dev', username: 'dev_tester' };
+  }
+  const result = verifyInitData(initData, BOT_TOKEN, SENSITIVE_MAX_AGE_SECONDS);
   if (!result.ok) return null;
   return result.user;
 }
@@ -365,6 +393,9 @@ app.post('/api/submit-score', (req, res) => {
   const name = session.name || displayName(user);
   store.submitPeriodScores(session.userId, name, verifiedScore);
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
+  // A verified run proves a real player — count any pending referral now (once).
+  // Anti-self-referral: opening a referral link alone no longer counts an invite.
+  store.activateReferral(session.userId, name);
   const ranks = ranksFor(session.userId);
   store.recordRun();
 
@@ -482,7 +513,7 @@ app.post('/api/profile', (req, res) => {
 const TON_ADDRESS_RE = /^(?:[A-Za-z0-9_-]{48}|-?\d:[0-9a-fA-F]{64})$/;
 
 app.post('/api/withdraw', (req, res) => {
-  const user = authenticate(req.body && req.body.initData);
+  const user = authenticateFresh(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
 
@@ -519,7 +550,7 @@ app.get('/api/tads-reward', tadsReward);
 app.post('/api/tads-reward', tadsReward);
 
 app.post('/api/deposit', (req, res) => {
-  const user = authenticate(req.body && req.body.initData);
+  const user = authenticateFresh(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
 
@@ -562,33 +593,94 @@ app.post('/api/deposit', (req, res) => {
   });
 });
 
+// Rolling, in-memory audit of admin-area access (successful + refused). Capped,
+// so it can be exposed to the admin and used to spot a leaked admin key being
+// used from an unexpected source / at an odd time.
+const adminAudit = [];
+function auditAdmin(req, ok) {
+  adminAudit.push({
+    ok: !!ok,
+    ip: AC.clientIp(req),
+    method: req.method,
+    path: (req.originalUrl || req.url || req.path || '').slice(0, 120),
+    at: Date.now(),
+  });
+  if (adminAudit.length > 300) adminAudit.splice(0, adminAudit.length - 300);
+}
+
+// Optional allow-list of source IPs that may touch the admin area at all. When
+// set (comma separated), any request from another IP is refused BEFORE the
+// key is even tested — so a leaked key is useless outside those networks.
+// 'loopback' is shorthand for 127.0.0.1 / ::1 / ::ffff:127.0.0.1.
+const ADMIN_IP_ALLOWLIST = (process.env.ADMIN_IP_ALLOWLIST || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+function adminIpAllowed(ip) {
+  if (!ADMIN_IP_ALLOWLIST.length) return true;
+  if (ADMIN_IP_ALLOWLIST.includes('loopback') &&
+      (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1')) return true;
+  return ADMIN_IP_ALLOWLIST.includes(ip);
+}
+
+// The wholesale write operations (full restore/import + rolling-backup restore)
+// are the only /internal actions that can overwrite EVERY balance/score in one
+// shot. If RESTORE_KEY is configured, they need a second, separate key in
+// addition to the normal admin key — so losing the admin key alone can no
+// longer wipe/replace the whole store.
+const RESTORE_KEY = process.env.RESTORE_KEY || '';
+
 function requireAdmin(req, res) {
   const expected = process.env.ADMIN_KEY;
   // Unset / short keys used to compare `undefined !== undefined` → OPEN admin.
   if (!expected || String(expected).length < 16) {
+    auditAdmin(req, false);
     res.status(403).json({ error: 'admin not configured' });
+    return false;
+  }
+  const clientIp = AC.clientIp(req);
+  if (!adminIpAllowed(clientIp)) {
+    auditAdmin(req, false);
+    res.status(403).json({ error: 'forbidden' });
     return false;
   }
   // Brute-force lockout: at most 8 admin-key attempts per IP per 10 minutes.
   // A correct key resets nothing (legit use needs far fewer), a wrong one is
   // counted and the caller gets a 429 once the bucket is full.
-  const adminIp = 'adminauth:' + AC.clientIp(req);
+  const adminIp = 'adminauth:' + clientIp;
   if (req.headers['x-admin-key']) {
     if (!AC.safeEqual(req.headers['x-admin-key'], expected)) {
       if (!store.allowRequest(adminIp, 8, 10 * 60 * 1000)) {
-        console.warn('admin key brute-force throttled from', AC.clientIp(req));
+        console.warn('admin key brute-force throttled from', clientIp);
+        auditAdmin(req, false);
         res.status(429).json({ error: 'too many admin attempts, try again later' });
         return false;
       }
+      auditAdmin(req, false);
       res.status(403).json({ error: 'forbidden' });
       return false;
     }
   } else {
     if (!store.allowRequest(adminIp, 8, 10 * 60 * 1000)) {
+      auditAdmin(req, false);
       res.status(429).json({ error: 'too many admin attempts, try again later' });
       return false;
     }
+    auditAdmin(req, false);
     res.status(403).json({ error: 'forbidden' });
+    return false;
+  }
+  auditAdmin(req, true);
+  return true;
+}
+
+// requireAdmin + (optional) separate restore key. Falls back to plain admin
+// auth when RESTORE_KEY is not configured, so existing setups keep working.
+function requireRestore(req, res) {
+  if (!requireAdmin(req, res)) return false;
+  if (!RESTORE_KEY || RESTORE_KEY.length < 16) return true; // not configured
+  const sent = String(req.headers['x-restore-key'] || '');
+  if (!sent || !AC.safeEqual(sent, RESTORE_KEY)) {
+    auditAdmin(req, false);
+    res.status(403).json({ error: 'restore key required for this operation' });
     return false;
   }
   return true;
@@ -611,10 +703,36 @@ app.get('/internal/deposits', (req, res) => {
   res.json({ deposits: store.listDeposits(req.query.status) });
 });
 
-app.post('/internal/deposits/:id/approve', (req, res) => {
+app.post('/internal/deposits/:id/approve', async (req, res) => {
   if (!requireAdmin(req, res)) return;
-  const result = store.approveDeposit(Number(req.params.id));
-  if (!result) return res.status(404).json({ error: 'not found or already handled' });
+  const id = Number(req.params.id);
+  const deposit = store.getDeposit(id);
+  if (!deposit) return res.status(404).json({ error: 'not found' });
+  if (deposit.status !== 'pending') {
+    return res.status(400).json({ error: 'already handled' });
+  }
+  // On-chain gate: if enabled, the claimed message hash must be found as a real
+  // inbound transfer to DEPOSIT_TON_ADDRESS before the account is credited.
+  if (DEPOSIT_ONCHAIN_ENABLED) {
+    const depositAddress = (process.env.DEPOSIT_TON_ADDRESS || '').trim();
+    if (!depositAddress) {
+      return res.status(503).json({ error: 'DEPOSIT_ONCHAIN_ENABLED requires DEPOSIT_TON_ADDRESS to be set' });
+    }
+    const vres = await verifyDepositClaim({
+      txHash: deposit.txHash,
+      depositAddress,
+      rpcUrl: TON_RPC_URL,
+      apiKey: TON_API_KEY,
+    });
+    if (!vres.ok) {
+      console.warn('[deposit] on-chain verification refused approve #' + id + ':', vres.reason || vres.http);
+      store.addStrike(deposit.userId, 'unverifiable deposit', { txHash: deposit.txHash, reason: vres.reason || String(vres.http || '') });
+      return res.status(403).json({ ok: false, error: 'deposit not verified on-chain: ' + (vres.reason || 'lookup failed') });
+    }
+    res.setHeader('X-Deposit-Onchain', 'verified:' + (vres.valueNanoTon || 0));
+  }
+  const result = store.approveDeposit(id);
+  if (!result) return res.status(400).json({ error: 'already handled' });
   res.json({ ok: true, deposit: result.deposit, flapBalance: store.getBalance(result.deposit.userId), cBalance: result.cBalance != null ? result.cBalance : result.balance });
 });
 
@@ -632,6 +750,7 @@ app.get('/internal/stats', (req, res) => {
     totalUsers: store.getTotalUsers(),
     activePlayers: store.getActivePlayers(),
     totalRuns: runStats.totalRuns,
+    adminAudit: adminAudit.slice(-50),
   }, store.persistInfo()));
 });
 
@@ -651,7 +770,7 @@ app.get('/internal/backup', (req, res) => {
 });
 
 app.post('/internal/backup', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!requireRestore(req, res)) return;
   if (!req.body || typeof req.body !== 'object' || !req.body.periodBoards) {
     return res.status(400).json({ error: 'invalid backup file' });
   }
@@ -680,7 +799,7 @@ app.post('/internal/backups/create', async (req, res) => {
 });
 
 app.post('/internal/backups/restore', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!requireRestore(req, res)) return;
   try {
     const result = await store.restoreBackup(req.body && req.body.id);
     res.status(result.ok ? 200 : 400).json(result);
@@ -762,7 +881,7 @@ app.post('/internal/run-weekly-rewards', (req, res) => {
 });
 
 app.post('/api/pvp/join', (req, res) => {
-  const user = authenticate(req.body && req.body.initData);
+  const user = authenticateFresh(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
   trackTelegramUser(user);
@@ -811,6 +930,7 @@ app.post('/api/pvp/submit', (req, res) => {
     token,
   });
   if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
+  store.activateReferral(userId, verified.session && verified.session.name);
   const result = store.pvpSubmitScore(userId, verified.replay.score, {
     sessionStartedAt: verified.session.startedAt,
   });

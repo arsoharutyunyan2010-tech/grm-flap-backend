@@ -28,6 +28,18 @@ const MIN_HEARTBEAT_GAME_MS = 25000;
 const HEARTBEAT_MAX_GAP_MS = 45000;
 const MIN_FLAP_GAP_STEPS = Math.floor((1 / P.MAX_FLAPS_PER_SECOND) / P.STEP);
 
+// ---- Machine-tap detectors (real-time seed-solver bots) ----------------
+// A real-time solver plays out the deterministic run and taps on a very tight
+// band of step-gaps. It may sprinkle a few outlier pauses to fake "human
+// jitter" and dodge a plain variance check, but over a LONG, HIGH run the
+// distribution is still dominated by one or two step-gap values. A human's
+// tap-gap distribution is far more spread out. These thresholds are tuned
+// high on purpose so a genuine elite human run is not rejected.
+const MACHINE_CONCENTRATION_MIN_SCORE = 70; // don't judge short/panic runs
+const MACHINE_CONCENTRATION_MIN_GAPS = 60;
+const MACHINE_CONCENTRATION_MAX_CV = 0.35;
+const MACHINE_CONCENTRATION_TOP2_MIN = 0.85; // top-2 gap values share of all
+
 let sessionSecret = Buffer.from(
   process.env.SESSION_SECRET || process.env.BOT_TOKEN || crypto.randomBytes(32).toString('hex'),
   'utf8'
@@ -142,6 +154,25 @@ function analyzeFlapPattern(flapLog, score) {
   // still trips it — stdev alone missed a ±1-step jittered solver.
   const cv = mean > 0 ? stdev / mean : 0;
   const uniqueGaps = new Set(gaps).size;
+
+  // Fraction of all inter-flap gaps that fall in the two most frequent values.
+  // Close to 1 = the stream is dominated by a couple of intervals = a script
+  // (or a seed-solver) tapping on a rhythm, even if it throws in rare jitter.
+  function top2GapFraction() {
+    const freq = new Map();
+    for (const g of gaps) freq.set(g, (freq.get(g) || 0) + 1);
+    const counts = Array.from(freq.values()).sort((a, b) => b - a);
+    const top2 = (counts[0] || 0) + (counts[1] || 0);
+    return top2 / gaps.length;
+  }
+
+  if (score >= MACHINE_CONCENTRATION_MIN_SCORE &&
+      gaps.length >= MACHINE_CONCENTRATION_MIN_GAPS &&
+      cv <= MACHINE_CONCENTRATION_MAX_CV &&
+      top2GapFraction() >= MACHINE_CONCENTRATION_TOP2_MIN) {
+    const top2f = top2GapFraction();
+    return { ok: false, reason: 'machine-like tap concentration', atMinRatio, stdev, cv, uniqueGaps, top2f };
+  }
 
   if (score >= 40 && atMinRatio > 0.88) {
     return { ok: false, reason: 'inhuman tap cadence', atMinRatio, stdev, cv, uniqueGaps };

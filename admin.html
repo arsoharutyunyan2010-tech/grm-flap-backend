@@ -37,6 +37,7 @@
   <h1>GRM FLAP — Admin</h1>
   <div class="keybox">
     <input id="adminKey" type="password" placeholder="Admin key (x-admin-key)">
+    <input id="restoreKey" type="password" placeholder="Restore key (optional, for full restores)" style="width:230px">
     <button onclick="loadAll()">Load</button>
   </div>
   <div id="err" class="err"></div>
@@ -116,6 +117,13 @@
   var API_BASE = window.location.origin;
 
   function getKey(){ return document.getElementById('adminKey').value.trim(); }
+  function getRestoreKey(){ return document.getElementById('restoreKey').value.trim(); }
+  function restoreHeaders(key){
+    var h = { 'x-admin-key': key, 'Content-Type': 'application/json' };
+    var rk = getRestoreKey();
+    if (rk) h['x-restore-key'] = rk;
+    return h;
+  }
 
   // HTML-escape every untrusted value before it lands in innerHTML, so a
   // stored name / txHash / address / reason / userId can never inject markup.
@@ -438,7 +446,7 @@
     reader.onload = function(){
       fetch(API_BASE + '/internal/backup', {
         method: 'POST',
-        headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+        headers: restoreHeaders(key),
         body: reader.result
       })
         .then(function(r){ return r.json(); })
@@ -500,7 +508,7 @@
     if (!confirm('Restore snapshot ' + id + '?\nCurrent data is backed up first.')) return;
     fetch(API_BASE + '/internal/backups/restore', {
       method: 'POST',
-      headers: { 'x-admin-key': key, 'Content-Type': 'application/json' },
+      headers: restoreHeaders(key),
       body: JSON.stringify({ id: id })
     })
       .then(function(r){ return r.json(); })
