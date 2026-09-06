@@ -59,8 +59,8 @@
     lookup aid; the server always bans by the verified Telegram ID.
   </p>
   <table>
-    <thead><tr><th>Telegram user ID</th><th>Name</th><th>Username</th><th>Last seen</th><th></th></tr></thead>
-    <tbody id="uRows"><tr><td colspan="5">Enter admin key and press Load.</td></tr></tbody>
+    <thead><tr><th>Telegram user ID</th><th>Name</th><th>Username</th><th>Last IP</th><th>Last seen</th><th></th></tr></thead>
+    <tbody id="uRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
   </table>
   <div class="keybox">
     <button onclick="downloadBackup()">Download backup</button>
@@ -161,7 +161,7 @@
     var tbody = document.getElementById('uRows');
     tbody.innerHTML = '';
     if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="5">No players recorded yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6">No players recorded yet.</td></tr>';
       return;
     }
     list.forEach(function(u){
@@ -170,6 +170,7 @@
         '<td class="user-id">' + esc(u.userId) + '</td>' +
         '<td>' + esc(u.name || 'Player') + '</td>' +
         '<td>' + (u.username ? esc('@' + String(u.username).replace(/^@/, '')) : '—') + '</td>' +
+        '<td>' + (u.lastIp ? esc(u.lastIp) : '—') + '</td>' +
         '<td>' + (u.lastSeen ? new Date(u.lastSeen).toLocaleString() : (u.firstSeen ? new Date(u.firstSeen).toLocaleString() : '—')) + '</td>' +
         '<td><button class="pay-btn">Use for ban</button></td>';
       tr.querySelector('button').onclick = function(){
