@@ -1470,6 +1470,9 @@ function requestDeposit(userId, name, amount, txHash, walletAddress) {
   scheduleSave();
   return { ok: true, request };
 }
+function getDeposit(id) {
+  return deposits.find((d) => d && d.id === Number(id)) || null;
+}
 function listDeposits(status) {
   return status ? deposits.filter(d => d.status === status) : deposits.slice();
 }
@@ -1951,6 +1954,7 @@ function attachReferral(userId, name, startParam) {
   }
   if (!referrerId || String(referrerId) === userId) return rec;
 
+  // Guard against referral cycles (A invites B who invites A).
   let walk = String(referrerId);
   for (let i = 0; i < 20 && walk; i++) {
     if (walk === userId) return rec;
@@ -1960,9 +1964,32 @@ function attachReferral(userId, name, startParam) {
 
   rec.referredBy = String(referrerId);
   rec.name = name || rec.name;
-  const parent = ensureReferral(referrerId, 'Player');
-  if (!parent.invited.some((x) => x.id === userId)) {
-    parent.invited.push({ id: userId, name: rec.name, at: Date.now() });
+  // NOTE: an invite is only COUNTED once the invited account actually plays a
+  // verified run (see activateReferral), not the moment it merely opens the
+  // app. Empty alt-accounts used to inflate an upline's daily invite board /
+  // referral rank are therefore no longer counted. The claim itself is stored
+  // so a genuine new player is still credited to the right upline later.
+  scheduleSave();
+  return rec;
+}
+
+/**
+ * Called once per user on their first successfully VERIFIED score. If this
+ * account was referred (rec.referredBy set) and has not been counted yet, add
+ * them to the upline's invite list and today's invite board. Because it only
+ * fires after a real, replayed run, self-referral rings of empty accounts and
+ * invite-leaderboard farming no longer earn the upline anything.
+ */
+function activateReferral(userId, name) {
+  userId = String(userId);
+  const rec = referralByUser.get(userId);
+  if (!rec || !rec.referredBy) return false;
+  if (rec.inviteCounted) return true; // idempotent across re-submits/restarts
+  const referrerId = String(rec.referredBy);
+  const parent = referralByUser.get(referrerId);
+  if (!parent) return false;
+  if (!parent.invited.some((x) => String(x.id) === userId)) {
+    parent.invited.push({ id: userId, name: (name || rec.name || 'Player'), at: Date.now() });
     const day = currentDayKey();
     if (!dailyInvites.has(day)) dailyInvites.set(day, new Map());
     const board = dailyInvites.get(day);
@@ -1971,8 +1998,9 @@ function attachReferral(userId, name, startParam) {
     prev.name = bestKnownName(referrerId, parent.name);
     board.set(String(referrerId), prev);
   }
+  rec.inviteCounted = true;
   scheduleSave();
-  return rec;
+  return true;
 }
 
 function invitedOf(userId) {
@@ -2122,11 +2150,11 @@ module.exports = {
   updateAllTimeBest, getAllTimeBest,
   getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
-  requestDeposit, listDeposits, approveDeposit, rejectDeposit,
+  requestDeposit, getDeposit, listDeposits, approveDeposit, rejectDeposit,
   bestKnownName,
   trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
-  attachReferral, getReferralInfo, getReferralLeaderboardDay,
+  attachReferral, activateReferral, getReferralInfo, getReferralLeaderboardDay,
   dataFile: DATA_FILE,
   ready,
   flush: saveNow,

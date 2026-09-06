@@ -55,6 +55,9 @@ setTimeout(() => {
       store.submitPeriodScores(process.env.T_U2, 'Bob', 99999);
       store.getReferralInfo(process.env.T_U1, 'Ann');
       store.attachReferral(process.env.T_U3, 'Cid', 'ref_' + process.env.T_U1);
+      // Mirror the real flow: an invite only COUNTS once the invited account
+      // turns in a verified run (server calls activateReferral on submit-score).
+      store.activateReferral(process.env.T_U3, 'Cid');
       store.flush();
       await new Promise(r => setTimeout(r, 800));
       console.log('RESULT ' + JSON.stringify({ ok: true }));
