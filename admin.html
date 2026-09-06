@@ -38,6 +38,8 @@
   <div class="keybox">
     <input id="adminKey" type="password" placeholder="Admin key (x-admin-key)">
     <input id="restoreKey" type="password" placeholder="Restore key (optional, for full restores)" style="width:230px">
+    <input id="adminCode" type="text" inputmode="numeric" autocomplete="one-time-code"
+           placeholder="2FA code (if ADMIN_TOTP_SECRET set)" style="width:200px">
     <button onclick="loadAll()">Load</button>
   </div>
   <div id="err" class="err"></div>
@@ -113,13 +115,37 @@
     <tbody id="acRows"><tr><td colspan="5">Enter admin key and press Load.</td></tr></tbody>
   </table>
 
+  <h2>Bot suspects <span class="muted">(high scores played with machine precision — reviewed by hand, never auto-banned)</span></h2>
+  <table>
+    <thead><tr><th>When</th><th>User</th><th>Name</th><th>Score</th><th>Ceiling</th>
+      <th>Removable taps</th><th>Survives ±1 step</th><th>Shared with</th><th>IP</th><th></th></tr></thead>
+    <tbody id="suspRows"><tr><td colspan="10">Enter admin key and press Load.</td></tr></tbody>
+  </table>
+
 <script>
   var API_BASE = window.location.origin;
 
   function getKey(){ return document.getElementById('adminKey').value.trim(); }
   function getRestoreKey(){ return document.getElementById('restoreKey').value.trim(); }
+  function getAdminCode(){
+    var el = document.getElementById('adminCode');
+    return el ? el.value.trim() : '';
+  }
+  // Every /internal call must carry the TOTP code too when the server has
+  // ADMIN_TOTP_SECRET configured, otherwise a leaked key alone would still work.
+  function adminHeaders(key){
+    var h = { 'x-admin-key': key };
+    var code = getAdminCode();
+    if (code) h['x-admin-code'] = code;
+    return h;
+  }
+  function adminJsonHeaders(key){
+    var h = adminHeaders(key);
+    h['Content-Type'] = 'application/json';
+    return h;
+  }
   function restoreHeaders(key){
-    var h = { 'x-admin-key': key, 'Content-Type': 'application/json' };
+    var h = adminJsonHeaders(key);
     var rk = getRestoreKey();
     if (rk) h['x-restore-key'] = rk;
     return h;
@@ -148,10 +174,41 @@
     loadBackups();
     loadBans(key);
     loadAntiCheat(key);
+    loadSuspects(key);
+  }
+
+  function loadSuspects(key){
+    fetch(API_BASE + '/internal/suspects', { headers: adminHeaders(key) })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        var tb = document.getElementById('suspRows');
+        var list = d.suspects || [];
+        if (!list.length) { tb.innerHTML = '<tr><td colspan="10">No flagged runs.</td></tr>'; return; }
+        tb.innerHTML = '';
+        list.forEach(function(ev){
+          var uid = String(ev.userId || '');
+          var pct = function(v){ return (v == null) ? '—' : (Math.round(v * 100) + '%'); };
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + (ev.at ? new Date(ev.at).toLocaleString() : '—') + '</td>' +
+            '<td class="user-id">' + esc(ev.userId) + '</td>' +
+            '<td>' + esc(ev.name) + '</td>' +
+            '<td>' + esc(ev.score) + '</td>' +
+            '<td>' + esc(ev.ceiling == null ? '—' : ev.ceiling) + '</td>' +
+            '<td>' + pct(ev.removableTapRatio) + '</td>' +
+            '<td>' + pct(ev.noiseSurvival) + '</td>' +
+            '<td class="user-id">' + esc(ev.sharedWith || '') + '</td>' +
+            '<td>' + esc(ev.ip || '') + '</td>' +
+            '<td><button class="pay-btn">Ban</button></td>';
+          (function(u){ tr.querySelector('button').onclick = function(){ quickBan(u); }; })(uid);
+          tb.appendChild(tr);
+        });
+      })
+      .catch(function(e){ document.getElementById('err').textContent = 'Suspects error: ' + e.message; });
   }
 
   function loadUsers(key){
-    fetch(API_BASE + '/internal/users', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/users', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){ renderUsers(d.users || []); })
       .catch(function(e){ document.getElementById('err').textContent = 'Users error: ' + e.message; });
@@ -182,7 +239,7 @@
   }
 
   function loadBans(key){
-    fetch(API_BASE + '/internal/bans', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/bans', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){ renderBans(d.bans || [], key); })
       .catch(function(e){ document.getElementById('err').textContent = 'Bans error: ' + e.message; });
@@ -265,7 +322,7 @@
   };
 
   function loadAntiCheat(key){
-    fetch(API_BASE + '/internal/anticheat', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/anticheat', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         var tb = document.getElementById('acRows');
@@ -295,7 +352,7 @@
   }
 
   function loadStats(key){
-    fetch(API_BASE + '/internal/stats', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/stats', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         document.getElementById('statUsers').textContent = d.totalUsers;
@@ -339,7 +396,7 @@
   }
 
   function loadDeposits(key){
-    fetch(API_BASE + '/internal/deposits', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/deposits', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){ renderDeposits(d.deposits || [], key); })
       .catch(function(e){ document.getElementById('err').textContent = 'Deposits error: ' + e.message; });
@@ -386,7 +443,7 @@
   };
 
   function loadWithdrawals(key){
-    fetch(API_BASE + '/internal/withdrawals', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/withdrawals', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){ renderWithdrawals(d.withdrawals || [], key); })
       .catch(function(e){ document.getElementById('err').textContent = 'Withdrawals error: ' + e.message; });
@@ -426,7 +483,7 @@
   window.downloadBackup = function(){
     var key = getKey();
     if (!key) return;
-    fetch(API_BASE + '/internal/backup', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/backup', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.blob(); })
       .then(function(blob){
         var a = document.createElement('a');
@@ -480,7 +537,7 @@
   window.loadBackups = function(){
     var key = getKey();
     if (!key) return;
-    fetch(API_BASE + '/internal/backups', { headers: { 'x-admin-key': key } })
+    fetch(API_BASE + '/internal/backups', { headers: adminHeaders(key) })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         var tb = document.getElementById('bRows');

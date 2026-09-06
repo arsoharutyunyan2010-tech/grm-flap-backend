@@ -2258,7 +2258,7 @@ window.FLAPY_ART = {
   }
   function submitScore(flapLog, reviveLog, totalSteps, clientScore){
     if (DEMO_MODE || !session || !session.sessionId) {
-      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false });
+      return Promise.resolve({ score: clientScore, best: Math.max(clientScore, loadBest()), rank: null, ranks:{}, verified: false, demo: true });
     }
     return apiFetch('/api/submit-score', {
       method: 'POST',
@@ -2560,17 +2560,25 @@ window.FLAPY_ART = {
         best = serverBest;
         saveBest(best);
         finalBestEl.textContent = best;
-      } else {
+      } else if (res.demo) {
+        // No server configured at all — the local best is the only best there is.
         if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
         finalBestEl.textContent = Math.max(best, verifiedScore);
+      } else {
+        // The SERVER REFUSED this run (anti-cheat, rate limit, ban...). Only the
+        // server's number ever reaches the leaderboard, so never promote an
+        // unverified score into the local best — and tell the player why.
+        verifyNote.textContent = res.error
+          ? ('Score not saved by the server: ' + res.error)
+          : 'Score not saved by the server.';
+        verifyNote.classList.remove('hidden');
+        finalBestEl.textContent = best;
       }
       var dayRank = (res.ranks && res.ranks.day) || null;
       finalRankEl.textContent = dayRank ? ('#'+dayRank) : '—';
       if (res.verified) {
         verifyNote.classList.add('hidden');
         refreshStatsAfterRun(res);
-      } else {
-        verifyNote.classList.add('hidden');
       }
     });
   }

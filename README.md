@@ -72,7 +72,18 @@ the server decides what they are worth (`anticheat.js` + `physics.js`).
 - **Human tap-cadence analysis** — bots that flap on the exact minimum
   legal interval (or a perfect metronome) for a high-score run are
   rejected. Repeat offenders get strikes → 12h / 48h temp-ban.
-- **Score hard cap** (400) and flap-log size cap (8000).
+- **Score hard cap** (`SCORE_HARD_CAP`, default 150) and flap-log size cap (8000).
+  400 was far above what a finger can produce here — see `SECURITY_REVIEW.md` §0.
+- **Score progression gate** — the ceiling an account may post grows with its
+  count of *verified* runs (30 → 60 → 150) and never more than `SCORE_JUMP_MAX`
+  above its own best, so a farmed alt-account cannot open with a big score.
+- **Shared-bot detection** — two accounts submitting an identical tap list for
+  the same seed both get a strike. This is the one machine-play signal that
+  cannot fire on two independent humans.
+- **Machine-precision telemetry** — removable-tap ratio and ±1-step noise
+  survival are computed for every high score and listed at
+  `GET /internal/suspects`. Deliberately **advisory only**: measurements showed
+  they cannot separate a bot from an excellent player.
 - **Tap-rate cap** (`MAX_FLAPS_PER_SECOND` in `physics.js`) — flaps faster
   than a human sustainable rate are dropped during replay, client-side and
   server-side identically, so this can't be used to desync the two.
@@ -98,7 +109,16 @@ the server decides what they are worth (`anticheat.js` + `physics.js`).
 
 None of this requires trusting the client for anything except *when it
 tapped* — everything that turns taps into a score happens on the server.
-Run `npm run test:anticheat` to exercise the checks.
+
+> **Be honest about the limit.** `physics.js` is public and the server hands
+> out the seed, so a script can *solve* a run instead of guessing at it.
+> `security/solver-poc.js` is exactly that script, kept in the repo as a
+> measuring stick: it solves a run to 453 points in ~17s, and its tap rhythm
+> defeats every cadence heuristic. What stops it is the score ceiling and the
+> account-progression gate, not the behavioural detectors. Read
+> `SECURITY_REVIEW.md` §0 before tuning any threshold.
+
+Run `npm test` (110 checks: anti-cheat, security, bot attacks, persistence).
 
 ## Moderation and timed game bans
 

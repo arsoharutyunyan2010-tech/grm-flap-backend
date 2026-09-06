@@ -9,7 +9,8 @@
     "test:persistence": "node test/persistence.test.js",
     "test:anticheat": "node test/anticheat.test.js",
     "test:security": "node test/security.test.js",
-    "test": "node test/anticheat.test.js && node test/security.test.js && node test/persistence.test.js",
+    "test:bot": "node test/bot-attacks.test.js",
+    "test": "node test/anticheat.test.js && node test/security.test.js && node test/bot-attacks.test.js && node test/persistence.test.js",
     "check:durable": "node check-durability.js"
   },
   "dependencies": {

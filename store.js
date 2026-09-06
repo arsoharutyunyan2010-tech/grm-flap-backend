@@ -9,6 +9,16 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Numeric env reader that honours an explicit 0. `Number(x) || fallback`
+// silently turns a deliberate 0 ("disable this gate") back into the default,
+// which is exactly the wrong failure mode for a security setting.
+function envNum(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
 const FALLBACK_FILE = path.join(__dirname, 'data', 'store.json');
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(DATA_FILE), 'backups');
@@ -90,6 +100,22 @@ let pvpHouseC = 0;
 const referralByUser = new Map(); // userId -> { code, referredBy, name, invited: [{id,name,at}], earned }
 const referralCodeIndex = new Map(); // code -> userId
 const dailyInvites = new Map(); // YYYY-MM-DD -> Map(userId -> { name, count })
+// Per-account verified-run history. The anti-cheat score gate reads this:
+// a script can reproduce a 453-pipe run on demand, but it cannot reproduce
+// months of gradually improving, human-plausible scores.
+const runStatsByUser = new Map(); // userId -> { verifiedRuns, best, bestAt, firstRunAt, lastRunAt, dayKey, runsToday, highRunsToday }
+// TON addresses that withdrawals were requested to, per account: one address
+// collecting from many accounts is a payout-mule / alt-farm signal.
+const withdrawAddrUsers = new Map(); // lowercase address -> Set(userId)
+// Referral commission paid per referrer per day (capped, anti self-farm).
+const commissionByDay = new Map(); // YYYY-MM-DD -> Map(userId -> number)
+// Two accounts submitting the SAME flapLog for the SAME seed are running the
+// same published bot. Cheap to check and it cannot false-positive on two
+// humans, so unlike the statistical detectors this one is allowed to strike.
+const flapSignatures = new Map(); // sig -> { userId, at, score }
+// Runs the statistical detectors flagged as machine-precision. Review queue
+// for the admin; deliberately NOT an automatic ban.
+const suspects = [];
 
 function currentDayKey(d = new Date()) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD UTC
@@ -164,6 +190,14 @@ function snapshot() {
     referrals: Object.fromEntries(Array.from(referralByUser.entries()).map(([uid, row]) => [uid, row])),
     bans: Object.fromEntries(Array.from(bans.entries()).map(([uid, row]) => [uid, row])),
     antiCheatEvents: antiCheatEvents.slice(-200),
+    runStats: Object.fromEntries(Array.from(runStatsByUser.entries()).map(([uid, row]) => [uid, row])),
+    withdrawAddrUsers: (function () {
+      const out = {};
+      for (const [addr, set] of withdrawAddrUsers) out[addr] = Array.from(set);
+      return out;
+    })(),
+    flapSignatures: Array.from(flapSignatures.entries()).map(([sig, row]) => ({ sig, ...row })),
+    suspects: suspects.slice(-200),
     dailyInvites: (function () {
       const out = {};
       for (const [day, m] of dailyInvites) {
@@ -180,7 +214,8 @@ const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
   'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'users', 'totalRuns',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
-  'bans', 'antiCheatEvents',
+  'bans', 'antiCheatEvents', 'runStats', 'withdrawAddrUsers',
+  'flapSignatures', 'suspects',
 ]);
 
 function hydrate(data) {
@@ -365,6 +400,59 @@ function hydrate(data) {
       });
     }
     dailyInvites.set(day, m);
+  }
+
+  flapSignatures.clear();
+  if (Array.isArray(data.flapSignatures)) {
+    for (const row of data.flapSignatures.slice(-5000)) {
+      if (row && row.sig && row.userId) {
+        flapSignatures.set(String(row.sig), {
+          userId: String(row.userId), at: Number(row.at) || 0, score: Number(row.score) || 0,
+        });
+      }
+    }
+  }
+
+  suspects.length = 0;
+  if (Array.isArray(data.suspects)) {
+    for (const row of data.suspects.slice(-200)) if (row && typeof row === 'object') suspects.push(row);
+  }
+
+  runStatsByUser.clear();
+  const rsIn = data.runStats || {};
+  if (rsIn && typeof rsIn === 'object' && !Array.isArray(rsIn)) {
+    for (const uid of Object.keys(rsIn)) {
+      const row = rsIn[uid];
+      if (!row || typeof row !== 'object') continue;
+      runStatsByUser.set(String(uid), {
+        verifiedRuns: Math.max(0, Number(row.verifiedRuns) || 0),
+        best: Math.max(0, Number(row.best) || 0),
+        bestAt: Number(row.bestAt) || 0,
+        firstRunAt: Number(row.firstRunAt) || 0,
+        lastRunAt: Number(row.lastRunAt) || 0,
+        dayKey: String(row.dayKey || ''),
+        runsToday: Math.max(0, Number(row.runsToday) || 0),
+        highRunsToday: Math.max(0, Number(row.highRunsToday) || 0),
+      });
+    }
+  }
+
+  withdrawAddrUsers.clear();
+  const waIn = data.withdrawAddrUsers || {};
+  if (waIn && typeof waIn === 'object' && !Array.isArray(waIn)) {
+    for (const addr of Object.keys(waIn)) {
+      const list = Array.isArray(waIn[addr]) ? waIn[addr] : [];
+      const set = new Set(list.map(String));
+      if (set.size) withdrawAddrUsers.set(String(addr).toLowerCase(), set);
+    }
+  }
+  // Rebuild the payout-address index from the withdrawal ledger too, so an
+  // older snapshot (written before this field existed) still gets protection.
+  for (const w of withdrawals) {
+    const addr = String((w && w.address) || '').trim().toLowerCase();
+    if (!addr || !w || !w.userId) continue;
+    if (!withdrawAddrUsers.has(addr)) withdrawAddrUsers.set(addr, new Set());
+    withdrawAddrUsers.get(addr).add(String(w.userId));
   }
 }
 
@@ -1411,6 +1499,18 @@ function creditCBalance(userId, amount) {
 }
 
 const MIN_WITHDRAW_FLAP = Math.max(1, Math.floor(Number(process.env.MIN_WITHDRAW_FLAP) || 10));
+// A freshly created alt-account that never played must not be able to cash out
+// farmed rewards; and one TON address collecting from a pile of accounts is a
+// payout-mule pattern the admin has to see before paying.
+const WITHDRAW_MIN_ACCOUNT_AGE_MS = Math.max(0, envNum('WITHDRAW_MIN_ACCOUNT_AGE_MS', 60 * 60 * 1000));
+const WITHDRAW_MIN_VERIFIED_RUNS = Math.max(0, envNum('WITHDRAW_MIN_VERIFIED_RUNS', 3));
+const WITHDRAW_FLAG_SHARED_AT = Math.max(2, envNum('WITHDRAW_FLAG_SHARED_AT', 2));
+const WITHDRAW_MAX_ACCOUNTS_PER_ADDRESS = Math.max(2, envNum('WITHDRAW_MAX_ACCOUNTS_PER_ADDRESS', 5));
+
+function payoutAddressUsers(address) {
+  const key = String(address || '').trim().toLowerCase();
+  return key ? (withdrawAddrUsers.get(key) || new Set()) : new Set();
+}
 
 function requestWithdrawal(userId, name, address, amount) {
   userId = String(userId);
@@ -1420,6 +1520,29 @@ function requestWithdrawal(userId, name, address, amount) {
     return { ok: false, error: 'minimum withdrawal is ' + MIN_WITHDRAW_FLAP + ' FLAP' };
   }
   if (amount > bal) return { ok: false, error: 'insufficient balance' };
+
+  const profile = accountProfile(userId);
+  if (profile.verifiedRuns < WITHDRAW_MIN_VERIFIED_RUNS) {
+    return { ok: false, error: 'play at least ' + WITHDRAW_MIN_VERIFIED_RUNS + ' verified rounds before withdrawing' };
+  }
+  if (WITHDRAW_MIN_ACCOUNT_AGE_MS && profile.firstRunAt &&
+      (Date.now() - profile.firstRunAt) < WITHDRAW_MIN_ACCOUNT_AGE_MS) {
+    const hours = Math.max(1, Math.round(WITHDRAW_MIN_ACCOUNT_AGE_MS / 3600000));
+    return { ok: false, error: 'account must be at least ' + hours + 'h old to withdraw' };
+  }
+
+  const addrKey = String(address || '').trim().toLowerCase();
+  const sharers = payoutAddressUsers(addrKey);
+  const otherAccounts = Array.from(sharers).filter((u) => u !== userId);
+  if (otherAccounts.length >= WITHDRAW_MAX_ACCOUNTS_PER_ADDRESS) {
+    antiCheatEvents.push({
+      userId, reason: 'payout address reused by many accounts', at: Date.now(),
+      details: { address: addrKey, accounts: otherAccounts.length + 1, amount },
+    });
+    if (antiCheatEvents.length > 400) antiCheatEvents.splice(0, antiCheatEvents.length - 400);
+    return { ok: false, error: 'this payout address is already linked to too many accounts' };
+  }
+
   balances.set(userId, bal - amount);
   const request = {
     id: withdrawalSeq++,
@@ -1427,7 +1550,15 @@ function requestWithdrawal(userId, name, address, amount) {
     status: 'pending',
     requestedAt: Date.now(),
   };
+  if (otherAccounts.length >= WITHDRAW_FLAG_SHARED_AT - 1) {
+    request.sharedPayoutAccounts = otherAccounts.length + 1;
+    request.needsReview = true;
+  }
   withdrawals.push(request);
+  if (addrKey) {
+    if (!withdrawAddrUsers.has(addrKey)) withdrawAddrUsers.set(addrKey, new Set());
+    withdrawAddrUsers.get(addrKey).add(userId);
+  }
   scheduleSave();
   return { ok: true, request, balance: bal - amount };
 }
@@ -1451,8 +1582,15 @@ function requestDeposit(userId, name, amount, txHash, walletAddress) {
   if (amount > 1e9) return { ok: false, error: 'invalid amount' };
   const hash = String(txHash || '').trim().toLowerCase();
   if (hash.length < 8 || hash.length > 128) return { ok: false, error: 'invalid transaction hash' };
-  const dup = deposits.find((d) => d && String(d.txHash || '').toLowerCase() === hash && d.status !== 'rejected');
-  if (dup) return { ok: false, error: 'transaction already submitted' };
+  // A transaction hash is a one-time fact about the chain. Counting only
+  // non-rejected rows used to let a refused hash be resubmitted forever, so an
+  // admin who rejected a fake deposit would see it come back on every attempt.
+  const dup = deposits.find((d) => d && String(d.txHash || '').toLowerCase() === hash);
+  if (dup) {
+    return { ok: false, error: dup.status === 'rejected'
+      ? 'transaction was already reviewed and rejected'
+      : 'transaction already submitted' };
+  }
   const request = {
     id: depositSeq++,
     userId,
@@ -1551,6 +1689,106 @@ function getActivePlayers(windowMs = 5 * 60 * 1000) {
 function recordRun() {
   totalRuns++;
   scheduleSave();
+}
+
+// --- per-account verified-run history ------------------------------------
+// Read by anticheat.scoreCeilingFor(). Only SUCCESSFULLY verified runs are
+// counted, so a rejected (bot) submission never helps an account "level up"
+// into being allowed to post a higher score.
+const HIGH_SCORE_RUN = Math.max(1, envNum('HIGH_SCORE_RUN', 40));
+
+function emptyRunStats(now, dayKey) {
+  return {
+    verifiedRuns: 0, best: 0, bestAt: 0,
+    firstRunAt: now, lastRunAt: 0,
+    dayKey, runsToday: 0, highRunsToday: 0,
+  };
+}
+
+function getRunStatsFor(userId) {
+  const uid = String(userId);
+  const day = currentDayKey();
+  let row = runStatsByUser.get(uid);
+  if (!row) {
+    row = emptyRunStats(Date.now(), day);
+    runStatsByUser.set(uid, row);
+  }
+  if (row.dayKey !== day) {
+    row.dayKey = day;
+    row.runsToday = 0;
+    row.highRunsToday = 0;
+  }
+  return row;
+}
+
+/** Snapshot of the account's run history, for the anti-cheat score gate. */
+function accountProfile(userId) {
+  const row = getRunStatsFor(String(userId));
+  const dir = userDirectory.get(String(userId));
+  return {
+    verifiedRuns: row.verifiedRuns,
+    best: row.best,
+    bestAt: row.bestAt,
+    firstRunAt: row.firstRunAt || (dir && dir.firstSeen) || 0,
+    lastRunAt: row.lastRunAt,
+    runsToday: row.runsToday,
+    highRunsToday: row.highRunsToday,
+    accountAgeMs: row.firstRunAt ? (Date.now() - row.firstRunAt) : 0,
+  };
+}
+
+// --- shared-bot detection -------------------------------------------------
+const FLAP_SIG_KEEP = Math.max(200, envNum('FLAP_SIG_KEEP', 5000));
+
+function flapSignature(seed, flapLog) {
+  const h = crypto.createHash('sha256');
+  h.update(String(seed) + '|');
+  for (let i = 0; i < flapLog.length; i++) h.update((i ? ',' : '') + (flapLog[i] | 0));
+  return h.digest('hex').slice(0, 32);
+}
+
+/**
+ * Records this submission's tap fingerprint and reports whether a DIFFERENT
+ * account has already submitted the identical run. Identical taps for an
+ * identical seed across accounts = the same bot binary.
+ */
+function checkFlapSignature(userId, seed, flapLog, score) {
+  if (!Array.isArray(flapLog) || flapLog.length < 20 || !(score > 0)) return { duplicate: false };
+  const sig = flapSignature(seed, flapLog);
+  const prev = flapSignatures.get(sig);
+  const other = prev && String(prev.userId) !== String(userId) ? prev : null;
+  flapSignatures.set(sig, { userId: String(userId), at: Date.now(), score: Math.floor(score) });
+  if (flapSignatures.size > FLAP_SIG_KEEP) {
+    const oldest = flapSignatures.keys().next().value;
+    if (oldest) flapSignatures.delete(oldest);
+  }
+  if (other) scheduleSave();
+  return { duplicate: !!other, otherUserId: other ? other.userId : null, sig };
+}
+
+/** Queue a run for human review without banning it. */
+function addSuspect(entry) {
+  suspects.push(Object.assign({ at: Date.now() }, entry));
+  if (suspects.length > 200) suspects.splice(0, suspects.length - 200);
+  scheduleSave();
+}
+
+function listSuspects(limit) {
+  return suspects.slice(-(limit || 50)).reverse();
+}
+
+function recordVerifiedRun(userId, score) {
+  const row = getRunStatsFor(String(userId));
+  const now = Date.now();
+  score = Math.max(0, Math.floor(Number(score) || 0));
+  if (!row.firstRunAt) row.firstRunAt = now;
+  row.verifiedRuns += 1;
+  row.runsToday += 1;
+  row.lastRunAt = now;
+  if (score > row.best) { row.best = score; row.bestAt = now; }
+  if (score >= HIGH_SCORE_RUN) row.highRunsToday += 1;
+  scheduleSave();
+  return row;
 }
 function getRunStats() {
   return { totalRuns };
@@ -2075,9 +2313,40 @@ function getReferralLeaderboardDay(limit) {
   return entries;
 }
 
+// Anti self-farm on the referral bonus: a ring of alt-accounts that top each
+// other up used to mint commission forever. Two brakes: the depositor has to
+// be a real, aged account, and each referrer's daily commission is capped.
+const REFERRAL_COMMISSION_MIN_DEPOSITOR_AGE_MS =
+  Math.max(0, envNum('REFERRAL_COMMISSION_MIN_DEPOSITOR_AGE_MS', 60 * 60 * 1000));
+const REFERRAL_COMMISSION_DAILY_CAP_C =
+  Math.max(0, envNum('REFERRAL_COMMISSION_DAILY_CAP_C', 5000));
+
+function commissionPaidToday(userId) {
+  const day = currentDayKey();
+  const board = commissionByDay.get(day);
+  return board ? (board.get(String(userId)) || 0) : 0;
+}
+
+function addCommissionToday(userId, amount) {
+  const day = currentDayKey();
+  if (!commissionByDay.has(day)) commissionByDay.set(day, new Map());
+  const board = commissionByDay.get(day);
+  board.set(String(userId), (board.get(String(userId)) || 0) + amount);
+  // keep at most 8 days of commission history in memory
+  if (commissionByDay.size > 8) {
+    const oldest = Array.from(commissionByDay.keys()).sort()[0];
+    if (oldest && oldest !== day) commissionByDay.delete(oldest);
+  }
+}
+
 function creditReferralCommissions(userId, amount) {
   amount = Number(amount) || 0;
   if (!(amount > 0)) return [];
+  const depositor = accountProfile(userId);
+  if (REFERRAL_COMMISSION_MIN_DEPOSITOR_AGE_MS && depositor.firstRunAt &&
+      (Date.now() - depositor.firstRunAt) < REFERRAL_COMMISSION_MIN_DEPOSITOR_AGE_MS) {
+    return [];
+  }
   // Level 1 / 2 / 3 of the depositor's upline: 7% / 3% / 1% in C.
   const rates = [0.07, 0.03, 0.01];
   const paid = [];
@@ -2086,9 +2355,15 @@ function creditReferralCommissions(userId, amount) {
     const rec = referralByUser.get(uid);
     const parentId = rec && rec.referredBy ? String(rec.referredBy) : '';
     if (!parentId) break;
-    const pay = Math.floor(amount * rates[i]);
+    let pay = Math.floor(amount * rates[i]);
+    if (REFERRAL_COMMISSION_DAILY_CAP_C > 0) {
+      const room = REFERRAL_COMMISSION_DAILY_CAP_C - commissionPaidToday(parentId);
+      if (room <= 0) { uid = parentId; continue; }
+      pay = Math.min(pay, room);
+    }
     if (pay > 0) {
       creditCBalance(parentId, pay);
+      addCommissionToday(parentId, pay);
       const parent = ensureReferral(parentId, 'Player');
       parent.earned = (parent.earned || 0) + pay;
       paid.push({ userId: parentId, level: i + 1, amount: pay });
@@ -2153,6 +2428,9 @@ module.exports = {
   requestDeposit, getDeposit, listDeposits, approveDeposit, rejectDeposit,
   bestKnownName,
   trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
+  accountProfile, recordVerifiedRun, getRunStatsFor, payoutAddressUsers,
+  checkFlapSignature, flapSignature, addSuspect, listSuspects,
+  commissionPaidToday, WITHDRAW_MIN_VERIFIED_RUNS, WITHDRAW_MIN_ACCOUNT_AGE_MS,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
   attachReferral, activateReferral, getReferralInfo, getReferralLeaderboardDay,
   dataFile: DATA_FILE,

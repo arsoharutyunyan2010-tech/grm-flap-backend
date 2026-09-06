@@ -360,10 +360,45 @@ function replaySession(sessionId, flapLog, totalSteps, reviveLog, opts) {
     revivesUsed: replay.revivesUsed,
     grantedRevives: granted,
     reviveAllowanceMs,
+    // The seed lets the server test whether every tap was load-bearing (a
+    // solved run has no removable taps); the account history is what makes a
+    // near-cap score on a brand-new account rejectable.
+    seed: session.seed,
+    account: opts.account || null,
   });
   if (!judged.ok) {
     store.addStrike(session.userId, judged.hard[0] || 'anticheat', { hard: judged.hard, score: replay.score });
     return { ok: false, status: 400, error: 'submission rejected: ' + (judged.hard[0] || 'anticheat') };
+  }
+
+  // Two accounts, same seed, byte-identical tap list = the same bot. This is
+  // the one machine-play signal that cannot fire on two independent humans,
+  // so it is the only one allowed to strike on its own.
+  const dup = store.checkFlapSignature(session.userId, session.seed, flaps, replay.score);
+  if (dup.duplicate) {
+    store.addStrike(session.userId, 'identical run to another account (shared bot)', {
+      score: replay.score, otherUserId: dup.otherUserId,
+    });
+    store.addStrike(String(dup.otherUserId), 'identical run to another account (shared bot)', {
+      score: replay.score, otherUserId: String(session.userId),
+    });
+  }
+
+  // High scores that the statistical detectors think were played with machine
+  // precision go to a human review queue instead of an automatic ban.
+  if (replay.score >= AC.SOLVER_MIN_SCORE &&
+      ((judged.redundancy && judged.redundancy.ok === false) ||
+       (judged.rigidity && judged.rigidity.ok === false))) {
+    store.addSuspect({
+      userId: String(session.userId),
+      name: session.name || '',
+      score: replay.score,
+      ceiling: judged.ceiling,
+      removableTapRatio: judged.redundancy && judged.redundancy.ratio,
+      noiseSurvival: judged.rigidity && judged.rigidity.kept,
+      sharedWith: dup.duplicate ? String(dup.otherUserId) : null,
+      ip: opts.ip || '',
+    });
   }
   return { ok: true, session, replay, judged, flapLog: flaps };
 }
@@ -383,6 +418,8 @@ app.post('/api/submit-score', (req, res) => {
     allowRevives: true,
     userId: String(user.id),
     token,
+    account: store.accountProfile(String(user.id)),
+    ip: AC.clientIp(req),
   });
   if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
 
@@ -390,6 +427,9 @@ app.post('/api/submit-score', (req, res) => {
   const replay = verified.replay;
 
   const verifiedScore = replay.score;
+  // Counted ONLY for verified runs: a rejected bot submission can never help
+  // the account qualify for a higher score ceiling later.
+  store.recordVerifiedRun(session.userId, verifiedScore);
   const name = session.name || displayName(user);
   store.submitPeriodScores(session.userId, name, verifiedScore);
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
@@ -628,6 +668,10 @@ function adminIpAllowed(ip) {
 // longer wipe/replace the whole store.
 const RESTORE_KEY = process.env.RESTORE_KEY || '';
 
+// Optional TOTP second factor for the whole admin area (base32 secret, the
+// same one an authenticator app enrols). Empty = key-only, as before.
+const ADMIN_TOTP_SECRET = (process.env.ADMIN_TOTP_SECRET || '').trim();
+
 function requireAdmin(req, res) {
   const expected = process.env.ADMIN_KEY;
   // Unset / short keys used to compare `undefined !== undefined` → OPEN admin.
@@ -642,32 +686,37 @@ function requireAdmin(req, res) {
     res.status(403).json({ error: 'forbidden' });
     return false;
   }
-  // Brute-force lockout: at most 8 admin-key attempts per IP per 10 minutes.
-  // A correct key resets nothing (legit use needs far fewer), a wrong one is
-  // counted and the caller gets a 429 once the bucket is full.
+  // Brute-force lockout: at most 8 admin auth failures per IP per 10 minutes,
+  // shared by the key check and the second-factor check. A correct login
+  // consumes nothing (legit use needs far fewer than 8).
   const adminIp = 'adminauth:' + clientIp;
-  if (req.headers['x-admin-key']) {
-    if (!AC.safeEqual(req.headers['x-admin-key'], expected)) {
-      if (!store.allowRequest(adminIp, 8, 10 * 60 * 1000)) {
-        console.warn('admin key brute-force throttled from', clientIp);
-        auditAdmin(req, false);
-        res.status(429).json({ error: 'too many admin attempts, try again later' });
-        return false;
-      }
-      auditAdmin(req, false);
-      res.status(403).json({ error: 'forbidden' });
-      return false;
-    }
-  } else {
+  function deny(status, message) {
     if (!store.allowRequest(adminIp, 8, 10 * 60 * 1000)) {
+      console.warn('admin auth brute-force throttled from', clientIp);
       auditAdmin(req, false);
       res.status(429).json({ error: 'too many admin attempts, try again later' });
       return false;
     }
     auditAdmin(req, false);
-    res.status(403).json({ error: 'forbidden' });
+    res.status(status).json({ error: message });
     return false;
   }
+
+  if (!req.headers['x-admin-key'] || !AC.safeEqual(req.headers['x-admin-key'], expected)) {
+    return deny(403, 'forbidden');
+  }
+
+  // Optional second factor: when ADMIN_TOTP_SECRET is set, the header key
+  // alone is no longer enough — a 6-digit authenticator code must match too.
+  // This is what makes a leaked/stolen ADMIN_KEY useless on its own.
+  if (ADMIN_TOTP_SECRET) {
+    const code = String(req.headers['x-admin-code'] ||
+      (req.body && typeof req.body === 'object' && req.body.adminCode) || '').trim();
+    if (!AC.totpValid(ADMIN_TOTP_SECRET, code, 1)) {
+      return deny(403, 'invalid or missing admin code');
+    }
+  }
+
   auditAdmin(req, true);
   return true;
 }
@@ -814,7 +863,11 @@ app.post('/internal/backups/restore', async (req, res) => {
 app.get('/internal/health', (req, res) => {
   const info = store.persistInfo();
   const ok = !info.degraded && info.durable;
-  if (req.headers['x-admin-key'] && AC.safeEqual(req.headers['x-admin-key'], process.env.ADMIN_KEY)) {
+  const keyOk = req.headers['x-admin-key'] && process.env.ADMIN_KEY &&
+    AC.safeEqual(req.headers['x-admin-key'], process.env.ADMIN_KEY);
+  const codeOk = !ADMIN_TOTP_SECRET ||
+    AC.totpValid(ADMIN_TOTP_SECRET, String(req.headers['x-admin-code'] || ''), 1);
+  if (keyOk && codeOk) {
     return res.status(info.degraded ? 503 : 200).json({ ok, persist: info });
   }
   res.status(info.degraded ? 503 : 200).json({ ok: ok ? true : false });
@@ -828,6 +881,14 @@ app.get('/internal/health', (req, res) => {
 app.get('/internal/anticheat', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ events: store.listAntiCheatEvents(80) });
+});
+
+// Runs the detectors think were machine-played but that were NOT auto-banned
+// (the statistics cannot separate a bot from an excellent player). Review the
+// list, then use Ban player on the ones you are sure about.
+app.get('/internal/suspects', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ suspects: store.listSuspects(Number(req.query.limit) || 100) });
 });
 
 // Manual moderation: ban a confirmed cheater / lift a ban / inspect bans.
@@ -895,6 +956,7 @@ app.post('/api/pvp/join', (req, res) => {
 app.post('/api/pvp/cancel', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   res.json(store.pvpCancel(String(user.id)));
 });
 app.post('/api/pvp/status', (req, res) => {
@@ -904,7 +966,10 @@ app.post('/api/pvp/status', (req, res) => {
   res.json(store.pvpStatus(String(user.id)));
 });
 app.post('/api/pvp/submit', (req, res) => {
-  const user = authenticate(req.body && req.body.initData);
+  // PvP settles a real C stake, so it gets the same tight initData window as
+  // the other money routes: a 12h-old leaked token must not be able to play a
+  // staked round for its owner.
+  const user = authenticateFresh(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
   const userId = String(user.id);
@@ -928,8 +993,11 @@ app.post('/api/pvp/submit', (req, res) => {
     allowRevives: false,
     userId,
     token,
+    account: store.accountProfile(userId),
+    ip: AC.clientIp(req),
   });
   if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
+  store.recordVerifiedRun(userId, verified.replay.score);
   store.activateReferral(userId, verified.session && verified.session.name);
   const result = store.pvpSubmitScore(userId, verified.replay.score, {
     sessionStartedAt: verified.session.startedAt,
@@ -940,11 +1008,13 @@ app.post('/api/pvp/submit', (req, res) => {
 app.post('/api/pvp/decline', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   res.json(store.pvpDecline(String(user.id)));
 });
 app.post('/api/pvp/forfeit', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   res.json(store.pvpForfeit(String(user.id)));
 });
 app.post('/api/pvp/heartbeat', (req, res) => {
@@ -964,6 +1034,7 @@ app.post('/api/pvp/ready', (req, res) => {
 app.post('/api/pvp/ack', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
   res.json(store.pvpAck(String(user.id)));
 });
 
