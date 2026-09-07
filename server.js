@@ -28,6 +28,10 @@ const { verifyDepositClaim } = require('./verifyDeposit.js');
 const DEPOSIT_ONCHAIN_ENABLED = process.env.DEPOSIT_ONCHAIN_ENABLED === 'true';
 const TON_RPC_URL = (process.env.TON_RPC_URL || '').trim();
 const TON_API_KEY = (process.env.TON_API_KEY || '').trim();
+// Dust guard for on-chain verified deposits: even a "real" inbound transfer is
+// refused if it carried less than this many nanoTON (default 0.01 TON). Stops
+// the "pay 0.001 TON, claim 10 000 C" trick where the hash IS genuine. 0 = off.
+const MIN_DEPOSIT_NANO_TON = Math.max(0, Math.floor(Number(process.env.MIN_DEPOSIT_NANO_TON) || 10000000));
 
 // TON Connect: when a player tops up by paying from a connected wallet
 // (Tonkeeper / Telegram Wallet / MyTonWallet...), the client sends the signed
@@ -197,11 +201,12 @@ function displayName(user) {
   return AC.sanitizeName(raw);
 }
 
-function trackTelegramUser(user) {
+function trackTelegramUser(user, ip) {
   if (!user || !user.id) return;
   store.trackUser(String(user.id), {
     name: displayName(user),
     username: user.username || '',
+    ip: ip || '',
   });
 }
 
@@ -253,7 +258,10 @@ app.post('/api/access', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
-  trackTelegramUser(user);
+  if (!store.allowRequest('access:' + user.id, 30, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  trackTelegramUser(user, AC.clientIp(req));
   res.json({ ok: true, userId: String(user.id), name: displayName(user) });
 });
 
@@ -275,7 +283,7 @@ app.post('/api/start-session', (req, res) => {
   }
 
   const name = displayName(user);
-  trackTelegramUser(user);
+  trackTelegramUser(user, ip);
   store.attachReferral(String(user.id), name, startParamFrom(req));
 
   const sessionId = crypto.randomBytes(16).toString('hex');
@@ -390,9 +398,31 @@ app.post('/api/submit-score', (req, res) => {
   const replay = verified.replay;
 
   const verifiedScore = replay.score;
+
+  // Fresh-account gate: a brand-new Telegram account cannot post an elite
+  // score on its first runs. Not a strike — a legit strong player simply
+  // plays a few more (capped) runs first; a throwaway solver-bot account
+  // never gets its big score onto the paid leaderboard.
+  const gate = store.newAccountGate(session.userId, verifiedScore);
+  if (!gate.ok) {
+    store.logEvent(session.userId, 'new-account score above cap', {
+      score: verifiedScore, cap: gate.cap, verifiedRuns: gate.runs, need: gate.need,
+    });
+    return res.status(400).json({
+      error: 'score not counted: account is too new for a score this high, play a few more runs',
+      code: 'NEW_ACCOUNT_CAP',
+    });
+  }
+
   const name = session.name || displayName(user);
+  // Behavioural anomalies (score jump vs. own history, bot-like consistency)
+  // are recorded for the admin BEFORE the run enters the history.
+  const anomalies = store.checkScoreAnomaly(session.userId, verifiedScore);
+  for (const a of anomalies) store.logEvent(session.userId, a.reason, a);
+
   store.submitPeriodScores(session.userId, name, verifiedScore);
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
+  store.recordVerifiedRun(session.userId, verifiedScore);
   // A verified run proves a real player — count any pending referral now (once).
   // Anti-self-referral: opening a referral link alone no longer counts an invite.
   store.activateReferral(session.userId, name);
@@ -419,6 +449,9 @@ app.post('/api/session-heartbeat', (req, res) => {
   const user = authenticate(body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('hb:' + user.id, 90, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many heartbeats, slow down' });
+  }
 
   const sessionId = String(body.sessionId || '');
   const session = store.getSession(sessionId);
@@ -483,11 +516,14 @@ app.post('/api/profile', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('profile:' + user.id, 30, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
 
   const userId = String(user.id);
   const ranks = ranksFor(userId);
 
-  trackTelegramUser(user);
+  trackTelegramUser(user, AC.clientIp(req));
   store.attachReferral(userId, displayName(user), req.body.startParam || req.body.ref || '');
   const refInfo = store.getReferralInfo(userId, displayName(user));
   const appLink = (process.env.TELEGRAM_APP_LINK || process.env.MINI_APP_SHARE || 'https://t.me/FlapyGameBot/directlink').trim().replace(/\/$/, '');
@@ -729,6 +765,20 @@ app.post('/internal/deposits/:id/approve', async (req, res) => {
       store.addStrike(deposit.userId, 'unverifiable deposit', { txHash: deposit.txHash, reason: vres.reason || String(vres.http || '') });
       return res.status(403).json({ ok: false, error: 'deposit not verified on-chain: ' + (vres.reason || 'lookup failed') });
     }
+    // The transfer is genuine — but did it actually carry money? Without this
+    // check a real (verifiable) dust transfer of 0.0001 TON could back a
+    // claimed top-up of any size, relying on the admin never eyeballing the
+    // on-chain value column.
+    if (MIN_DEPOSIT_NANO_TON > 0 && Number(vres.valueNanoTon || 0) < MIN_DEPOSIT_NANO_TON) {
+      console.warn('[deposit] on-chain value below minimum refused approve #' + id + ':', vres.valueNanoTon, '<', MIN_DEPOSIT_NANO_TON);
+      store.logEvent(deposit.userId, 'deposit below on-chain minimum', {
+        txHash: deposit.txHash, valueNanoTon: vres.valueNanoTon, minimum: MIN_DEPOSIT_NANO_TON,
+      });
+      return res.status(403).json({
+        ok: false,
+        error: 'on-chain transfer is real but below the minimum value (' + vres.valueNanoTon + ' < ' + MIN_DEPOSIT_NANO_TON + ' nanoTON)',
+      });
+    }
     res.setHeader('X-Deposit-Onchain', 'verified:' + (vres.valueNanoTon || 0));
   }
   const result = store.approveDeposit(id);
@@ -810,11 +860,16 @@ app.post('/internal/backups/restore', async (req, res) => {
 
 // Lightweight health probe. Public (uptime monitors hit it) but must NOT
 // leak paths / instance ids / player counts; the full persist report is
-// only returned when a valid admin key is supplied.
+// only returned when a valid admin key is supplied. The key check mirrors
+// requireAdmin: an UNSET admin key must never match anything (comparing
+// against String(undefined) let a literal "undefined" header through).
 app.get('/internal/health', (req, res) => {
   const info = store.persistInfo();
   const ok = !info.degraded && info.durable;
-  if (req.headers['x-admin-key'] && AC.safeEqual(req.headers['x-admin-key'], process.env.ADMIN_KEY)) {
+  const expected = process.env.ADMIN_KEY;
+  const keyOk = !!expected && String(expected).length >= 16 &&
+    !!req.headers['x-admin-key'] && AC.safeEqual(req.headers['x-admin-key'], expected);
+  if (keyOk) {
     return res.status(info.degraded ? 503 : 200).json({ ok, persist: info });
   }
   res.status(info.degraded ? 503 : 200).json({ ok: ok ? true : false });
@@ -884,23 +939,29 @@ app.post('/api/pvp/join', (req, res) => {
   const user = authenticateFresh(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
-  trackTelegramUser(user);
+  trackTelegramUser(user, AC.clientIp(req));
   if (!store.allowRequest('pvpjoin:' + user.id, 20, 60 * 1000)) {
     return res.status(429).json({ error: 'too many PvP requests, slow down' });
   }
-  const result = store.pvpJoin(String(user.id), displayName(user), Number(req.body.stake));
+  const result = store.pvpJoin(String(user.id), displayName(user), Number(req.body.stake), AC.clientIp(req));
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
 });
 app.post('/api/pvp/cancel', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (!store.allowRequest('pvpcancel:' + user.id, 20, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   res.json(store.pvpCancel(String(user.id)));
 });
 app.post('/api/pvp/status', (req, res) => {
   const user = authenticate(req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('pvpstatus:' + user.id, 60, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   res.json(store.pvpStatus(String(user.id)));
 });
 app.post('/api/pvp/submit', (req, res) => {
@@ -930,6 +991,21 @@ app.post('/api/pvp/submit', (req, res) => {
     token,
   });
   if (!verified.ok) return res.status(verified.status).json({ error: verified.error });
+  // Same fresh-account gate as the classic leaderboard: a new account must
+  // not bot its way to a stake-winning elite score either. The session is
+  // already consumed, but the turn stays open — the player can simply play
+  // another run (the gate lifts after a few verified games).
+  const pvpGate = store.newAccountGate(userId, verified.replay.score);
+  if (!pvpGate.ok) {
+    store.logEvent(userId, 'new-account score above cap (pvp)', {
+      score: verified.replay.score, cap: pvpGate.cap, verifiedRuns: pvpGate.runs, need: pvpGate.need,
+    });
+    return res.status(400).json({
+      error: 'score not counted: account is too new for a score this high, play a few more runs',
+      code: 'NEW_ACCOUNT_CAP',
+    });
+  }
+  store.recordVerifiedRun(userId, verified.replay.score);
   store.activateReferral(userId, verified.session && verified.session.name);
   const result = store.pvpSubmitScore(userId, verified.replay.score, {
     sessionStartedAt: verified.session.startedAt,
@@ -940,23 +1016,35 @@ app.post('/api/pvp/submit', (req, res) => {
 app.post('/api/pvp/decline', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (!store.allowRequest('pvpdecl:' + user.id, 20, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   res.json(store.pvpDecline(String(user.id)));
 });
 app.post('/api/pvp/forfeit', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (!store.allowRequest('pvpff:' + user.id, 20, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   res.json(store.pvpForfeit(String(user.id)));
 });
 app.post('/api/pvp/heartbeat', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('pvphb:' + user.id, 60, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   res.json(store.pvpHeartbeat(String(user.id)));
 });
 app.post('/api/pvp/ready', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
   if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('pvprdy:' + user.id, 30, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   const result = store.pvpReady(String(user.id));
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
@@ -964,6 +1052,9 @@ app.post('/api/pvp/ready', (req, res) => {
 app.post('/api/pvp/ack', (req, res) => {
   const user = authenticate(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (!store.allowRequest('pvpack:' + user.id, 30, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many PvP requests, slow down' });
+  }
   res.json(store.pvpAck(String(user.id)));
 });
 

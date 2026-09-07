@@ -28,6 +28,19 @@ const BACKUP_PREFIX = REDIS_KEY + ':bak:';
 const BACKUP_INDEX_KEY = REDIS_KEY + ':bakindex';
 const useRedis = !!(UPSTASH_URL && UPSTASH_TOKEN);
 
+// --- anti-fraud tuning -----------------------------------------------------
+// An integer env parser where 0 is a LEGITIMATE "disabled" value (unlike the
+// `|| default` idiom, which silently turns 0 into the default).
+function intEnv(name, def) {
+  const n = Number(process.env[name]);
+  return (Number.isFinite(n) && n >= 0) ? Math.floor(n) : def;
+}
+// A brand-new account cannot post a huge score until it has played this many
+// verified runs. Stops a fresh/throwaway Telegram account running a solver
+// bot straight to the top of the weekly (paid!) leaderboard on run #1.
+const NEW_ACCOUNT_RUNS = intEnv('NEW_ACCOUNT_RUNS', 5);
+const NEW_ACCOUNT_SCORE_CAP = intEnv('NEW_ACCOUNT_SCORE_CAP', 120);
+
 // --- data-safety configuration -------------------------------------------
 // How often an automatic snapshot backup is taken (default: 1 hour).
 const BACKUP_EVERY_MS = Math.max(60 * 1000, Number(process.env.BACKUP_EVERY_MS) || 60 * 60 * 1000);
@@ -90,6 +103,10 @@ let pvpHouseC = 0;
 const referralByUser = new Map(); // userId -> { code, referredBy, name, invited: [{id,name,at}], earned }
 const referralCodeIndex = new Map(); // code -> userId
 const dailyInvites = new Map(); // YYYY-MM-DD -> Map(userId -> { name, count })
+// Per-user history of the last VERIFIED (server-replayed) scores. Feeds the
+// new-account gate + score-anomaly detection. Never contains client-claimed
+// values, only scores the replay accepted.
+const runHistory = new Map(); // userId -> [{ score, at }] (max 20)
 
 function currentDayKey(d = new Date()) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD UTC
@@ -162,6 +179,11 @@ function snapshot() {
       return out;
     })(),
     referrals: Object.fromEntries(Array.from(referralByUser.entries()).map(([uid, row]) => [uid, row])),
+    runHistory: (function () {
+      const out = {};
+      for (const [uid, arr] of runHistory) out[String(uid)] = arr;
+      return out;
+    })(),
     bans: Object.fromEntries(Array.from(bans.entries()).map(([uid, row]) => [uid, row])),
     antiCheatEvents: antiCheatEvents.slice(-200),
     dailyInvites: (function () {
@@ -180,7 +202,7 @@ const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
   'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'users', 'totalRuns',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
-  'bans', 'antiCheatEvents',
+  'bans', 'antiCheatEvents', 'runHistory',
 ]);
 
 function hydrate(data) {
@@ -345,6 +367,18 @@ function hydrate(data) {
       windowStart: Number(row.windowStart) || 0,
     });
   }
+
+  runHistory.clear();
+  const rhIn = data.runHistory || {};
+  for (const uid of Object.keys(rhIn)) {
+    const arr = Array.isArray(rhIn[uid]) ? rhIn[uid] : [];
+    const clean = arr
+      .filter((x) => x && Number.isFinite(Number(x.score)))
+      .map((x) => ({ score: Math.max(0, Math.floor(Number(x.score))), at: Number(x.at) || 0 }))
+      .slice(-20);
+    if (clean.length) runHistory.set(String(uid), clean);
+  }
+
   antiCheatEvents.length = 0;
   if (Array.isArray(data.antiCheatEvents)) {
     for (const ev of data.antiCheatEvents.slice(-200)) {
@@ -579,6 +613,17 @@ function mergeSnapshots(base, other) {
     cur.earned = Math.max(Number(cur.earned) || 0, Number(row.earned) || 0);
     cur.referredBy = cur.referredBy || row.referredBy || null;
     cur.code = cur.code || row.code;
+  }
+
+  // verified-run history: union by (at, score), newest 20 per user
+  out.runHistory = out.runHistory || {};
+  for (const [uid, arr] of Object.entries(other.runHistory || {})) {
+    const cur = out.runHistory[uid];
+    if (!Array.isArray(cur)) { out.runHistory[uid] = Array.isArray(arr) ? arr.slice(-20) : []; continue; }
+    const seen = new Set(cur.map((x) => (x && x.at) + ':' + (x && x.score)));
+    const merged = cur.concat((arr || []).filter((x) => x && !seen.has(x.at + ':' + x.score)));
+    merged.sort((a, b) => (Number(a && a.at) || 0) - (Number(b && b.at) || 0));
+    out.runHistory[uid] = merged.slice(-20);
   }
 
   // daily invite counts: keep the larger count
@@ -1245,6 +1290,94 @@ function listAntiCheatEvents(limit) {
   return antiCheatEvents.slice(-(limit || 50)).reverse();
 }
 
+/**
+ * Record a SOFT security event: visible to the admin in /internal/anticheat,
+ * but does NOT add a strike / can never auto-ban by itself. Used for signals
+ * that are suspicious-but-not-proof (score jumps, same-IP PvP matches,
+ * new-account cap hits) so a legit outlier player is never punished by a
+ * heuristic, while the admin gets a trail to review.
+ */
+function logEvent(userId, reason, details) {
+  antiCheatEvents.push({
+    userId: String(userId),
+    reason: String(reason || 'review').slice(0, 120),
+    at: Date.now(),
+    soft: true,
+    details: details || null,
+  });
+  if (antiCheatEvents.length > 400) antiCheatEvents.splice(0, antiCheatEvents.length - 400);
+  scheduleSave();
+  return true;
+}
+
+/**
+ * New-account score gate. A throwaway Telegram account driving a solver bot
+ * used to be able to top the (paid) weekly board on its very first run. Until
+ * an account has NEW_ACCOUNT_RUNS verified runs, any score above
+ * NEW_ACCOUNT_SCORE_CAP is refused (NOT strike-punished — a genuinely great
+ * new player just has to play a few more runs). Either constant set to 0
+ * disables the gate.
+ */
+function newAccountGate(userId, score) {
+  if (NEW_ACCOUNT_RUNS <= 0 || NEW_ACCOUNT_SCORE_CAP <= 0) {
+    return { ok: true, runs: 0, disabled: true };
+  }
+  const hist = runHistory.get(String(userId)) || [];
+  const runs = hist.length;
+  if (runs >= NEW_ACCOUNT_RUNS) return { ok: true, runs };
+  if (score <= NEW_ACCOUNT_SCORE_CAP) return { ok: true, runs };
+  return { ok: false, runs, cap: NEW_ACCOUNT_SCORE_CAP, need: NEW_ACCOUNT_RUNS };
+}
+
+/**
+ * Behavioural anomaly flags for an ACCEPTED score (checked before the run is
+ * added to history). Returns a list of soft reasons for the admin:
+ *   - 'score jump': a player whose verified best never exceeded X suddenly
+ *     posts a multiple of it — typical of a bot switched on mid-week.
+ *   - 'suspiciously consistent scores': bots replay the deterministic engine
+ *     and end on nearly identical scores run after run; humans are noisy.
+ */
+function checkScoreAnomaly(userId, score) {
+  const hist = runHistory.get(String(userId)) || [];
+  const flags = [];
+  if (hist.length) {
+    let prevBest = 0;
+    for (const h of hist) if (h.score > prevBest) prevBest = h.score;
+    if (score >= 80 && score > prevBest * 3 + 40) {
+      flags.push({ reason: 'score jump', prevBest, score });
+    }
+  }
+  const all = hist.concat([{ score, at: Date.now() }]);
+  if (all.length >= 8) {
+    const scores = all.map((h) => h.score);
+    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    let varSum = 0;
+    for (const s of scores) varSum += (s - mean) * (s - mean);
+    const stdev = Math.sqrt(varSum / scores.length);
+    if (mean >= 40 && stdev < 1.5) {
+      flags.push({ reason: 'suspiciously consistent scores', mean: Math.round(mean * 10) / 10, stdev: Math.round(stdev * 100) / 100, runs: scores.length });
+    }
+  }
+  return flags;
+}
+
+/** Append an ACCEPTED (server-verified) score to the per-user run history. */
+function recordVerifiedRun(userId, score) {
+  userId = String(userId);
+  score = Math.max(0, Math.floor(Number(score) || 0));
+  const arr = runHistory.get(userId) || [];
+  arr.push({ score, at: Date.now() });
+  while (arr.length > 20) arr.shift();
+  runHistory.set(userId, arr);
+  scheduleSave();
+  return arr.length;
+}
+
+function getRunHistory(userId) {
+  return (runHistory.get(String(userId)) || []).slice();
+}
+
+
 // --- manual moderation ---------------------------------------------------
 function listBans(limit) {
   const now = Date.now();
@@ -1451,7 +1584,10 @@ function requestDeposit(userId, name, amount, txHash, walletAddress) {
   if (amount > 1e9) return { ok: false, error: 'invalid amount' };
   const hash = String(txHash || '').trim().toLowerCase();
   if (hash.length < 8 || hash.length > 128) return { ok: false, error: 'invalid transaction hash' };
-  const dup = deposits.find((d) => d && String(d.txHash || '').toLowerCase() === hash && d.status !== 'rejected');
+  // A hash may be submitted exactly ONCE, ever — including after a rejection.
+  // Allowing rejected hashes back in let a cheater re-submit the same foreign
+  // transfer over and over, hoping an admin approves one of the duplicates.
+  const dup = deposits.find((d) => d && String(d.txHash || '').toLowerCase() === hash);
   if (dup) return { ok: false, error: 'transaction already submitted' };
   const request = {
     id: depositSeq++,
@@ -1503,14 +1639,18 @@ function trackUser(userId, profile) {
   const details = typeof profile === 'string' ? { name: profile } : (profile || {});
   const name = String(details.name || previous.name || 'Player').slice(0, 120);
   const username = String(details.username || previous.username || '').slice(0, 64);
+  // Last seen IP (from the trusted proxy). Purely for the admin directory —
+  // spotting multi-account farmers that share one IP. Never shown publicly.
+  const ip = String(details.ip || previous.lastIp || '').slice(0, 64).trim();
   const firstSeen = Number(previous.firstSeen) || now;
   // Persist identity changes immediately, but do not write the whole store
   // on every page refresh. The in-memory lastSeen is still updated for the
   // admin list; it is persisted at most once per minute per player.
   const changed = wasNew || previous.name !== name || previous.username !== username ||
+    (ip && ip !== previous.lastIp) ||
     !previous.lastSeen || now - previous.lastSeen >= 60 * 1000 || previous.firstSeen !== firstSeen;
   knownUsers.add(userId);
-  userDirectory.set(userId, { name, username, firstSeen, lastSeen: now });
+  userDirectory.set(userId, { name, username, firstSeen, lastSeen: now, lastIp: ip });
   recentActivity.set(userId, now);
   if (changed) scheduleSave();
 }
@@ -1534,6 +1674,7 @@ function listUsers(limit) {
       username: row.username || '',
       firstSeen: row.firstSeen || 0,
       lastSeen: row.lastSeen || 0,
+      lastIp: row.lastIp || '',
     });
   }
   out.sort((a, b) => (b.lastSeen || b.firstSeen || 0) - (a.lastSeen || a.firstSeen || 0));
@@ -1594,11 +1735,11 @@ function pvpClearUser(userId) {
   pvpByUser.delete(String(userId));
 }
 
-function pvpRequeue(userId, name, stake) {
+function pvpRequeue(userId, name, stake, ip) {
   if (getCBalance(userId) < stake) return;
   let q = pvpQueue.get(stake) || [];
   if (q.some((x) => x.userId === String(userId))) return;
-  q.push({ userId: String(userId), name: name || 'Player', joinedAt: Date.now() });
+  q.push({ userId: String(userId), name: name || 'Player', joinedAt: Date.now(), ip: ip || '' });
   pvpQueue.set(stake, q);
 }
 
@@ -1742,9 +1883,10 @@ setInterval(() => {
   }
 }, 3000).unref();
 
-function pvpJoin(userId, name, stake) {
+function pvpJoin(userId, name, stake, ip) {
   userId = String(userId);
   stake = Number(stake);
+  const joinIp = String(ip || '').slice(0, 64);
   if (PVP_STAKES.indexOf(stake) < 0) return { ok: false, error: 'invalid stake' };
   pvpSweepTimeouts();
   const existingId = pvpByUser.get(userId);
@@ -1772,12 +1914,12 @@ function pvpJoin(userId, name, stake) {
     pvpQueue.set(stake, q);
     if (getCBalance(userId) < stake) {
       // Joiner went broke between the earlier check and now — put the opponent back.
-      pvpRequeue(opp.userId, opp.name, stake);
+      pvpRequeue(opp.userId, opp.name, stake, opp.ip);
       return { ok: false, error: 'insufficient C' };
     }
     if (getCBalance(opp.userId) < stake) {
       // Opponent went broke in the tiny window after the filter. Don't strand the joiner.
-      q.push({ userId, name: name || 'Player', joinedAt: Date.now() });
+      q.push({ userId, name: name || 'Player', joinedAt: Date.now(), ip: joinIp });
       pvpQueue.set(stake, q);
       return { ok: true, waiting: true, stake, cBalance: getCBalance(userId) };
     }
@@ -1787,8 +1929,8 @@ function pvpJoin(userId, name, stake) {
       stake,
       bank: stake * 2,
       paid: false,
-      p1: { userId, name: name || 'Player', score: null, lastSeen: now },
-      p2: { userId: String(opp.userId), name: opp.name || 'Player', score: null, lastSeen: now },
+      p1: { userId, name: name || 'Player', score: null, lastSeen: now, ip: joinIp },
+      p2: { userId: String(opp.userId), name: opp.name || 'Player', score: null, lastSeen: now, ip: opp.ip || '' },
       turn: null,
       status: 'confirming',
       createdAt: now,
@@ -1797,10 +1939,18 @@ function pvpJoin(userId, name, stake) {
     pvpMatches.set(match.id, match);
     pvpByUser.set(userId, match.id);
     pvpByUser.set(String(opp.userId), match.id);
+    // Self-matching signal: one person queueing two of their own accounts to
+    // funnel the stake into a single wallet (minus the 10% house cut). Same IP
+    // is not proof (two friends on one WiFi match legitimately), so this is a
+    // soft event for the admin — but it is recorded on EVERY such match.
+    if (joinIp && opp.ip && joinIp === opp.ip) {
+      match.sameIp = true;
+      logEvent(userId, 'pvp same-ip match', { opponent: String(opp.userId), stake, ip: joinIp, matchId: match.id });
+    }
     scheduleSave();
     return { ok: true, match: publicPvp(match, userId) };
   }
-  q.push({ userId, name: name || 'Player', joinedAt: Date.now() });
+  q.push({ userId, name: name || 'Player', joinedAt: Date.now(), ip: joinIp });
   pvpQueue.set(stake, q);
   return { ok: true, waiting: true, stake, cBalance: getCBalance(userId) };
 }
@@ -2141,7 +2291,8 @@ module.exports = {
   currentDayKey, currentWeekKey, currentMonthKey, previousWeekKey, periodKey,
   weekAlreadyPaid,
   createSession, getSession, consumeSession, addHeartbeat, grantRevive,
-  isBanned, banInfo, addStrike, listAntiCheatEvents,
+  isBanned, banInfo, addStrike, listAntiCheatEvents, logEvent,
+  newAccountGate, checkScoreAnomaly, recordVerifiedRun, getRunHistory,
   manualBan, unban, listBans,
   submitPeriodScores, submitWeeklyScore, getLeaderboard, getUserRank,
   allowRequest,

@@ -98,7 +98,27 @@ the server decides what they are worth (`anticheat.js` + `physics.js`).
 
 None of this requires trusting the client for anything except *when it
 tapped* — everything that turns taps into a score happens on the server.
-Run `npm run test:anticheat` to exercise the checks.
+Run `npm run test` to exercise the checks (anticheat + security + hardening +
+persistence suites).
+
+Additional fraud hardening (see `SECURITY_REVIEW.md` for the full audit):
+
+- **New-account score gate** — until an account has 5 server-verified runs it
+  cannot post a score above 120 (`NEW_ACCOUNT_RUNS` / `NEW_ACCOUNT_SCORE_CAP`),
+  so a throwaway account with a solver bot cannot top the paid weekly board on
+  run #1.
+- **Behavioural anomaly flags** — the server keeps each player's last 20
+  verified scores and records soft admin events on implausible jumps and
+  bot-like run-to-run consistency.
+- **Deposits** — a `txHash` is single-use forever (even after rejection); with
+  on-chain verification enabled, transfers below `MIN_DEPOSIT_NANO_TON`
+  (default 0.01 TON) are refused on approve.
+- **PvP** — matches between two accounts joined from the same IP are flagged
+  (`pvp same-ip match`) for admin review; all PvP routes are per-user
+  rate-limited.
+- **Admin** — `/internal/users` shows each player's last IP to spot
+  multi-account farming; `/internal/health` can no longer be tricked into
+  leaking the persist report when `ADMIN_KEY` is unset.
 
 ## Moderation and timed game bans
 
