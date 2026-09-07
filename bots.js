@@ -13,15 +13,83 @@
 
 const BOT_COUNT = 25;
 
-// Small, stable pool of neutral looking nicknames.
-const BOT_NAMES = [
-  'Nika', 'Arman', 'Sofi', 'Levon', 'Mika', 'Dato', 'Aram', 'Lilit',
-  'Roman', 'Karen', 'Zara', 'Tigran', 'Anush', 'Vahe', 'Milena',
-  'Suren', 'Gor', 'Ani', 'Davit', 'Elen', 'Hayk', 'Nare', 'Sergo',
-  'Vika', 'Artur', 'Lusine', 'Narek', 'Emma', 'Gevorg', 'Sona',
-  'Alik', 'Rita', 'Samvel', 'Kristi', 'Ruben', 'Mane', 'Tato',
-  'Diana', 'Grigor', 'Alina',
+// Filler bots look like ordinary Telegram accounts: an "@" handle built from a
+// stem plus an optional suffix / digits. Most of them are international; only
+// ARMENIAN_PER_DAY of them use an Armenian stem, so the board does not read as
+// a list of local names.
+const ARMENIAN_PER_DAY = 2;
+
+const INTL_STEMS = [
+  'alex', 'max', 'nikita', 'dima', 'sasha', 'vlad', 'denis', 'egor', 'kirill',
+  'ivan', 'artem', 'roma', 'sergey', 'pavel', 'yura', 'timur', 'murat', 'emir',
+  'arda', 'ahmet', 'mehmet', 'ali', 'omar', 'karim', 'luis', 'pedro', 'diego',
+  'marco', 'leo', 'nick', 'tony', 'oscar', 'viktor', 'jason', 'kevin', 'brian',
+  'anna', 'maria', 'sofia', 'elina', 'katya', 'lena', 'nina', 'julia', 'polina',
+  'dasha', 'alina', 'kris', 'mia', 'ela',
+  'crypto', 'night', 'shadow', 'ghost', 'turbo', 'pixel', 'lucky', 'sniper',
+  'blaze', 'frost', 'nova', 'zero', 'wolf', 'falcon', 'panda', 'rocket',
 ];
+
+const ARMENIAN_STEMS = [
+  'armen', 'hayk', 'narek', 'gevorg', 'tigran', 'vahe', 'arsen', 'samvel',
+  'karen', 'mher', 'davo', 'grish', 'ani', 'lilit', 'sona', 'nare', 'anush',
+  'hovo', 'gor', 'tato',
+];
+
+const SUFFIXES = [
+  '', '', '', '_pro', '_off', '_ton', '_tg', '_xx', 'ka', 'chik', '_king',
+  '_yt', 'ttv', '_life', '_007', 'x',
+];
+
+// Build one plausible Telegram handle from a stem.
+function makeHandle(stem, rnd) {
+  let name = stem;
+  const shape = Math.floor(rnd() * 5);
+  if (shape === 0) {
+    name += SUFFIXES[Math.floor(rnd() * SUFFIXES.length)];
+  } else if (shape === 1) {
+    name += String(10 + Math.floor(rnd() * 89));            // ...42
+  } else if (shape === 2) {
+    name += '_' + String(1990 + Math.floor(rnd() * 22));    // ..._2004
+  } else if (shape === 3) {
+    name += SUFFIXES[Math.floor(rnd() * SUFFIXES.length)] + String(Math.floor(rnd() * 999));
+  } else {
+    name += '_' + String(100 + Math.floor(rnd() * 899));    // ..._777
+  }
+  name = name.replace(/[^a-z0-9_]/g, '').slice(0, 24);
+  if (name.length < 5) name += String(10 + Math.floor(rnd() * 89));
+  return '@' + name;
+}
+
+// Deterministic handle list for a day: ARMENIAN_PER_DAY Armenian stems mixed
+// into international ones, shuffled, all unique.
+function handlesForDay(rnd, count) {
+  const pick = (pool, n) => {
+    const copy = pool.slice();
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      const tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp;
+    }
+    return copy.slice(0, n);
+  };
+  const armCount = Math.min(ARMENIAN_PER_DAY, count);
+  const stems = pick(ARMENIAN_STEMS, armCount).concat(pick(INTL_STEMS, count - armCount));
+  // shuffle so the Armenian handles do not always sit at the top
+  for (let i = stems.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = stems[i]; stems[i] = stems[j]; stems[j] = tmp;
+  }
+  const seen = new Set();
+  const out = [];
+  for (const stem of stems) {
+    let handle = makeHandle(stem, rnd);
+    let guard = 0;
+    while (seen.has(handle) && guard++ < 8) handle = makeHandle(stem, rnd);
+    seen.add(handle);
+    out.push(handle);
+  }
+  return out;
+}
 
 // Deterministic 32-bit hash -> PRNG (mulberry32).
 function hashString(str) {
@@ -50,12 +118,7 @@ function mulberry32(seed) {
  */
 function botsForDay(dayKey) {
   const rnd = mulberry32(hashString('flap-bots:' + String(dayKey)));
-  const names = BOT_NAMES.slice();
-  // Fisher-Yates with the seeded PRNG so the picked names differ per day.
-  for (let i = names.length - 1; i > 0; i--) {
-    const j = Math.floor(rnd() * (i + 1));
-    const tmp = names[i]; names[i] = names[j]; names[j] = tmp;
-  }
+  const names = handlesForDay(rnd, BOT_COUNT);
   const used = new Set();
   const out = [];
   for (let i = 0; i < BOT_COUNT; i++) {

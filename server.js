@@ -33,6 +33,168 @@ const TON_API_KEY = (process.env.TON_API_KEY || '').trim();
 // the "pay 0.001 TON, claim 10 000 C" trick where the hash IS genuine. 0 = off.
 const MIN_DEPOSIT_NANO_TON = Math.max(0, Math.floor(Number(process.env.MIN_DEPOSIT_NANO_TON) || 10000000));
 
+// ---------------------------------------------------------------------------
+// Automatic top-ups paid from a CONNECTED wallet (TON Connect).
+// The player signs the transfer inside the mini app, so the server knows the
+// exact message (BOC) it should look for on-chain. Instead of parking the
+// request in the admin queue, we poll the TON indexer until that transfer shows
+// up at the deposit address and then credit the account by itself. Manual
+// (hash pasted by hand) top-ups keep the old admin-approval flow.
+// Turn it off with DEPOSIT_AUTO_CREDIT=false.
+const DEPOSIT_AUTO_CREDIT = process.env.DEPOSIT_AUTO_CREDIT !== 'false';
+// How long we keep looking for the transfer before leaving it to an admin.
+const AUTO_CREDIT_WINDOW_MS = Math.max(
+  30 * 1000,
+  Math.floor(Number(process.env.DEPOSIT_AUTO_CREDIT_WINDOW_MS) || 10 * 60 * 1000),
+);
+// Tolerance on the paid value: wallets shave network fees off, and the TON
+// price moves between quoting and signing.
+const AUTO_CREDIT_TOLERANCE = Math.min(0.5, Math.max(0, Number(process.env.DEPOSIT_AUTO_CREDIT_TOLERANCE) || 0.12));
+const FLAP_PER_USD = 100; // 100 C = $1, same rate as the mini app
+
+function depositAddress() {
+  return (process.env.DEPOSIT_TON_ADDRESS || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd').trim();
+}
+
+// TON/USD price with a short cache, used to sanity-check what actually landed
+// on-chain against the amount of C the player asked for.
+let tonPriceCache = { usd: 0, at: 0 };
+async function tonUsdPrice() {
+  // Escape hatch / offline deployments: a fixed rate can be pinned via env.
+  const pinned = Number(process.env.TON_USD_PRICE);
+  if (pinned > 0) return pinned;
+  const now = Date.now();
+  if (tonPriceCache.usd > 0 && now - tonPriceCache.at < 5 * 60 * 1000) return tonPriceCache.usd;
+  if (typeof fetch !== 'function') return 0;
+  const sources = [
+    {
+      url: 'https://tonapi.io/v2/rates?tokens=ton&currencies=usd',
+      pick: (d) => d && d.rates && d.rates.TON && d.rates.TON.prices && d.rates.TON.prices.USD,
+    },
+    {
+      url: 'https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd',
+      pick: (d) => d && d['the-open-network'] && d['the-open-network'].usd,
+    },
+  ];
+  for (const src of sources) {
+    try {
+      const resp = await fetch(src.url, { method: 'GET' });
+      if (!resp || !resp.ok) continue;
+      const price = Number(src.pick(await resp.json()));
+      if (price > 0) {
+        tonPriceCache = { usd: price, at: now };
+        return price;
+      }
+    } catch (err) { /* try the next source */ }
+  }
+  return 0;
+}
+
+// Amount of C an on-chain payment is worth. Returns null when we have no price
+// (then we simply trust the claimed amount, the transfer itself is verified).
+async function creditableAmount(claimed, valueNanoTon) {
+  const price = await tonUsdPrice();
+  if (!(price > 0) || !(valueNanoTon > 0)) return null;
+  const paidUsd = (valueNanoTon / 1e9) * price;
+  const paidC = Math.floor(paidUsd * FLAP_PER_USD);
+  // Never credit more than the player asked for; if they underpaid by more than
+  // the tolerance, credit what actually arrived.
+  if (paidC >= Math.floor(claimed * (1 - AUTO_CREDIT_TOLERANCE))) return claimed;
+  return Math.max(0, paidC);
+}
+
+const autoCreditTimers = new Map();
+// Retry schedule (ms from submission): the indexer needs a few seconds to see
+// the transfer, then we back off.
+const AUTO_CREDIT_DELAYS = [8000, 12000, 20000, 30000, 45000, 60000, 90000, 120000, 150000];
+
+function scheduleAutoCredit(depositId, attempt) {
+  if (!DEPOSIT_AUTO_CREDIT) return;
+  const id = Number(depositId);
+  attempt = Number(attempt) || 0;
+  const delay = AUTO_CREDIT_DELAYS[Math.min(attempt, AUTO_CREDIT_DELAYS.length - 1)];
+  if (autoCreditTimers.has(id)) clearTimeout(autoCreditTimers.get(id));
+  const timer = setTimeout(() => {
+    autoCreditTimers.delete(id);
+    tryAutoCredit(id, attempt).catch((err) => {
+      console.warn('[deposit-auto] #' + id + ' failed:', (err && err.message) || err);
+    });
+  }, delay);
+  if (timer.unref) timer.unref();
+  autoCreditTimers.set(id, timer);
+}
+
+async function tryAutoCredit(id, attempt) {
+  const deposit = store.getDeposit(id);
+  if (!deposit || deposit.status !== 'pending' || !deposit.auto) return;
+  const address = depositAddress();
+  if (!address) return;
+
+  const expired = Date.now() - Number(deposit.requestedAt || 0) > AUTO_CREDIT_WINDOW_MS;
+  const vres = await verifyDepositClaim({
+    txHash: deposit.txHash,
+    depositAddress: address,
+    rpcUrl: TON_RPC_URL,
+    apiKey: TON_API_KEY,
+  });
+
+  if (!vres.ok) {
+    if (expired) {
+      // Give up quietly: the request stays pending for a human to look at.
+      deposit.autoResult = 'not-found: ' + (vres.reason || 'lookup failed');
+      console.warn('[deposit-auto] #' + id + ' left for admin:', deposit.autoResult);
+      return;
+    }
+    scheduleAutoCredit(id, attempt + 1);
+    return;
+  }
+
+  const valueNanoTon = Number(vres.valueNanoTon || 0);
+  if (MIN_DEPOSIT_NANO_TON > 0 && valueNanoTon < MIN_DEPOSIT_NANO_TON) {
+    deposit.autoResult = 'below minimum on-chain value (' + valueNanoTon + ')';
+    store.logEvent(deposit.userId, 'auto top-up below minimum', {
+      txHash: deposit.txHash, valueNanoTon, minimum: MIN_DEPOSIT_NANO_TON,
+    });
+    return;
+  }
+
+  const claimed = Number(deposit.amount) || 0;
+  const credit = await creditableAmount(claimed, valueNanoTon);
+  if (credit != null && credit !== claimed) {
+    if (credit <= 0) {
+      deposit.autoResult = 'paid value too small to credit';
+      return;
+    }
+    deposit.claimedAmount = claimed;
+    deposit.amount = credit;
+  }
+  deposit.valueNanoTon = valueNanoTon;
+  deposit.onchainSource = vres.source || '';
+
+  const result = store.approveDeposit(id);
+  if (!result) return;
+  deposit.autoApproved = true;
+  deposit.autoResult = 'credited';
+  store.logEvent(deposit.userId, 'auto top-up credited', {
+    depositId: id, amount: deposit.amount, txHash: deposit.txHash, valueNanoTon,
+  });
+  console.log('[deposit-auto] #' + id + ' credited', deposit.amount, 'C to', deposit.userId);
+}
+
+// After a restart, pick up wallet top-ups that were still waiting for their
+// transfer to appear on-chain.
+function resumeAutoCredits() {
+  if (!DEPOSIT_AUTO_CREDIT) return;
+  let n = 0;
+  for (const d of store.listDeposits('pending')) {
+    if (!d || !d.auto) continue;
+    if (Date.now() - Number(d.requestedAt || 0) > AUTO_CREDIT_WINDOW_MS) continue;
+    scheduleAutoCredit(d.id, 0);
+    n++;
+  }
+  if (n) console.log('[deposit-auto] resumed', n, 'pending wallet top-up(s)');
+}
+
 // TON Connect: when a player tops up by paying from a connected wallet
 // (Tonkeeper / Telegram Wallet / MyTonWallet...), the client sends the signed
 // transaction BOC instead of a hand-pasted hash. We hash the BOC server-side
@@ -605,11 +767,13 @@ app.post('/api/deposit', (req, res) => {
   }
   // Paid straight from a connected TON wallet? The client sends the signed
   // transaction BOC — derive its message hash here instead of trusting input.
+  let fromConnectedWallet = false;
   if (!txHash && req.body && req.body.boc) {
     txHash = txHashFromBoc(req.body.boc);
     if (!txHash) {
       return res.status(400).json({ error: 'invalid transaction payload' });
     }
+    fromConnectedWallet = true;
   }
   if (!txHash) {
     return res.status(400).json({ error: 'invalid transaction hash' });
@@ -618,10 +782,20 @@ app.post('/api/deposit', (req, res) => {
   const result = store.requestDeposit(userId, displayName(user), amount, txHash, sender);
   if (!result.ok) return res.status(400).json({ error: result.error });
 
+  // Wallet top-ups are credited automatically: we watch the chain for this
+  // exact transfer and approve the request ourselves once it is confirmed.
+  const auto = fromConnectedWallet && DEPOSIT_AUTO_CREDIT;
+  if (auto) {
+    result.request.auto = true;
+    result.request.source = 'tonconnect';
+    scheduleAutoCredit(result.request.id, 0);
+  }
+
   res.json({
     ok: true,
     requestId: result.request.id,
     status: result.request.status,
+    auto,
     amount,
     usd: amount / 100,
     flapBalance: store.getBalance(userId),
@@ -737,6 +911,31 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
 app.get('/internal/deposits', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ deposits: store.listDeposits(req.query.status) });
+});
+
+// Status of a single top-up request, for the player who created it. Lets the
+// mini app show "credited" as soon as the automatic on-chain check succeeds.
+app.post('/api/deposit-status', (req, res) => {
+  // Read-only status check — the normal (12h) auth window is enough here, so a
+  // long play session can still watch its top-up land.
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  const userId = String(user.id);
+  if (!store.allowRequest('depstatus:' + userId, 120, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  const deposit = store.getDeposit(Number(req.body && req.body.requestId));
+  if (!deposit || String(deposit.userId) !== userId) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.json({
+    ok: true,
+    requestId: deposit.id,
+    status: deposit.status,
+    auto: !!deposit.auto,
+    amount: deposit.amount,
+    cBalance: store.getCBalance(userId),
+  });
 });
 
 app.post('/internal/deposits/:id/approve', async (req, res) => {
@@ -1091,6 +1290,7 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 3000;
 const start = store.ready || Promise.resolve();
 start.then(() => {
+  resumeAutoCredits();
   app.listen(PORT, () => {
     const info = store.persistInfo();
     console.log(`GRM FLAP backend listening on :${PORT}`);
