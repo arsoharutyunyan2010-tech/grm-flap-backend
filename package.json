@@ -10,7 +10,8 @@
     "test:anticheat": "node test/anticheat.test.js",
     "test:security": "node test/security.test.js",
     "test:hardening": "node test/hardening.test.js",
-    "test": "node test/anticheat.test.js && node test/security.test.js && node test/hardening.test.js && node test/persistence.test.js",
+    "test:artwork": "node --test test/artwork.test.js",
+    "test": "node test/anticheat.test.js && node test/security.test.js && node test/hardening.test.js && node test/persistence.test.js && npm run test:artwork",
     "check:durable": "node check-durability.js"
   },
   "dependencies": {

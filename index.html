@@ -140,6 +140,59 @@
     box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 6px rgba(244,197,66,0.06);
     color: var(--ink);
   }
+  /* Artwork modals stay between Telegram's header and the bottom navigation.
+     Scroll the card on short screens instead of hiding action buttons. */
+  .art-overlay{
+    padding: calc(var(--app-safe-top) + 12px) 16px calc(132px + env(safe-area-inset-bottom, 0px));
+    background: rgba(8,4,18,0.55);
+  }
+  .art-overlay .card{
+    width: min(352px, 100%);
+    max-height: 100%;
+    padding: 18px 20px 22px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  .art-overlay .title{ font-size: 26px; letter-spacing: 1px; overflow-wrap: anywhere; }
+  .screen-art{
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 14px;
+    object-fit: contain;
+    border-radius: 14px;
+    pointer-events: none;
+    user-select: none;
+  }
+  .screen-art--modal{ width: auto; height: clamp(100px, 18vh, 148px); }
+  .screen-art--page{ width: auto; max-height: 190px; margin: 18px auto 20px; }
+  .screen-art.art-unavailable{ display: none !important; }
+  .search-art{ position: relative; }
+  .search-art .screen-art{ width: 100%; height: auto; }
+  .search-dots{
+    position: absolute; left: 50%; top: 58%;
+    transform: translate(-50%, -50%);
+    display: flex; gap: 7px;
+    pointer-events: none;
+  }
+  .search-dots span{
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--gold);
+    animation: search-pulse 1.2s ease-in-out infinite;
+  }
+  .search-dots span:nth-child(2){ animation-delay: 0.2s; }
+  .search-dots span:nth-child(3){ animation-delay: 0.4s; }
+  .art-unavailable + .search-dots{ display: none; }
+  @keyframes search-pulse{ 0%, 80%, 100%{ opacity: 0.35; } 40%{ opacity: 1; } }
+  @media (max-height: 660px){
+    .art-overlay .card{ padding: 14px 16px 18px; }
+    .art-overlay button:not(.stake-chip){ padding: 11px 16px; }
+    .screen-art--modal{ height: 96px; margin-bottom: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .search-dots span{ animation: none; }
+  }
   .title{
     font-size: 30px;
     font-weight: 900;
@@ -774,9 +827,11 @@
     box-shadow: 0 0 22px rgba(244,197,66,0.55), 0 4px 0 #b8892a;
     text-transform: none;
   }
-  .stake-grid{ display:grid; grid-template-columns: repeat(3,1fr); gap:8px; margin: 12px 0 8px; }
+  .stake-grid{ display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:8px; margin: 12px 0 8px; }
   .stake-chip{
     all: unset;
+    box-sizing: border-box;
+    min-width: 0;
     display:flex; align-items:center; justify-content:center; gap:6px;
     text-align:center;
     padding: 12px 6px;
@@ -808,6 +863,10 @@
     width:20px !important; height:20px !important;
     margin:0 !important;
     display:block;
+  }
+  @media (max-width: 380px){
+    .stake-chip{ padding: 10px 4px; gap: 4px; }
+    .stake-chip .coin-on-gold{ width: 22px; height: 22px; margin: 0; }
   }
   .pvp-fee{
     margin-top: 12px;
@@ -931,8 +990,9 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="howCard">
+  <div class="overlay art-overlay hidden" id="howCard">
     <div class="card">
+      <img class="screen-art screen-art--modal" src="/img/ui/how-to-play.webp" width="456" height="365" loading="lazy" decoding="async" alt="" aria-hidden="true">
       <div class="title" data-i18n="howTo">How to play</div>
       <div class="how-sec" data-i18n="howClassic">CLASSIC: tap to fly through pipes. One life (ads off). Your score goes to the leaderboard. No coins are spent.</div>
       <div class="how-sec" data-i18n="howPvp">PVP 1 VS 1: pick a C stake, find an opponent. You get 5 seconds to decline. If nobody declines, C is taken and Player 1 flies, then Player 2. Higher score wins 90% of the bank. Closing the bot after start is a loss.</div>
@@ -940,8 +1000,9 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="pvpCard">
+  <div class="overlay art-overlay hidden" id="pvpCard">
     <div class="card">
+      <img class="screen-art screen-art--modal" src="/img/ui/pvp-battle-banner.webp" width="640" height="321" loading="lazy" decoding="async" alt="" aria-hidden="true">
       <div class="brand-title" style="font-size:28px">PVP</div>
       <div class="sub" data-i18n="pvpSub">Pick a stake. Highest score wins.</div>
       <div class="stake-grid" id="stakeGrid"></div>
@@ -952,16 +1013,21 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="pvpWaitCard">
+  <div class="overlay art-overlay hidden" id="pvpWaitCard">
     <div class="card">
+      <div class="search-art" aria-hidden="true">
+        <img class="screen-art screen-art--modal" src="/img/ui/pvp-searching.webp" width="640" height="342" loading="lazy" decoding="async" alt="" aria-hidden="true">
+        <div class="search-dots"><span></span><span></span><span></span></div>
+      </div>
       <div class="title" data-i18n="pvpWaiting">Waiting for opponent…</div>
       <div class="hint" id="pvpWaitHint"></div>
       <button id="pvpCancelBtn" class="secondary" data-i18n="cancel">CANCEL</button>
     </div>
   </div>
 
-  <div class="overlay hidden" id="pvpConfirmCard">
+  <div class="overlay art-overlay hidden" id="pvpConfirmCard">
     <div class="card">
+      <img class="screen-art screen-art--modal" src="/img/ui/pvp-battle-banner.webp" width="640" height="321" loading="lazy" decoding="async" alt="" aria-hidden="true">
       <div class="title" data-i18n="pvpFound">OPPONENT FOUND</div>
       <div class="pvp-vs" id="pvpConfirmVs"></div>
       <div class="pvp-count" id="pvpConfirmCount">5</div>
@@ -970,8 +1036,9 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="pvpReadyCard">
+  <div class="overlay art-overlay hidden" id="pvpReadyCard">
     <div class="card">
+      <img class="screen-art screen-art--modal" src="/img/ui/pvp-battle-banner.webp" width="640" height="321" loading="lazy" decoding="async" alt="" aria-hidden="true">
       <div class="title" data-i18n="pvpAskReady">Are you ready?</div>
       <div class="pvp-vs" id="pvpReadyVs"></div>
       <div class="hint" id="pvpReadyHint"></div>
@@ -979,8 +1046,9 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="pvpInfoCard">
+  <div class="overlay art-overlay hidden" id="pvpInfoCard">
     <div class="card">
+      <img class="screen-art screen-art--modal" src="/img/ui/pvp-battle-banner.webp" width="640" height="321" loading="lazy" decoding="async" alt="" aria-hidden="true">
       <div class="title" id="pvpInfoTitle">PVP</div>
       <div class="pvp-vs" id="pvpInfoVs"></div>
       <div class="hint" id="pvpInfoHint"></div>
@@ -988,8 +1056,11 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="pvpResultCard">
+  <div class="overlay art-overlay hidden" id="pvpResultCard">
     <div class="card">
+      <img id="pvpWinArt" class="screen-art screen-art--modal hidden" src="/img/ui/pvp-win.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
+      <img id="pvpLoseArt" class="screen-art screen-art--modal hidden" src="/img/ui/mascot-crash.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
+      <img id="pvpDrawArt" class="screen-art screen-art--modal hidden" src="/img/ui/pvp-battle-banner.webp" width="640" height="321" loading="lazy" decoding="async" alt="" aria-hidden="true">
       <div class="title" id="pvpResultTitle">PVP</div>
       <div class="pvp-vs" id="pvpResultVs"></div>
       <div class="pvp-credit hidden" id="pvpResultCredit"></div>
@@ -1015,9 +1086,10 @@
     </div>
   </div>
 
-  <div class="overlay hidden" id="overCard">
+  <div class="overlay art-overlay hidden" id="overCard">
     <div class="card">
       <div id="crashMode">
+        <img class="screen-art screen-art--modal" src="/img/ui/mascot-crash.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
         <div class="title" style="font-size:26px;" data-i18n="oops">OOPS!</div>
         <div class="stat-row"><span data-i18n="score">Score</span><b id="crashScore">0</b></div>
         <button id="continueBtn">▶ WATCH AD & CONTINUE</button>
@@ -1025,6 +1097,8 @@
         <div class="hint" id="continueHint"></div>
       </div>
       <div id="finalMode" class="hidden">
+        <img id="gameOverArt" class="screen-art screen-art--modal" src="/img/ui/game-over-banner.webp" width="488" height="380" loading="lazy" decoding="async" alt="" aria-hidden="true">
+        <img id="newBestArt" class="screen-art screen-art--modal hidden" src="/img/ui/trophy-new-best.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
         <div class="title" style="font-size:26px;" data-i18n="gameOver">GAME OVER</div>
         <div class="stat-row"><span data-i18n="score">Score</span><b id="finalScore">0</b></div>
         <div class="stat-row"><span data-i18n="best">Best</span><b id="finalBest">0</b></div>
@@ -1215,6 +1289,7 @@
       </div>
     </div>
     <div class="sub" data-i18n="tasksSub">Complete tasks and earn rewards.</div>
+    <img class="screen-art screen-art--page" src="/img/ui/tasks-chest.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
     <div class="lb-list" id="tasksList">
       <div class="hint" data-i18n="comingSoon">Coming soon.</div>
     </div>
@@ -1225,6 +1300,7 @@
   <div class="page-inner">
     <div class="page-title-row"><img src="" data-art="nav-referral.png" alt=""><div class="title" data-i18n="referral">REFERRAL</div></div>
     <div class="sub" data-i18n="refSub">Invite friends. Earn <img class="tiny-coin" src="" data-art="c-coin.png" alt="C"> when they top up.</div>
+    <img class="screen-art screen-art--page" src="/img/ui/referral-friends.webp" width="768" height="326" loading="lazy" decoding="async" alt="" aria-hidden="true">
     <div class="rate-chip" style="flex-direction:column; gap:8px; align-items:stretch;">
       <div class="field-label" data-i18n="refLink">Your link</div>
       <div class="addr-row">
@@ -1380,6 +1456,13 @@ window.FLAPY_ART = {
   Array.prototype.forEach.call(document.querySelectorAll('img[data-art]'), function(el){
     var url = artBlobUrl(el.getAttribute('data-art'));
     if (url) el.src = url;
+  });
+  // These illustrations are lazy, cacheable files, not another multi-MB
+  // base64 bundle. A missing/unsupported image must never hide the real UI.
+  document.querySelectorAll('img.screen-art').forEach(function(el){
+    function unavailable(){ el.classList.add('art-unavailable'); }
+    el.addEventListener('error', unavailable);
+    if (el.complete && !el.naturalWidth) unavailable();
   });
 
   var API_BASE_URL = window.GRM_FLAP_API_BASE || "";
@@ -2809,41 +2892,51 @@ window.FLAPY_ART = {
     overCard.classList.add('hidden');
     state = 'playing';
   }
+  function setFinalArtwork(isNewBest){
+    document.getElementById('gameOverArt').classList.toggle('hidden', isNewBest);
+    document.getElementById('newBestArt').classList.toggle('hidden', !isNewBest);
+    newBestBadge.classList.toggle('hidden', !isNewBest);
+  }
   function finalizeRun(){
     if (pvpMode) { finalizePvpRun(); return; }
     state = 'over';
     var totalSteps = stepIndex;
     var clientScore = score;
+    var finishedSession = session;
     finalScoreEl.textContent = clientScore;
-    finalBestEl.textContent = Math.max(best, clientScore);
+    finalBestEl.textContent = best;
     finalRankEl.textContent = '—';
     verifyNote.textContent = '';
     verifyNote.classList.add('hidden');
-    newBestBadge.classList.add('hidden');
+    setFinalArtwork(false);
     crashMode.classList.add('hidden');
     finalMode.classList.remove('hidden');
     overCard.classList.remove('hidden');
     submitScore(flapLog, reviveLog, totalSteps, clientScore).then(function(res){
+      // A slow response from a previous flight must not decorate the next one
+      // with an old trophy, or change the UI after access has been revoked.
+      if (session !== finishedSession || state !== 'over' || pvpMode || accessLocked) return;
       var verifiedScore = res.verified ? res.score : clientScore;
+      var isNewBest = false;
       finalScoreEl.textContent = verifiedScore;
       if (res.verified && (res.allTimeBest != null || res.best != null)) {
         var serverBest = Number(res.allTimeBest != null ? res.allTimeBest : res.best);
-        if (verifiedScore > best) newBestBadge.classList.remove('hidden');
+        isNewBest = typeof res.newBest === 'boolean' ? res.newBest
+          : (verifiedScore > best && verifiedScore >= serverBest);
         best = serverBest;
         saveBest(best);
         finalBestEl.textContent = best;
-      } else {
-        if (verifiedScore > best) { best = verifiedScore; saveBest(best); newBestBadge.classList.remove('hidden'); }
-        finalBestEl.textContent = Math.max(best, verifiedScore);
+      } else if (DEMO_MODE) {
+        isNewBest = verifiedScore > best;
+        if (isNewBest) { best = verifiedScore; saveBest(best); }
+        finalBestEl.textContent = best;
       }
+      // Rejected/offline submissions in live mode never earn a trophy or
+      // overwrite the local best. Explicit demo play still supports records.
+      setFinalArtwork(isNewBest);
       var dayRank = (res.ranks && res.ranks.day) || null;
       finalRankEl.textContent = dayRank ? ('#'+dayRank) : '—';
-      if (res.verified) {
-        verifyNote.classList.add('hidden');
-        refreshStatsAfterRun(res);
-      } else {
-        verifyNote.classList.add('hidden');
-      }
+      if (res.verified) refreshStatsAfterRun(res);
     });
   }
   function finalizePvpRun(){
@@ -2944,10 +3037,11 @@ window.FLAPY_ART = {
       });
   });
   document.getElementById('howBtn').addEventListener('click', function(){
+    hideGameOverlays();
     document.getElementById('howCard').classList.remove('hidden');
   });
   document.getElementById('howCloseBtn').addEventListener('click', function(){
-    document.getElementById('howCard').classList.add('hidden');
+    showMode();
   });
   document.getElementById('pvpDeclineBtn').addEventListener('click', function(){
     apiFetch('/api/pvp/decline', { method:'POST', body: JSON.stringify({ initData: initData }) })
@@ -3841,6 +3935,11 @@ window.FLAPY_ART = {
     var s2 = (m.p2.score==null?'—':m.p2.score);
     return (m.p1.name||'P1') + ' — score ' + s1 + '\n' + (m.p2.name||'P2') + ' — score ' + s2;
   }
+  function setPvpResultArtwork(outcome){
+    document.getElementById('pvpWinArt').classList.toggle('hidden', outcome !== 'win');
+    document.getElementById('pvpLoseArt').classList.toggle('hidden', outcome !== 'lose');
+    document.getElementById('pvpDrawArt').classList.toggle('hidden', outcome !== 'draw');
+  }
   function applyPvpState(data){
     if (!data) return;
     pvpLastData = data;
@@ -3914,6 +4013,7 @@ window.FLAPY_ART = {
       pvpMode = false;
       hideGameOverlays();
       var youWin = (m.winner === m.youAre);
+      setPvpResultArtwork(m.winner === 'tie' ? 'draw' : (youWin ? 'win' : 'lose'));
       var title = m.winner === 'tie' ? t('pvpDraw') : (youWin ? t('pvpYouWin') : t('pvpYouLose'));
       document.getElementById('pvpResultTitle').textContent = title;
       var vs = document.getElementById('pvpResultVs');
