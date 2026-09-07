@@ -520,6 +520,93 @@
     box-shadow: inset 0 0 0 2px #f4c542;
   }
 
+  /* ---------- Home / main menu ---------- */
+  .page-home .page-inner{ padding-top: 4px; }
+  .home-banner{
+    width:100%;
+    display:block;
+    border-radius:22px;
+    border:2px solid rgba(244,197,66,0.45);
+    box-shadow: 0 14px 34px rgba(0,0,0,0.55), 0 0 24px rgba(244,197,66,0.20);
+    margin-bottom: 18px;
+    object-fit: contain;
+  }
+  .home-hello{
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    color: #ffe9a8;
+    margin: 2px 0 10px;
+    opacity: 0.9;
+  }
+  .home-section-title{
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin: 12px 0 8px;
+    opacity: 0.9;
+  }
+  .home-games{
+    display:flex; flex-direction:column; gap:12px;
+    margin-top: 4px;
+  }
+  .game-card{
+    all: unset;
+    display:flex; align-items:center; gap:14px;
+    box-sizing:border-box;
+    width:100%;
+    padding:16px 16px;
+    border-radius:18px;
+    border:1px solid rgba(244,197,66,0.32);
+    background: linear-gradient(135deg, rgba(244,197,66,0.10), rgba(255,255,255,0.03));
+    color: var(--ink);
+    cursor:pointer;
+    text-align:left;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+  }
+  .game-card:active{
+    transform: scale(0.98) translateY(2px);
+    border-color: rgba(244,197,66,0.75);
+  }
+  .game-card-img{
+    width:64px; height:64px; flex:0 0 auto;
+    object-fit:contain;
+  }
+  .game-card-text{
+    display:flex; flex-direction:column; justify-content:center;
+    flex:1; min-width:0;
+  }
+  .game-card-title{
+    font-size:26px;
+    font-weight:900;
+    letter-spacing:2px;
+    line-height:1;
+    background: linear-gradient(180deg, #ffe9a8, var(--gold) 55%, var(--gold-dark));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .game-card-desc{
+    display:block;
+    font-size:12px;
+    opacity:0.65;
+    margin-top:4px;
+  }
+  .game-card-arrow{
+    margin-left:auto;
+    font-size:24px;
+    font-weight:900;
+    color:var(--gold);
+  }
+  .home-note{
+    margin-top:16px;
+    font-size:12px;
+    opacity:0.55;
+    text-align:center;
+  }
+
   .page{
     position:fixed; inset:0;
     color: var(--ink);
@@ -940,6 +1027,25 @@
   </div>
 </div>
 
+<div class="page hidden" id="page-home">
+  <div class="page-inner">
+    <img class="home-banner" src="/img/home-banner.jpg" alt="FLAPY GAMES">
+    <div class="home-hello" id="homeGreeting" data-i18n="welcome">Welcome to FLAPY GAMES</div>
+    <div class="home-section-title" data-i18n="games">Games</div>
+    <div class="home-games">
+      <button type="button" class="game-card" id="homeFlapyBtn">
+        <img class="game-card-img" src="" data-art="logo.png" alt="">
+        <span class="game-card-text">
+          <span class="game-card-title">FLAPY</span>
+          <span class="game-card-desc" data-i18n="flapyDesc">Classic &amp; PVP 1 VS 1</span>
+        </span>
+        <span class="game-card-arrow" aria-hidden="true">➜</span>
+      </button>
+    </div>
+    <div class="home-note" data-i18n="homeMore">More games and surprises coming soon.</div>
+  </div>
+</div>
+
 <div class="page hidden" id="page-profile">
   <button id="langBtn" class="lang-fab" aria-label="Language">🌐</button>
   <button id="soundBtn" class="sound-fab" aria-label="Sound">🔊</button>
@@ -1275,27 +1381,27 @@ window.FLAPY_ART = {
     var flags = { music: true, click: true, flap: true, crash: true };
     var musicOn = false, step = 0, nextTime = 0, timer = null;
     var noiseCache = null;
-    // ---- Background track v2: "Neon Sprint" ---------------------------------
-    // 112 BPM, 16th-note grid, 4 bars (Am - F - C - G) with a plucked arpeggio,
-    // a filtered saw bass and a bright pentatonic lead.
-    var BPM = 112;
+    // ---- Background music v3: "Sky Glow" ------------------------------------
+    // 96 BPM, 16th-note grid, 4 bars (D - Bm - G - A), a lighter dreamy
+    // arpeggio, a smooth sine bass and a warm bell-like lead.
+    var BPM = 96;
     var STEP_DUR = 60 / BPM / 4;   // one 16th note
     var LOOP_STEPS = 64;           // 4 bars of 16 steps
     // semitone offset -> Hz, relative to A2 (110 Hz)
     function hz(semi){ return 110 * Math.pow(2, semi / 12); }
-    // one chord per bar: A minor, F major, C major, G major
+    // one chord per bar: D major, B minor, G major, A major
     var CHORDS = [
-      { bass: 0,  arp: [12, 15, 19, 24] },   // Am : A3 C4 E4 A4
-      { bass: -4, arp: [8, 12, 17, 20] },    // F  : F3 A3 C4 F4
-      { bass: 3,  arp: [15, 19, 22, 27] },   // C  : C4 E4 G4 C5
-      { bass: -2, arp: [10, 14, 17, 22] }    // G  : G3 B3 D4 G4
+      { bass: 5,  arp: [5, 9, 12, 17] },     // D  : D3 F#3 A3 D4
+      { bass: -1, arp: [5, 9, 12, 16] },     // Bm : D3 F#3 A3 C#4
+      { bass: -5, arp: [7, 11, 14, 19] },    // G  : G3 B3 D4 G4
+      { bass: 0,  arp: [9, 12, 16, 21] }     // A  : F#3 A3 C#4 F#4
     ];
-    // lead line, one slot per 16th (null = rest), A minor pentatonic
+    // lead line, one slot per 16th (null = rest), bright D-major melody
     var LEAD = [
-      24, null, null, 27,  29, null, 27, null,  24, null, null, null,  22, null, 24, null,
-      22, null, null, 24,  27, null, null, 29,  27, null, 24, null,  22, null, null, null,
-      27, null, 29, null,  31, null, 29, null,  27, null, 24, null,  27, null, null, null,
-      29, null, 27, null,  24, null, 22, null,  24, null, 27, null,  29, null, 31, null
+      24, null, 26, 29,  31, null, 29, 26,  24, null, 22, null,  21, null, 19, null,
+      17, null, 19, 21,  22, null, 24, null,  26, null, 24, 22,  21, null, 19, null,
+      24, null, 26, 29,  31, null, 33, 31,  29, null, 26, 24,  22, null, 24, 26,
+      29, null, 31, 29,  26, null, 24, 22,  21, null, 19, 21,  24, null, null, null
     ];
 
     function loadFlags(){
@@ -1401,65 +1507,84 @@ window.FLAPY_ART = {
       src.start(t0);
       src.stop(t0+0.12);
     }
-    // Hit sound: the bird slams into a pipe / the ground.
+    // Hit sound: heavier, glassy "slam" when the bird hits a pipe / the ground.
     function crash(){
       if (!flags.crash || !ensure()) return;
       var t0 = actx.currentTime;
-      // low body thump
-      var thump = actx.createOscillator();
-      thump.type = 'sine';
-      thump.frequency.setValueAtTime(320, t0);
-      thump.frequency.exponentialRampToValueAtTime(48, t0 + 0.25);
-      var tg = actx.createGain();
-      tg.gain.setValueAtTime(0.0001, t0);
-      tg.gain.exponentialRampToValueAtTime(0.30, t0 + 0.01);
-      tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.34);
-      thump.connect(tg); tg.connect(sfxGain);
-      thump.start(t0); thump.stop(t0 + 0.36);
-      // metallic clank
-      var clank = actx.createOscillator();
-      clank.type = 'square';
-      clank.frequency.setValueAtTime(210, t0);
-      clank.frequency.exponentialRampToValueAtTime(90, t0 + 0.18);
-      var cf = actx.createBiquadFilter();
-      cf.type = 'bandpass'; cf.frequency.value = 700; cf.Q.value = 1.4;
-      var cg = actx.createGain();
-      cg.gain.setValueAtTime(0.20, t0);
-      cg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
-      clank.connect(cf); cf.connect(cg); cg.connect(sfxGain);
-      clank.start(t0); clank.stop(t0 + 0.24);
+      // deep low boom
+      var boom = actx.createOscillator();
+      boom.type = 'sine';
+      boom.frequency.setValueAtTime(260, t0);
+      boom.frequency.exponentialRampToValueAtTime(42, t0 + 0.26);
+      var bg = actx.createGain();
+      bg.gain.setValueAtTime(0.0001, t0);
+      bg.gain.exponentialRampToValueAtTime(0.28, t0 + 0.01);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.34);
+      boom.connect(bg); bg.connect(sfxGain);
+      boom.start(t0); boom.stop(t0 + 0.36);
+      // glass shatter
+      var shards = [720, 980, 1340];
+      for (var si = 0; si < shards.length; si++) {
+        var st = t0 + si * 0.015;
+        var o = actx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(shards[si], st);
+        o.frequency.exponentialRampToValueAtTime(shards[si] * 0.18, st + 0.16);
+        var f = actx.createBiquadFilter();
+        f.type = 'bandpass'; f.frequency.value = shards[si] * 1.8; f.Q.value = 2.2;
+        var g = actx.createGain();
+        g.gain.setValueAtTime(0.0001, st);
+        g.gain.exponentialRampToValueAtTime(0.12, st + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, st + 0.20);
+        o.connect(f); f.connect(g); g.connect(sfxGain);
+        o.start(st); o.stop(st + 0.24);
+      }
       // impact noise burst
       var ns = actx.createBufferSource();
       ns.buffer = noiseBuf();
       var nf = actx.createBiquadFilter();
       nf.type = 'lowpass';
-      nf.frequency.setValueAtTime(3800, t0);
-      nf.frequency.exponentialRampToValueAtTime(400, t0 + 0.2);
+      nf.frequency.setValueAtTime(4200, t0);
+      nf.frequency.exponentialRampToValueAtTime(300, t0 + 0.18);
       var ng = actx.createGain();
-      ng.gain.setValueAtTime(0.22, t0);
-      ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.26);
+      ng.gain.setValueAtTime(0.20, t0);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
       ns.connect(nf); nf.connect(ng); ng.connect(sfxGain);
-      ns.start(t0); ns.stop(t0 + 0.28);
+      ns.start(t0); ns.stop(t0 + 0.26);
     }
-    // Short "you lost" motif, played when the run is actually finished.
+    // New "defeat" motif: a sad descending phrase when the run ends.
     function gameOver(){
       if (!flags.crash || !ensure()) return;
       var t0 = actx.currentTime + 0.28;
-      var notes = [392.00, 349.23, 293.66, 220.00]; // G4 F4 D4 A3
+      var notes = [440.0, 392.0, 329.63, 261.63]; // A4 G4 E4 C4
       for (var i = 0; i < notes.length; i++) {
-        var st = t0 + i * 0.16;
+        var st = t0 + i * 0.17;
+        var gl = i === notes.length - 1 ? 0.70 : 0.26;
         var o = actx.createOscillator();
         o.type = 'triangle';
         o.frequency.setValueAtTime(notes[i], st);
-        o.frequency.exponentialRampToValueAtTime(notes[i] * 0.97, st + 0.22);
+        o.frequency.exponentialRampToValueAtTime(notes[i] * 0.94, st + 0.28);
         var f = actx.createBiquadFilter();
-        f.type = 'lowpass'; f.frequency.value = 2200;
+        f.type = 'lowpass'; f.frequency.value = 2000;
         var g = actx.createGain();
         g.gain.setValueAtTime(0.0001, st);
-        g.gain.exponentialRampToValueAtTime(i === notes.length - 1 ? 0.20 : 0.15, st + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, st + (i === notes.length - 1 ? 0.55 : 0.24));
+        g.gain.exponentialRampToValueAtTime(i === notes.length - 1 ? 0.22 : 0.15, st + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, st + gl);
         o.connect(f); f.connect(g); g.connect(sfxGain);
-        o.start(st); o.stop(st + (i === notes.length - 1 ? 0.6 : 0.26));
+        o.start(st); o.stop(st + gl + 0.05);
+        // gritty secondary voice for a more dramatic defeat
+        var o2 = actx.createOscillator();
+        o2.type = 'sawtooth';
+        o2.frequency.setValueAtTime(notes[i] * 0.5, st);
+        o2.frequency.exponentialRampToValueAtTime(notes[i] * 0.36, st + 0.24);
+        var f2 = actx.createBiquadFilter();
+        f2.type = 'lowpass'; f2.frequency.value = 1200; f2.Q.value = 1.4;
+        var g2 = actx.createGain();
+        g2.gain.setValueAtTime(0.0001, st);
+        g2.gain.exponentialRampToValueAtTime(i === notes.length - 1 ? 0.10 : 0.06, st + 0.03);
+        g2.gain.exponentialRampToValueAtTime(0.0001, st + gl);
+        o2.connect(f2); f2.connect(g2); g2.connect(sfxGain);
+        o2.start(st); o2.stop(st + gl + 0.05);
         var sub = actx.createOscillator();
         sub.type = 'sine';
         sub.frequency.value = notes[i] / 2;
@@ -1480,10 +1605,10 @@ window.FLAPY_ART = {
       if (beat === 0 || beat === 4 || beat === 8 || beat === 12 || beat === 14) {
         var kick = actx.createOscillator();
         kick.type = 'sine';
-        kick.frequency.setValueAtTime(150, t0);
-        kick.frequency.exponentialRampToValueAtTime(45, t0 + 0.10);
+        kick.frequency.setValueAtTime(140, t0);
+        kick.frequency.exponentialRampToValueAtTime(40, t0 + 0.10);
         var kg = actx.createGain();
-        kg.gain.setValueAtTime(beat === 14 ? 0.08 : 0.15, t0);
+        kg.gain.setValueAtTime(beat === 14 ? 0.06 : 0.11, t0);
         kg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
         kick.connect(kg); kg.connect(musicGain);
         kick.start(t0); kick.stop(t0 + 0.17);
@@ -1494,9 +1619,9 @@ window.FLAPY_ART = {
         var sn = actx.createBufferSource();
         sn.buffer = noiseBuf();
         var sf = actx.createBiquadFilter();
-        sf.type = 'bandpass'; sf.frequency.value = 1900; sf.Q.value = 0.7;
+        sf.type = 'lowpass'; sf.frequency.value = 1500; sf.Q.value = 0.5;
         var sg2 = actx.createGain();
-        sg2.gain.setValueAtTime(0.075, t0);
+        sg2.gain.setValueAtTime(0.055, t0);
         sg2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
         sn.connect(sf); sf.connect(sg2); sg2.connect(musicGain);
         sn.start(t0); sn.stop(t0 + 0.14);
@@ -1509,25 +1634,25 @@ window.FLAPY_ART = {
         var hf = actx.createBiquadFilter();
         hf.type = 'highpass'; hf.frequency.value = 7200;
         var hg = actx.createGain();
-        hg.gain.setValueAtTime(beat % 8 === 7 ? 0.030 : 0.016, t0);
+        hg.gain.setValueAtTime(beat % 8 === 7 ? 0.022 : 0.012, t0);
         hg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.035);
         hat.connect(hf); hf.connect(hg); hg.connect(musicGain);
         hat.start(t0); hat.stop(t0 + 0.04);
       }
 
-      // --- filtered saw bass, syncopated ---
+      // --- smooth sine bass, syncopated ---
       if (beat === 0 || beat === 6 || beat === 8 || beat === 11) {
         var bass = actx.createOscillator();
-        bass.type = 'sawtooth';
+        bass.type = 'sine';
         bass.frequency.value = hz(chord.bass);
         var bf = actx.createBiquadFilter();
         bf.type = 'lowpass';
-        bf.frequency.setValueAtTime(900, t0);
-        bf.frequency.exponentialRampToValueAtTime(220, t0 + STEP_DUR * 2.4);
-        bf.Q.value = 5;
+        bf.frequency.setValueAtTime(700, t0);
+        bf.frequency.exponentialRampToValueAtTime(160, t0 + STEP_DUR * 2.4);
+        bf.Q.value = 1.8;
         var bg = actx.createGain();
         bg.gain.setValueAtTime(0.0001, t0);
-        bg.gain.exponentialRampToValueAtTime(0.10, t0 + 0.015);
+        bg.gain.exponentialRampToValueAtTime(0.085, t0 + 0.015);
         bg.gain.exponentialRampToValueAtTime(0.0001, t0 + STEP_DUR * 2.6);
         bass.connect(bf); bf.connect(bg); bg.connect(musicGain);
         bass.start(t0); bass.stop(t0 + STEP_DUR * 2.7);
@@ -1540,13 +1665,13 @@ window.FLAPY_ART = {
           ? chord.arp[chord.arp.length - 1 - idx]
           : chord.arp[idx];
         var pl = actx.createOscillator();
-        pl.type = 'triangle';
+        pl.type = 'sine';
         pl.frequency.value = hz(upDown);
         var pf = actx.createBiquadFilter();
-        pf.type = 'lowpass'; pf.frequency.value = 4200;
+        pf.type = 'lowpass'; pf.frequency.value = 3600;
         var pg = actx.createGain();
         pg.gain.setValueAtTime(0.0001, t0);
-        pg.gain.exponentialRampToValueAtTime(0.055, t0 + 0.012);
+        pg.gain.exponentialRampToValueAtTime(0.05, t0 + 0.012);
         pg.gain.exponentialRampToValueAtTime(0.0001, t0 + STEP_DUR * 1.6);
         pl.connect(pf); pf.connect(pg); pg.connect(musicGain);
         pl.start(t0); pl.stop(t0 + STEP_DUR * 1.7);
@@ -1556,13 +1681,13 @@ window.FLAPY_ART = {
       var note = LEAD[s % LEAD.length];
       if (note != null) {
         var lead = actx.createOscillator();
-        lead.type = 'square';
+        lead.type = 'triangle';
         lead.frequency.value = hz(note);
         var lf = actx.createBiquadFilter();
-        lf.type = 'lowpass'; lf.frequency.value = 2600;
+        lf.type = 'lowpass'; lf.frequency.value = 2400;
         var lg = actx.createGain();
         lg.gain.setValueAtTime(0.0001, t0);
-        lg.gain.exponentialRampToValueAtTime(0.055, t0 + 0.02);
+        lg.gain.exponentialRampToValueAtTime(0.05, t0 + 0.02);
         lg.gain.exponentialRampToValueAtTime(0.0001, t0 + STEP_DUR * 2.2);
         lead.connect(lf); lf.connect(lg); lg.connect(musicGain);
         lead.start(t0); lead.stop(t0 + STEP_DUR * 2.3);
@@ -1572,7 +1697,7 @@ window.FLAPY_ART = {
         shine.frequency.value = hz(note + 12);
         var shg = actx.createGain();
         shg.gain.setValueAtTime(0.0001, t0);
-        shg.gain.exponentialRampToValueAtTime(0.018, t0 + 0.03);
+        shg.gain.exponentialRampToValueAtTime(0.014, t0 + 0.03);
         shg.gain.exponentialRampToValueAtTime(0.0001, t0 + STEP_DUR * 1.6);
         shine.connect(shg); shg.connect(musicGain);
         shine.start(t0); shine.stop(t0 + STEP_DUR * 1.7);
@@ -1680,6 +1805,7 @@ window.FLAPY_ART = {
       loadingAd:"LOADING AD…", watchAd2:"1/2", play:"PLAY", continuesLeft:" continue(s) left",
       adUnavailable:"Ad unavailable — try again", tapToContinueRun:"Tap to continue your run",
       profile:"PROFILE", home:"HOME", bestScore:"Best score", flapBalance:"FLAPY balance",
+      welcome:"Welcome to FLAPY GAMES", games:"GAMES", flapyDesc:"Classic & PVP 1 VS 1", homeMore:"More games and surprises coming soon.",
       dayRank:"Today's rank", monthRank:"Monthly rank",
       wallet:"WALLET", walletSub:"Top up C · withdraw FLAPY", usdValue:"USD value",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1689,8 +1815,8 @@ window.FLAPY_ART = {
       topup:"TOP UP", withdrawTab:"WITHDRAW", youPay:"You pay", payToAddress:"Send TON to this address",
       txHash:"Transaction hash", requestTopup:"REQUEST TOP-UP", copy:"COPY", copied:"COPIED",
       enterTx:"Paste the TON transaction hash.",
-      topupOk:"Top-up request submitted. We will credit C after review.",
-      topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit C after checking.",
+      topupOk:"Top-up request submitted. The system checks the transfer automatically and credits C once it is confirmed on-chain.",
+      topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash. The transfer is checked automatically and C is credited once it is confirmed on-chain.",
       leaderboard:"LEADERBOARD", lbSub:"Daily score leaders — prizes are shown by place", lbRecordsTitle:"Score records",
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
       dailyPrize:"Daily prize", monthLockedTitle:"MONTHLY LEADERBOARD LOCKED", monthLockedSub:"Opens when there are 1000 online players.",
@@ -1750,6 +1876,7 @@ window.FLAPY_ART = {
       loadingAd:"РЕКЛАМА…", watchAd2:"1/2", play:"ИГРАТЬ", continuesLeft:" продолж. осталось",
       adUnavailable:"Реклама недоступна — попробуйте ещё", tapToContinueRun:"Нажмите, чтобы продолжить",
       profile:"ПРОФИЛЬ", home:"ГЛАВНАЯ", bestScore:"Лучший счёт", flapBalance:"Баланс FLAPY",
+      welcome:"Добро пожаловать в FLAPY GAMES", games:"ИГРЫ", flapyDesc:"Классика и PVP 1 VS 1", homeMore:"Скоро добавятся новые игры и сюрпризы.",
       dayRank:"Место сегодня", monthRank:"Место за месяц",
       wallet:"КОШЕЛЁК", walletSub:"Пополнение C · вывод FLAPY", usdValue:"В долларах",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1759,8 +1886,8 @@ window.FLAPY_ART = {
       topup:"ПОПОЛНИТЬ", withdrawTab:"ВЫВОД", youPay:"К оплате", payToAddress:"Отправьте TON на этот адрес",
       txHash:"Хэш транзакции", requestTopup:"ЗАПРОСИТЬ ПОПОЛНЕНИЕ", copy:"КОПИР.", copied:"СКОПИРОВАНО",
       enterTx:"Вставьте хэш TON-транзакции.",
-      topupOk:"Заявка на пополнение отправлена. C начислим после проверки.",
-      topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции. Админ начислит C после проверки.",
+      topupOk:"Заявка на пополнение отправлена. Система автоматически проверяет перевод и начислит C после подтверждения в сети.",
+      topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции. Перевод проверяется автоматически, C начислится после подтверждения в сети.",
       leaderboard:"ЛИДЕРЫ", lbSub:"Лидеры дня по очкам — призы указаны по местам", lbRecordsTitle:"Рекорды",
       daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место", lbViewScore:"ОЧКИ", lbViewInvites:"ПРИГЛАШЕНИЯ",
       dailyPrize:"Дневной приз", monthLockedTitle:"МЕСЯЧНЫЙ РЕЙТИНГ ЗАКРЫТ", monthLockedSub:"Откроется, когда онлайн будет 1000 игроков.",
@@ -1820,6 +1947,7 @@ window.FLAPY_ART = {
       loadingAd:"РЕКЛАМА…", watchAd2:"1/2", play:"ГРАТИ", continuesLeft:" продовж. залишилось",
       adUnavailable:"Реклама недоступна — спробуйте ще", tapToContinueRun:"Натисніть, щоб продовжити",
       profile:"ПРОФІЛЬ", home:"ГОЛОВНА", bestScore:"Найкращий рахунок", flapBalance:"Баланс FLAPY",
+      welcome:"Ласкаво просимо до FLAPY GAMES", games:"ІГРИ", flapyDesc:"Класика та PVP 1 VS 1", homeMore:"Скоро з'являться нові ігри та сюрпризи.",
       dayRank:"Місце сьогодні", monthRank:"Місце за місяць",
       wallet:"ГАМАНЕЦЬ", walletSub:"Поповнення C · вивід FLAPY", usdValue:"У доларах",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1829,8 +1957,8 @@ window.FLAPY_ART = {
       topup:"ПОПОВНИТИ", withdrawTab:"ВИВІД", youPay:"До сплати", payToAddress:"Надішліть TON на цю адресу",
       txHash:"Хеш транзакції", requestTopup:"ЗАПИТАТИ ПОПОВНЕННЯ", copy:"КОПІЯ", copied:"СКОПІЙОВАНО",
       enterTx:"Вставте хеш TON-транзакції.",
-      topupOk:"Заявку на поповнення надіслано. C нарахуємо після перевірки.",
-      topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції. Адмін нарахує C після перевірки.",
+      topupOk:"Заявку на поповнення надіслано. Система автоматично перевіряє переказ і нарахує C після підтвердження в мережі.",
+      topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції. Переказ перевіряється автоматично, C нарахується після підтвердження в мережі.",
       leaderboard:"ЛІДЕРИ", lbSub:"Лідери дня за балами — призи вказані по місцях", lbRecordsTitle:"Рекорди",
       daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце", lbViewScore:"БАЛИ", lbViewInvites:"ЗАПРОШЕННЯ",
       dailyPrize:"Денний приз", monthLockedTitle:"МІСЯЧНИЙ РЕЙТИНГ ЗАКРИТО", monthLockedSub:"Відкриється, коли онлайн буде 1000 гравців.",
@@ -1890,6 +2018,7 @@ window.FLAPY_ART = {
       loadingAd:"广告加载中…", watchAd2:"1/2", play:"开始", continuesLeft:" 次续命剩余",
       adUnavailable:"广告不可用，请重试", tapToContinueRun:"点击继续本局",
       profile:"个人", home:"主页", bestScore:"最高分", flapBalance:"FLAPY 余额",
+      welcome:"欢迎来到 FLAPY GAMES", games:"游戏", flapyDesc:"经典与 PVP 1 VS 1", homeMore:"更多游戏和惊喜即将推出。",
       dayRank:"今日排名", monthRank:"本月排名",
       wallet:"钱包", walletSub:"充值 C · 提现 FLAPY", usdValue:"美元价值",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1899,8 +2028,8 @@ window.FLAPY_ART = {
       topup:"充值", withdrawTab:"提现", youPay:"需支付", payToAddress:"向此地址发送 TON",
       txHash:"交易哈希", requestTopup:"申请充值", copy:"复制", copied:"已复制",
       enterTx:"请粘贴 TON 交易哈希。",
-      topupOk:"充值申请已提交，审核后将到账 C。",
-      topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希。管理员核对后会充值 C。",
+      topupOk:"充值申请已提交，系统会自动核验转账，链上确认后到账 C。",
+      topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希。系统会自动核验转账，链上确认后自动充值 C。",
       leaderboard:"排行榜", lbSub:"今日分数排行 — 奖励按名次显示", lbRecordsTitle:"分数纪录",
       daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名", lbViewScore:"分数", lbViewInvites:"邀请",
       dailyPrize:"每日奖励", monthLockedTitle:"月榜已锁定", monthLockedSub:"在线玩家达到 1000 人时开放。",
@@ -1960,6 +2089,7 @@ window.FLAPY_ART = {
       loadingAd:"विज्ञापन लोड…", watchAd2:"1/2", play:"खेलें", continuesLeft:" जारी मौके बाकी",
       adUnavailable:"विज्ञापन उपलब्ध नहीं — फिर कोशिश करें", tapToContinueRun:"जारी रखने के लिए टैप करें",
       profile:"प्रोफ़ाइल", home:"होम", bestScore:"सर्वश्रेष्ठ स्कोर", flapBalance:"FLAPY बैलेंस",
+      welcome:"FLAPY GAMES में आपका स्वागत है", games:"गेम्स", flapyDesc:"क्लासिक और PVP 1 VS 1", homeMore:"और गेम और सरप्राइज़ जल्द आ रहे हैं।",
       dayRank:"आज की रैंक", monthRank:"मासिक रैंक",
       wallet:"वॉलेट", walletSub:"C जमा करें · FLAPY निकालें", usdValue:"USD मूल्य",
       flapRate:"100 C = $1 · 100 FLAPY = $1",
@@ -1969,8 +2099,8 @@ window.FLAPY_ART = {
       topup:"जमा", withdrawTab:"निकासी", youPay:"भुगतान", payToAddress:"इस पते पर TON भेजें",
       txHash:"लेनदेन हैश", requestTopup:"जमा का अनुरोध", copy:"कॉपी", copied:"कॉपी हो गया",
       enterTx:"TON लेनदेन हैश चिपकाएँ।",
-      topupOk:"जमा अनुरोध भेज दिया गया। जाँच के बाद C जुड़ जाएगा।",
-      topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ। एडमिन जाँचकर C जोड़ देगा।",
+      topupOk:"जमा अनुरोध भेज दिया गया। सिस्टम ट्रांसफ़र की जाँच करके चेन पर पुष्टि होते ही C जोड़ देगा।",
+      topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ। ट्रांसफ़र स्वतः जाँचा जाएगा और चेन पर पुष्टि होते ही C जुड़ जाएगा।",
       leaderboard:"लीडरबोर्ड", lbSub:"दैनिक स्कोर लीडर — इनाम रैंक के साथ दिखेगा", lbRecordsTitle:"स्कोर रिकॉर्ड",
       daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक", lbViewScore:"स्कोर", lbViewInvites:"आमंत्रण",
       dailyPrize:"दैनिक इनाम", monthLockedTitle:"मासिक लीडरबोर्ड लॉक है", monthLockedSub:"1000 ऑनलाइन खिलाड़ी होने पर खुलेगा।",
@@ -2997,9 +3127,14 @@ window.FLAPY_ART = {
     if (!(amt > 0)) { msg.textContent = t('enterAmount'); return; }
     if (!tx) { msg.textContent = t('enterTx'); return; }
     msg.textContent = t('submitting');
-    requestDeposit(amt, tx).then(function(){
-      msg.textContent = t('topupOk');
+    requestDeposit(amt, tx).then(function(r){
       document.getElementById('depositTx').value = '';
+      if (r && r.auto && r.requestId != null) {
+        msg.textContent = t('topupConfirming');
+        watchAutoTopup(r.requestId, msg);
+      } else {
+        msg.textContent = t('topupOk');
+      }
     }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
   });
   document.querySelectorAll('.acc-head').forEach(function(head){
@@ -3188,10 +3323,10 @@ window.FLAPY_ART = {
   // on-chain. Poll the request until the server flips it to "approved" and then
   // refresh the balances in place.
   var autoTopupTimer = null;
-  function watchAutoTopup(requestId){
+  function watchAutoTopup(requestId, msgEl){
     if (autoTopupTimer) { clearTimeout(autoTopupTimer); autoTopupTimer = null; }
     var tries = 0;
-    var msg = document.getElementById('depositMsg');
+    var msg = msgEl || document.getElementById('depositMsg');
     function poll(){
       tries++;
       fetchDepositStatus(requestId).then(function(st){
@@ -3268,7 +3403,7 @@ window.FLAPY_ART = {
     });
   });
 
-  var PAGES = ['profile','wallet','leaderboard','tasks','referral'];
+  var PAGES = ['home','profile','wallet','leaderboard','tasks','referral'];
   // The referral page has no nav button any more (it lives behind the Tasks
   // burger menu and the main-menu button), so it highlights the TASKS tab.
   function navTabFor(page){ return page === 'referral' ? 'tasks' : page; }
@@ -3277,7 +3412,7 @@ window.FLAPY_ART = {
     document.querySelectorAll('.nav-btn').forEach(function(b){
       b.classList.toggle('active', b.getAttribute('data-page') === tab);
     });
-    wrap.classList.toggle('hidden', page !== 'home');
+    wrap.classList.add('hidden');
     PAGES.forEach(function(p){
       var el = document.getElementById('page-'+p);
       if (el) el.classList.toggle('hidden', page !== p);
@@ -3289,11 +3424,34 @@ window.FLAPY_ART = {
     if (page === 'leaderboard') loadLeaderboardPage(false);
     if (page === 'referral') loadReferralPage();
   }
+  function showGameMenu(){
+    // The HOME page is the hub. Opening FLAPY brings the actual game into
+    // focus (CLASSIC / PVP) instead of settling directly on the game.
+    PAGES.forEach(function(p){
+      var el = document.getElementById('page-'+p);
+      if (el) el.classList.add('hidden');
+    });
+    closeTasksMenu();
+    if (soundCard) soundCard.classList.add('hidden');
+    if (langCard) langCard.classList.add('hidden');
+    wrap.classList.remove('hidden');
+    if (accessLocked) {
+      accessCard.classList.remove('hidden');
+    } else if (pvpAutoResume && pvpLastData) {
+      pvpAutoResume = false;
+      applyPvpState(pvpLastData);
+    } else {
+      pvpAutoResume = false;
+      showMode();
+    }
+  }
   document.querySelectorAll('.nav-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
       showPage(btn.getAttribute('data-page'));
     });
   });
+  var homeFlapyBtn = document.getElementById('homeFlapyBtn');
+  if (homeFlapyBtn) homeFlapyBtn.addEventListener('click', showGameMenu);
 
   // Tasks page burger menu -> referral
   function closeTasksMenu(){
@@ -3652,6 +3810,8 @@ window.FLAPY_ART = {
   var pvpConfirmTick = null;
   var pvpMatchLive = false;
   var pvpPendingSubmit = null;
+  var pvpLastData = null;
+  var pvpAutoResume = false;
   var pvpStakes = [10,20,30,50,75,100,250,500,1000];
   function coinImg(kind){
     return '<img class="tiny-coin" src="'+artBlobUrl(kind==='c' ? 'c-coin.png' : 'coin.png')+'" alt="">';
@@ -3714,6 +3874,7 @@ window.FLAPY_ART = {
   }
   function applyPvpState(data){
     if (!data) return;
+    pvpLastData = data;
     if (data.cBalance != null) {
       setAmt('walletCBalance', data.cBalance, 'c');
       setAmt('profileCBalance', data.cBalance, 'c');
@@ -3891,6 +4052,7 @@ window.FLAPY_ART = {
     apiFetch('/api/pvp/status', { method:'POST', body: JSON.stringify({ initData: initData }) })
       .then(function(res){
         if (res && (res.match || res.waiting)) {
+          pvpAutoResume = true;
           applyPvpState(res);
           startPvpPoll();
         }
@@ -3900,13 +4062,15 @@ window.FLAPY_ART = {
     applyI18n();
     renderStakes();
     document.getElementById('navbar').classList.remove('hidden');
+    // Open the hub (HOME) instead of dropping straight into the game.
+    showPage('home');
+    // Verify game access in the background. If the user is blocked, the
+    // access card appears when they tap the FLAPY game card.
     if (DEMO_MODE) {
-      showMode();
+      accessLocked = false;
       return;
     }
-    showAccessChecking();
     checkGameAccess().then(function(){
-      showMode();
       resumePvpIfAny();
     }).catch(function(){});
   }

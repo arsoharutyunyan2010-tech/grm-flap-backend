@@ -34,12 +34,14 @@ const TON_API_KEY = (process.env.TON_API_KEY || '').trim();
 const MIN_DEPOSIT_NANO_TON = Math.max(0, Math.floor(Number(process.env.MIN_DEPOSIT_NANO_TON) || 10000000));
 
 // ---------------------------------------------------------------------------
-// Automatic top-ups paid from a CONNECTED wallet (TON Connect).
-// The player signs the transfer inside the mini app, so the server knows the
-// exact message (BOC) it should look for on-chain. Instead of parking the
-// request in the admin queue, we poll the TON indexer until that transfer shows
-// up at the deposit address and then credit the account by itself. Manual
-// (hash pasted by hand) top-ups keep the old admin-approval flow.
+// Automatic top-ups from a CONNECTED wallet (TON Connect) and from manual
+// hash-paste requests. For connected payments the player signs the transfer
+// inside the mini app, so the server knows the exact message (BOC) it should
+// look for on-chain. For manual top-ups the pasted txHash is verified to the
+// same deposit address. Instead of parking the request in the admin queue, we
+// poll the TON indexer until that transfer shows up at the deposit address and
+// then credit the account by itself. If verification is unavailable, the
+// request remains pending for admin review.
 // Turn it off with DEPOSIT_AUTO_CREDIT=false.
 const DEPOSIT_AUTO_CREDIT = process.env.DEPOSIT_AUTO_CREDIT !== 'false';
 // How long we keep looking for the transfer before leaving it to an admin.
@@ -782,12 +784,15 @@ app.post('/api/deposit', (req, res) => {
   const result = store.requestDeposit(userId, displayName(user), amount, txHash, sender);
   if (!result.ok) return res.status(400).json({ error: result.error });
 
-  // Wallet top-ups are credited automatically: we watch the chain for this
-  // exact transfer and approve the request ourselves once it is confirmed.
-  const auto = fromConnectedWallet && DEPOSIT_AUTO_CREDIT;
+  // Top-ups are credited automatically: whether the player pays from a
+  // connected wallet (BOC) or pastes a transaction hash, the server watches
+  // the chain for the exact transfer and approves the request itself once it
+  // is confirmed inbound on DEPOSIT_TON_ADDRESS. If verification is unavailable,
+  // the request stays pending for a human to review.
+  const auto = DEPOSIT_AUTO_CREDIT;
   if (auto) {
     result.request.auto = true;
-    result.request.source = 'tonconnect';
+    result.request.source = fromConnectedWallet ? 'tonconnect' : 'manual';
     scheduleAutoCredit(result.request.id, 0);
   }
 

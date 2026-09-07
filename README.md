@@ -210,10 +210,14 @@ The Wallet page lets players link a real TON wallet via
   TON (live rate from tonapi.io, CoinGecko fallback), opens a native payment
   confirmation in the connected wallet, and submits the resulting
   transaction **BOC** to `POST /api/deposit` (`{ boc, sender }`). The server
-  hashes the BOC with `@ton/core` into a searchable message hash, so the
-  admin panel's pending list looks exactly like the manual hash-paste flow —
-  approval stays manual. The payer's wallet address is stored on the request
-  (`deposit.wallet`) and shown in `admin.html`.
+  hashes the BOC with `@ton/core` into a searchable message hash, then the
+  server watches the chain for that exact inbound transfer to
+  `DEPOSIT_TON_ADDRESS`. When it is confirmed, the top-up is credited
+  automatically (this includes manual hash-paste top-ups too, so pasted
+  hashes are verified on-chain instead of waiting for an admin). If on-chain
+  verification is unavailable, the request stays pending for admin review.
+  The payer's wallet address is stored on the request (`deposit.wallet`) and
+  shown in `admin.html`.
 
 ## Production notes
 
