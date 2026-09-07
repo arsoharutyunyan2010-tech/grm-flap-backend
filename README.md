@@ -14,6 +14,10 @@ Pipeline: **Telegram Bot → Mini App → Rewarded Ads → Game → Score → Se
 | `store.js` | Data layer (in-memory demo — swap for Redis/Postgres in production; see comments inside). |
 | `rewards.js` | Weekly GRM reward tiers + payout stub. |
 | `bot.js` | Minimal bot that sends a "Play" button opening the Mini App. |
+| `img/ui/` | Optimized, lazy-loaded artwork for game results, PvP, help, tasks and referrals. |
+
+See [UI_ARTWORK.md](UI_ARTWORK.md) for the complete screen mapping, deployment,
+asset regeneration and artwork regression tests.
 
 ## Why the score can't be faked from the browser console
 

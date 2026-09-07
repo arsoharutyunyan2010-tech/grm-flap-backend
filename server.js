@@ -584,6 +584,7 @@ app.post('/api/submit-score', (req, res) => {
   const anomalies = store.checkScoreAnomaly(session.userId, verifiedScore);
   for (const a of anomalies) store.logEvent(session.userId, a.reason, a);
 
+  const previousBest = store.getAllTimeBest(session.userId);
   store.submitPeriodScores(session.userId, name, verifiedScore);
   const allTimeBest = store.updateAllTimeBest(session.userId, name, verifiedScore);
   store.recordVerifiedRun(session.userId, verifiedScore);
@@ -598,6 +599,9 @@ app.post('/api/submit-score', (req, res) => {
     clientScoreMismatch: verifiedScore !== clientScore,
     best: allTimeBest,
     allTimeBest,
+    // The new-best illustration must use the account's record, not a stale
+    // browser-local best (or a client-claimed score).
+    newBest: verifiedScore > previousBest,
     rank: ranks.week,
     ranks,
     weekKey: store.currentWeekKey(),
