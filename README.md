@@ -213,15 +213,26 @@ The Wallet page lets players link a real TON wallet via
 - **Top-up tab** — **PAY WITH CONNECTED WALLET** converts the C amount to
   TON (live rate from tonapi.io, CoinGecko fallback), opens a native payment
   confirmation in the connected wallet, and submits the resulting
-  transaction **BOC** to `POST /api/deposit` (`{ boc, sender }`). The server
-  hashes the BOC with `@ton/core` into a searchable message hash, then the
-  server watches the chain for that exact inbound transfer to
-  `DEPOSIT_TON_ADDRESS`. When it is confirmed, the top-up is credited
-  automatically (this includes manual hash-paste top-ups too, so pasted
-  hashes are verified on-chain instead of waiting for an admin). If on-chain
-  verification is unavailable, the request stays pending for admin review.
-  The payer's wallet address is stored on the request (`deposit.wallet`) and
-  shown in `admin.html`.
+  transaction **BOC** to `POST /api/deposit` (`{ boc, sender }`).
+  The server reads that BOC with `@ton/core` (`parseSignedBoc`) and takes
+  three things from the *signed* transaction: the wallet that signed it, the
+  address it pays and the exact nanoTON amount. It refuses the request if the
+  payment is not addressed to `DEPOSIT_TON_ADDRESS`, otherwise it watches the
+  deposit address's history for that transfer — inbound, from that wallet, for
+  that amount, not older than the request — and credits the C balance by
+  itself. **No admin approval is involved.**
+  Why not just look up a hash: the wallet signs an external message to *itself*
+  and the blockchain relays the transfer, so the hash of the signed BOC is not
+  the hash that appears on the deposit address. Matching (sender + amount +
+  time + destination) is what actually works, and it cannot be forged without
+  paying. Manual hash-paste top-ups are verified the same automatic way by
+  their claimed hash. Each on-chain transfer may only ever pay for ONE request
+  (`spentTransfers`), so signing several top-ups for the same payment credits
+  only the first. If the chain cannot be reached at all, the request stays
+  pending for admin review.
+  The payer's wallet address, the signed amount and the verification result are
+  stored on the request (`deposit.wallet`, `deposit.expectedNano`,
+  `deposit.verifiedBy`) and shown in `admin.html`.
 
 ## Production notes
 

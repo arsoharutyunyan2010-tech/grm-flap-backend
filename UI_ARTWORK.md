@@ -1,9 +1,9 @@
 # UI artwork integration
 
-The nine illustrations introduced in PR #25 are now used by the Mini App.
-The original `img/*.png` files remain untouched. The browser loads prepared,
-mobile-sized **`img/ui/*.webp`** files instead: **382,580 bytes total** versus
-22,716,164 bytes of source PNGs (98.3% smaller).
+The eight illustrations still used by the Mini App (the Tasks chest was removed
+from the Tasks screen at the owner's request, together with its source PNG).
+The browser loads prepared, mobile-sized **`img/ui/*.webp`** files:
+**354,766 bytes total** instead of the multi-megabyte source PNGs.
 
 ## Screen mapping
 
@@ -16,11 +16,12 @@ mobile-sized **`img/ui/*.webp`** files instead: **382,580 bytes total** versus
 | `pvp-searching` | Matchmaking queue, with native animated search dots |
 | `pvp-win` | PvP victory only; never a loss or draw |
 | `how-to-play` | How-to-play modal, alongside the existing translated instructions |
-| `tasks-chest` | Tasks page, above the task list/empty state |
 | `referral-friends` | Referral page, above the real invitation link and statistics |
 
-The existing home background, home banner, navigation icons, game sprites and
-sound effects are retained.
+The main-menu background comes from `img/menu-bg.jpg` when that file is present
+and falls back to the built-in `img/home-bg.jpg` otherwise; the old
+`home-banner.jpg` illustration is no longer shown on the menu. Navigation icons,
+game sprites and sound effects are retained.
 
 ## Delivery and presentation
 

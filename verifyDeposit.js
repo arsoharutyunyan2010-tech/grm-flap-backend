@@ -1,40 +1,47 @@
 /**
  * GRM FLAP — server-side on-chain verification of a deposit claim.
  * ------------------------------------------------------------------------
- * WHY: previously `/api/deposit` accepted a client-supplied `txHash` or a
- * signed TON BOC and only checked its FORMAT. Nothing proved that a real
- * inbound transfer to the project's deposit address actually exists for that
- * hash. So an attacker could claim "I sent $X to the deposit address" with a
- * hash/BOC of any *other* transfer and rely on an inattentive admin to approve
- * it. This module queries a TON indexer (toncenter by default) and confirms
- * that an inbound message with that hash reached the deposit address.
+ * WHY: `/api/deposit` used to accept a client-supplied `txHash` or a signed
+ * TON BOC and only checked its FORMAT. Nothing proved that a real inbound
+ * transfer to the project's deposit address actually exists for that hash, so
+ * an attacker could claim "I sent $X to the deposit address" with the hash of
+ * any *other* transfer and rely on an inattentive admin to approve it.
+ * This module queries a TON indexer (toncenter by default) and confirms that
+ * real money reached the deposit address.
  *
- * IMPORTANT / opt-in: the network dependency is OFF until you set
- *   DEPOSIT_ONCHAIN_ENABLED=true        (require verification before approve)
- * and, optionally:
- *   TON_RPC_URL=https://toncenter.com/api/v2   (default)
- *   TON_API_KEY=...                      (only if the endpoint needs a key)
- *   DEPOSIT_TON_ADDRESS=...              (the real address players pay into)
+ * TWO WAYS A TOP-UP IS MATCHED ON-CHAIN
+ * 1. "hash"  — the claimed transaction/message hash is found among the deposit
+ *              address's transactions. This is what a hand-pasted hash uses.
+ * 2. "transfer" — for a payment made from a CONNECTED wallet the client sends
+ *              the signed transaction BOC. Its external-message hash is NOT
+ *              what lands on the deposit address: the wallet signs an external
+ *              message to *itself* and the blockchain then relays the internal
+ *              transfer, which carries a different hash. So instead of looking
+ *              for a hash, we read the signed BOC (dest + amount + the wallet
+ *              that signed it) and look for THAT transfer: an inbound internal
+ *              message to the deposit address, from that wallet, for that
+ *              amount, no earlier than the moment the player submitted.
+ *              All four must match — an attacker cannot forge any of them
+ *              without actually paying.
  *
- * When it is NOT enabled the old manual-approval flow is preserved untouched.
- * When it IS enabled, `/internal/deposits/:id/approve` calls verifyDepositClaim()
- * and refuses to credit the account unless an inbound transfer with the claimed
- * hash is found arriving at DEPOSIT_TON_ADDRESS.
+ * Config (all optional, sensible defaults):
+ *   TON_RPC_URL=https://toncenter.com/api/v2   indexer to query
+ *   TON_API_KEY=...                            only if the endpoint needs one
+ *   DEPOSIT_TON_ADDRESS=...                    the address players pay into
  *
- * Amount semantics: the claimed amount in the app is arbitrary C-units, so we
- * do NOT hard-enforce an exact TON value (that would need a live price feed).
- * We DO return the on-chain value + source so the admin (and /internal/deposits)
- * can eyeball it; the anti-fraud guarantee we enforce is "this exact message
- * genuinely paid into OUR address".
+ * Amount semantics: the app quotes C-units, so the on-chain value is compared
+ * against the value inside the SIGNED transaction (exact, up to a small
+ * tolerance) rather than against the claimed C amount.
  */
 'use strict';
 
-let TonAddress = null;
+let TonCore = null;
 try {
-  // @ton/core provides Address.parse + eqRaw — used to compare raw addresses.
-  const core = require('@ton/core');
-  if (core && core.Address) TonAddress = core.Address;
-} catch (e) { /* optional dep — fall back to string comparison below */ }
+  // @ton/core provides Address.parse/eq plus the cell parsers used to read a
+  // signed transaction BOC. Optional — the hash flow works without it.
+  TonCore = require('@ton/core');
+} catch (e) { /* optional dep — hash-only verification below */ }
+const TonAddress = TonCore && TonCore.Address ? TonCore.Address : null;
 
 function asHex(raw) {
   if (typeof raw !== 'string') return '';
@@ -78,6 +85,28 @@ function itemSource(item) {
   return (item && item.in_msg && item.in_msg.source) || '';
 }
 
+function itemUtime(item) {
+  const u = Number(item && item.utime);
+  return Number.isFinite(u) && u > 0 ? u : 0;
+}
+
+// Stable identity of a ledger row, so one transfer can only ever pay for one
+// top-up request (see spentTransfers in server.js).
+function itemTxId(item) {
+  const t = item && item.transaction_id;
+  if (t && t.hash) return asHex(t.hash);
+  if (t && t.lt) return 'lt:' + t.lt;
+  if (item && item.in_msg && item.in_msg.hash) return asHex(item.in_msg.hash);
+  return '';
+}
+
+function itemDestination(item) {
+  if (item && item.in_msg && item.in_msg.destination) return item.in_msg.destination;
+  if (item && item.account) return item.account;
+  if (item && item.address && item.address.account_address) return item.address.account_address;
+  return '';
+}
+
 // Compare an address from the ledger to our deposit address. Prefer a raw
 // address comparison (friendly vs raw forms both collapse to the same raw) when
 // @ton/core is available; otherwise fall back to a tolerant string check.
@@ -98,16 +127,95 @@ function addressesEqual(a, b) {
   return rA.length >= 48 && rA === rB;
 }
 
+/* ------------------------------------------------------------------ *
+ * Reading a signed transaction (TON Connect "pay with wallet" top-up)
+ * ------------------------------------------------------------------ */
+
+// Depth-first walk over the cells reachable from `cell`, collecting every
+// internal message they carry. Wallet v4/v5 and high-load wallets all keep the
+// outgoing transfers somewhere under the signed body, so a bounded walk finds
+// them without needing to know which wallet contract signed.
+function collectRelaxedMessages(cell, out, depth, seen) {
+  if (!cell || depth > 6 || out.length >= 8 || typeof cell.beginParse !== 'function') return;
+  let id = '';
+  try { id = cell.hash().toString('hex'); } catch (e) { return; }
+  if (seen.has(id)) return;
+  seen.add(id);
+  try {
+    const relaxed = TonCore.loadMessageRelaxed(cell.beginParse());
+    const info = relaxed && relaxed.info;
+    if (info && info.type === 'internal' && info.dest) {
+      const coins = info.value && info.value.coins;
+      const nano = Number(coins == null ? 0 : coins);
+      if (Number.isFinite(nano)) out.push({ dest: String(info.dest.toString()), valueNanoTon: nano });
+    }
+  } catch (e) { /* this cell is not a message — keep walking */ }
+  const refs = cell.refs || [];
+  for (const ref of refs) collectRelaxedMessages(ref, out, depth + 1, seen);
+}
+
 /**
- * Fetch the most recent transactions of an address from a toncenter-style
- * getTransactions endpoint and scan for the claimed message hash.
+ * Read what a signed transaction BOC actually pays.
+ *
+ * @param {string} boc  base64 BOC as returned by TON Connect sendTransaction
+ * @returns {{ok:boolean, txHash?:string, payer?:string, transfers?:Array<{dest:string,valueNanoTon:number}>, reason?:string}}
+ */
+function parseSignedBoc(boc) {
+  if (!TonCore || !TonCore.Cell || typeof TonCore.loadMessage !== 'function') {
+    return { ok: false, reason: 'ton parser unavailable' };
+  }
+  if (typeof boc !== 'string' || boc.length < 32 || boc.length > 40000) {
+    return { ok: false, reason: 'invalid transaction payload' };
+  }
+  let root = null;
+  try {
+    root = TonCore.Cell.fromBoc(Buffer.from(boc, 'base64'))[0];
+  } catch (e) {
+    return { ok: false, reason: 'invalid transaction payload' };
+  }
+  if (!root) return { ok: false, reason: 'invalid transaction payload' };
+
+  let txHash = '';
+  try { txHash = root.hash().toString('hex'); } catch (e) { /* leave empty */ }
+
+  let payer = '';
+  const transfers = [];
+  try {
+    const msg = TonCore.loadMessage(root.beginParse());
+    const info = msg && msg.info;
+    if (info && info.type === 'external-in' && info.dest) payer = String(info.dest.toString());
+    const body = msg && msg.body; // Cell when the body was stored as a ref
+    if (body && typeof body.beginParse === 'function') {
+      collectRelaxedMessages(body, transfers, 0, new Set());
+    }
+  } catch (e) { /* hash-only fallback still applies */ }
+
+  return { ok: !!txHash, txHash, payer, transfers, reason: txHash ? undefined : 'unreadable transaction' };
+}
+
+/* ------------------------------------------------------------------ *
+ * On-chain lookup
+ * ------------------------------------------------------------------ */
+
+// The default tolerance for matching the SIGNED amount against the amount that
+// arrived. Wallets normally forward it untouched; the slack only covers
+// indexers that round or report a post-fee value.
+const DEFAULT_VALUE_TOLERANCE = 0.02;
+
+/**
+ * Look for the player's transfer among the deposit address's recent history.
  *
  * @param {object} o
  * @param {string} o.txHash          claimed message/transaction hash
  * @param {string} o.depositAddress  the project's deposit address
+ * @param {string} [o.expectedSource]      wallet that signed the payment
+ * @param {number} [o.expectedValueNanoTon] amount inside the signed payment
+ * @param {number} [o.notBeforeSec]  ignore transfers older than this (unix s)
+ * @param {number} [o.valueTolerance] relative slack on expectedValueNanoTon
  * @param {string} [o.rpcUrl]        default https://toncenter.com/api/v2
  * @param {string} [o.apiKey]
- * @param {number} [o.limit]         pages worth of recent txs to scan
+ * @param {number} [o.limit]         transactions per page
+ * @param {number} [o.maxPages]      how far back to walk
  * @param {Function} [o.fetchImpl]   injected fetch (tests) — defaults to global.fetch
  */
 async function verifyDepositClaim(o) {
@@ -115,7 +223,24 @@ async function verifyDepositClaim(o) {
   const txHash = String(o.txHash || '').trim();
   const depositAddress = String(o.depositAddress || '').trim();
   const limit = Math.max(5, Math.min(100, Number(o.limit) || 30));
-  if (!txHash || txHash.length < 8 || !depositAddress) {
+  const maxPages = Math.max(1, Math.min(10, Number(o.maxPages) || 5));
+  const expectedSource = String(o.expectedSource || '').trim();
+  const expectedValue = Number(o.expectedValueNanoTon) || 0;
+  const tolerance = Math.min(0.5, Math.max(0, Number(o.valueTolerance) >= 0
+    ? Number(o.valueTolerance)
+    : DEFAULT_VALUE_TOLERANCE));
+  // Allow a little slack for wallet/indexer clock skew, never more.
+  const notBefore = Math.floor(Number(o.notBeforeSec) || 0) - 120;
+
+  // A "transfer" match needs BOTH the signer and the exact signed amount: the
+  // amount alone is guessable (two players paying $1 in the same minute would
+  // collide), the signer alone is not proof of value.
+  const canMatchTransfer = !!(expectedSource && expectedValue > 0);
+
+  if ((!txHash || txHash.length < 8) && !canMatchTransfer) {
+    return { ok: false, reason: 'on-chain verification requires a tx hash and deposit address' };
+  }
+  if (!depositAddress) {
     return { ok: false, reason: 'on-chain verification requires a tx hash and deposit address' };
   }
   const rpcUrl = (String(o.rpcUrl || '').trim().replace(/\/+$/, '')) || 'https://toncenter.com/api/v2';
@@ -126,13 +251,13 @@ async function verifyDepositClaim(o) {
 
   let nextLt = null;
   let scanned = 0;
-  let best = null; // best candidate: same address + hash found
-  let sameAddressAny = false; // some tx reached our address at all
+  let best = null;               // matched transfer
+  let sameAddressAny = false;    // some tx reached our address at all
   let foundAnyHash = false;
 
-  // Scan several pages of the address's history until we either find the hash
-  // or exhaust the recent window.
-  for (let page = 0; page < 5; page++) {
+  // Scan pages of the address's history (newest → oldest) until we find the
+  // transfer or run out of window.
+  for (let page = 0; page < maxPages; page++) {
     let url = `${rpcUrl}/getTransactions?address=${encodeURIComponent(depositAddress)}&limit=${limit}`;
     if (nextLt) url += '&to_lt=' + encodeURIComponent(nextLt);
     const headers = {};
@@ -152,22 +277,44 @@ async function verifyDepositClaim(o) {
 
     for (const item of list) {
       scanned++;
-      const toAddress = item && item.in_msg && item.in_msg.destination
-        ? item.in_msg.destination
-        : (item && item.account);
+      const toAddress = itemDestination(item);
       const toDeposit = addressesEqual(toAddress, depositAddress);
       const hashes = itemHashes(item);
-      const hashHit = hashes.some((h) => isHashEqual(h, txHash));
+      const hashHit = !!txHash && hashes.some((h) => isHashEqual(h, txHash));
       if (hashHit) foundAnyHash = true;
+
       if (toDeposit && hashHit) {
         best = {
+          matchedBy: 'hash',
           valueNanoTon: itemValueNanoTon(item),
           source: itemSource(item),
+          utime: itemUtime(item),
+          txId: itemTxId(item),
           toDeposit: true,
         };
         break;
       }
-      if (toDeposit) sameAddressAny = true;
+
+      if (toDeposit) {
+        sameAddressAny = true;
+        if (canMatchTransfer) {
+          const source = itemSource(item);
+          const value = itemValueNanoTon(item);
+          const utime = itemUtime(item);
+          const sourceOk = !!source && addressesEqual(source, expectedSource);
+          // Wallets forward the signed amount untouched; the slack only covers
+          // rounding in the indexer's reported value.
+          const valueOk = Math.abs(value - expectedValue) <= Math.max(expectedValue * tolerance, 1000);
+          const timeOk = !notBefore || utime === 0 || utime >= notBefore;
+          if (sourceOk && valueOk && timeOk) {
+            best = {
+              matchedBy: 'transfer', valueNanoTon: value, source, utime,
+              txId: itemTxId(item), toDeposit: true,
+            };
+            break;
+          }
+        }
+      }
     }
     if (best) break;
     // Page forward using the oldest transaction id on this page (toncenter
@@ -178,12 +325,28 @@ async function verifyDepositClaim(o) {
   }
 
   if (best) {
-    return { ok: true, found: true, valueNanoTon: best.valueNanoTon, source: best.source };
+    return {
+      ok: true,
+      found: true,
+      matchedBy: best.matchedBy,
+      valueNanoTon: best.valueNanoTon,
+      source: best.source,
+      utime: best.utime,
+      txId: best.txId || '',
+    };
   }
   const reason = foundAnyHash && !sameAddressAny
     ? 'hash exists but was NOT paid to the deposit address'
-    : 'no inbound transfer with that hash found to the deposit address';
+    : 'no inbound transfer from that wallet to the deposit address found yet';
   return { ok: false, found: false, reason, sameAddressAny, foundAnyHash, scanned };
 }
 
-module.exports = { verifyDepositClaim, _t: { asHex, isHashEqual, itemHashes, itemValueNanoTon, itemSource, addressesEqual } };
+module.exports = {
+  verifyDepositClaim,
+  parseSignedBoc,
+  addressesEqual,
+  _t: {
+    asHex, isHashEqual, itemHashes, itemValueNanoTon, itemSource, itemUtime,
+    itemTxId, itemDestination, addressesEqual, collectRelaxedMessages,
+  },
+};

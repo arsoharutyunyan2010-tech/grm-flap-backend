@@ -574,26 +574,21 @@
   }
 
   /* ---------- Home / main menu ---------- */
+  /* Background art. `/img/menu-bg.jpg` is the menu artwork: when the file is
+     present it paints, when it is not the layer is skipped and the built-in
+     home-bg.jpg underneath shows through, so the menu is never broken. */
   #page-home, .page-home{
     background-color: #0d0620;
     background-image:
-      linear-gradient(180deg, rgba(13,6,32,0.30) 0%, rgba(13,6,32,0.60) 100%),
+      linear-gradient(180deg, rgba(13,6,32,0.42) 0%, rgba(13,6,32,0.55) 62%, rgba(13,6,32,0.84) 100%),
+      url('/img/menu-bg.jpg'),
       url('/img/home-bg.jpg');
     background-size: cover;
     background-position: center top;
     background-repeat: no-repeat;
     background-attachment: fixed;
   }
-  .page-home .page-inner, #page-home .page-inner{ padding-top: 4px; }
-  .home-banner{
-    width:100%;
-    display:block;
-    border-radius:22px;
-    border:2px solid rgba(244,197,66,0.45);
-    box-shadow: 0 14px 34px rgba(0,0,0,0.55), 0 0 24px rgba(244,197,66,0.20);
-    margin-bottom: 18px;
-    object-fit: contain;
-  }
+  .page-home .page-inner, #page-home .page-inner{ padding-top: 10px; }
   .home-hello{
     font-size: 15px;
     font-weight: 800;
@@ -620,22 +615,32 @@
     display:flex; align-items:center; gap:14px;
     box-sizing:border-box;
     width:100%;
-    padding:16px 16px;
-    border-radius:18px;
-    border:1px solid rgba(244,197,66,0.32);
-    background: linear-gradient(135deg, rgba(244,197,66,0.10), rgba(255,255,255,0.03));
+    padding:18px 18px;
+    border-radius:20px;
+    border:2px solid rgba(244,197,66,0.85);
+    background: linear-gradient(135deg, rgba(244,197,66,0.26), rgba(255,255,255,0.06));
     color: var(--ink);
     cursor:pointer;
     text-align:left;
-    box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,233,168,0.25), 0 0 26px rgba(244,197,66,0.28);
+    animation: homeCtaPulse 2.4s ease-in-out infinite;
+  }
+  /* The one button on the menu has to be impossible to miss. */
+  @keyframes homeCtaPulse{
+    0%, 100%{ box-shadow: 0 10px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,233,168,0.25), 0 0 20px rgba(244,197,66,0.20); }
+    50%{ box-shadow: 0 12px 30px rgba(0,0,0,0.50), inset 0 0 0 2px rgba(255,233,168,0.60), 0 0 42px rgba(244,197,66,0.50); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .game-card{ animation: none; }
   }
   .game-card:active{
     transform: scale(0.98) translateY(2px);
-    border-color: rgba(244,197,66,0.75);
+    border-color: #ffe9a8;
   }
   .game-card-img{
     width:64px; height:64px; flex:0 0 auto;
     object-fit:contain;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,0.45));
   }
   .game-card-text{
     display:flex; flex-direction:column; justify-content:center;
@@ -654,14 +659,34 @@
   .game-card-desc{
     display:block;
     font-size:12px;
-    opacity:0.65;
+    opacity:0.75;
     margin-top:4px;
   }
-  .game-card-arrow{
+  .game-card-go{
     margin-left:auto;
-    font-size:24px;
+    display:inline-flex; align-items:center; gap:8px;
+    flex:0 0 auto;
+    padding:12px 16px;
+    border-radius:999px;
+    background: linear-gradient(180deg, #ffe9a8 0%, #f4c542 55%, #d99a1f 100%);
+    color:#20143a;
+    font-size:15px;
     font-weight:900;
-    color:var(--gold);
+    letter-spacing:1.2px;
+    white-space:nowrap;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.65);
+  }
+  .game-card-arrow{
+    font-size:16px;
+    font-weight:900;
+    color:#20143a;
+  }
+  @media (max-width: 380px){
+    .game-card{ padding:14px; gap:10px; }
+    .game-card-img{ width:52px; height:52px; }
+    .game-card-title{ font-size:22px; letter-spacing:1px; }
+    .game-card-go{ padding:10px 12px; font-size:13px; }
+    .game-card-arrow{ display:none; }
   }
   .home-note{
     margin-top:16px;
@@ -1113,7 +1138,6 @@
 
 <div class="page hidden" id="page-home">
   <div class="page-inner">
-    <img class="home-banner" src="/img/home-banner.jpg" alt="FLAPY GAMES">
     <div class="home-hello" id="homeGreeting" data-i18n="welcome">Welcome to FLAPY GAMES</div>
     <div class="home-section-title" data-i18n="games">Games</div>
     <div class="home-games">
@@ -1123,7 +1147,7 @@
           <span class="game-card-title">FLAPY</span>
           <span class="game-card-desc" data-i18n="flapyDesc">Classic &amp; PVP 1 VS 1</span>
         </span>
-        <span class="game-card-arrow" aria-hidden="true">➜</span>
+        <span class="game-card-go"><span data-i18n="play">PLAY</span><span class="game-card-arrow" aria-hidden="true">➜</span></span>
       </button>
     </div>
     <div class="home-note" data-i18n="homeMore">More games and surprises coming soon.</div>
@@ -1289,7 +1313,6 @@
       </div>
     </div>
     <div class="sub" data-i18n="tasksSub">Complete tasks and earn rewards.</div>
-    <img class="screen-art screen-art--page" src="/img/ui/tasks-chest.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
     <div class="lb-list" id="tasksList">
       <div class="hint" data-i18n="comingSoon">Coming soon.</div>
     </div>
