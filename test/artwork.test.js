@@ -17,7 +17,7 @@ const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const serverSource = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
 const names = [
   'mascot-crash', 'trophy-new-best', 'game-over-banner', 'pvp-battle-banner',
-  'pvp-searching', 'pvp-win', 'how-to-play', 'tasks-chest', 'referral-friends',
+  'pvp-searching', 'pvp-win', 'how-to-play', 'referral-friends',
 ];
 const assetPath = name => path.join(ROOT, 'img', 'ui', name + '.webp');
 
@@ -102,7 +102,7 @@ function clientHarness(overrides = {}) {
 const visible = el => !el.classList.contains('hidden');
 const flushPromises = () => new Promise(resolve => setImmediate(resolve));
 
-test('all nine illustrations are small, valid WebP files with lazy accessible markup', () => {
+test('all eight illustrations are small, valid WebP files with lazy accessible markup', () => {
   assert.deepEqual(fs.readdirSync(path.join(ROOT, 'img', 'ui')).sort(), names.map(n => n + '.webp').sort());
   let totalBytes = 0;
   for (const name of names) {

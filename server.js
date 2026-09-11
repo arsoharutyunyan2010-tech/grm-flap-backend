@@ -20,7 +20,7 @@ const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
 const BOTS = require('./bots.js');
-const { verifyDepositClaim } = require('./verifyDeposit.js');
+const { verifyDepositClaim, parseSignedBoc, addressesEqual } = require('./verifyDeposit.js');
 
 // Optional on-chain deposit verification (see verifyDeposit.js). OFF by default
 // so existing manual-approval deployments are unaffected; turn on by setting
@@ -105,10 +105,51 @@ async function creditableAmount(claimed, valueNanoTon) {
   return Math.max(0, paidC);
 }
 
+// One on-chain transfer may only ever pay for ONE request. Without this a
+// player could pay 0.4 TON once and then sign several top-ups for the same
+// amount from the same wallet — every one of them would find that transfer and
+// be credited. The key is the ledger row's own identity (transaction id +
+// sender + value), rebuilt from the stored deposits after a restart.
+const spentTransfers = new Map(); // transfer key -> deposit id that consumed it
+function transferKey(vres) {
+  return [
+    String((vres && vres.matchedBy) || 'hash'),
+    String((vres && vres.txId) || ''),
+    String((vres && vres.source) || '').toLowerCase(),
+    String((vres && vres.valueNanoTon) || 0),
+  ].join('|');
+}
+function rebuildSpentTransfers() {
+  spentTransfers.clear();
+  for (const d of store.listDeposits()) {
+    if (d && d.status === 'approved' && d.onchainTxId) spentTransfers.set(String(d.onchainTxId), d.id);
+  }
+}
+// Mark this transfer as consumed by `deposit`. Refuses when another request
+// already got the money.
+function claimTransfer(deposit, vres) {
+  const key = transferKey(vres);
+  const owner = spentTransfers.get(key);
+  if (owner != null && Number(owner) !== Number(deposit.id)) return { ok: false, owner, key };
+  spentTransfers.set(key, deposit.id);
+  return { ok: true, key };
+}
+
 const autoCreditTimers = new Map();
 // Retry schedule (ms from submission): the indexer needs a few seconds to see
-// the transfer, then we back off.
-const AUTO_CREDIT_DELAYS = [8000, 12000, 20000, 30000, 45000, 60000, 90000, 120000, 150000];
+// the transfer, then we back off. Override with DEPOSIT_AUTO_CREDIT_DELAYS_MS
+// (comma separated) — mostly useful for tests and for tuning how eagerly the
+// balance appears in the mini app.
+const AUTO_CREDIT_DELAYS = (() => {
+  const fallback = [8000, 12000, 20000, 30000, 45000, 60000, 90000, 120000, 150000];
+  const raw = (process.env.DEPOSIT_AUTO_CREDIT_DELAYS_MS || '').trim();
+  if (!raw) return fallback;
+  const parsed = raw.split(',').map((s) => Math.floor(Number(s))).filter((n) => Number.isFinite(n) && n > 0);
+  return parsed.length ? parsed : fallback;
+})();
+// Safety net: even when a timer is lost (or the process was busy), every
+// pending automatic top-up gets re-checked on this interval.
+const AUTO_CREDIT_SWEEP_MS = Math.max(5000, Math.floor(Number(process.env.DEPOSIT_AUTO_CREDIT_SWEEP_MS) || 30000));
 
 function scheduleAutoCredit(depositId, attempt) {
   if (!DEPOSIT_AUTO_CREDIT) return;
@@ -136,6 +177,12 @@ async function tryAutoCredit(id, attempt) {
   const vres = await verifyDepositClaim({
     txHash: deposit.txHash,
     depositAddress: address,
+    // Connected-wallet payments: the signed BOC told us which wallet paid and
+    // for exactly how much, so the transfer can be recognised even though the
+    // wallet's external message has a different hash than the relayed one.
+    expectedSource: deposit.wallet || '',
+    expectedValueNanoTon: Number(deposit.expectedNano) || 0,
+    notBeforeSec: Math.floor(Number(deposit.requestedAt || 0) / 1000),
     rpcUrl: TON_RPC_URL,
     apiKey: TON_API_KEY,
   });
@@ -144,6 +191,7 @@ async function tryAutoCredit(id, attempt) {
     if (expired) {
       // Give up quietly: the request stays pending for a human to look at.
       deposit.autoResult = 'not-found: ' + (vres.reason || 'lookup failed');
+      deposit.autoDone = true;
       console.warn('[deposit-auto] #' + id + ' left for admin:', deposit.autoResult);
       return;
     }
@@ -154,6 +202,7 @@ async function tryAutoCredit(id, attempt) {
   const valueNanoTon = Number(vres.valueNanoTon || 0);
   if (MIN_DEPOSIT_NANO_TON > 0 && valueNanoTon < MIN_DEPOSIT_NANO_TON) {
     deposit.autoResult = 'below minimum on-chain value (' + valueNanoTon + ')';
+    deposit.autoDone = true;
     store.logEvent(deposit.userId, 'auto top-up below minimum', {
       txHash: deposit.txHash, valueNanoTon, minimum: MIN_DEPOSIT_NANO_TON,
     });
@@ -165,6 +214,7 @@ async function tryAutoCredit(id, attempt) {
   if (credit != null && credit !== claimed) {
     if (credit <= 0) {
       deposit.autoResult = 'paid value too small to credit';
+      deposit.autoDone = true;
       return;
     }
     deposit.claimedAmount = claimed;
@@ -172,15 +222,31 @@ async function tryAutoCredit(id, attempt) {
   }
   deposit.valueNanoTon = valueNanoTon;
   deposit.onchainSource = vres.source || '';
+  deposit.verifiedBy = vres.matchedBy || 'hash';
+
+  // The transfer is real — but has it already paid for another request?
+  const claim = claimTransfer(deposit, vres);
+  if (!claim.ok) {
+    deposit.autoResult = 'on-chain transfer already credited to request #' + claim.owner;
+    deposit.autoDone = true;
+    store.addStrike(deposit.userId, 'reused transfer', {
+      txHash: deposit.txHash, owner: claim.owner, valueNanoTon,
+    });
+    console.warn('[deposit-auto] #' + id + ' refused: transfer already credited to #' + claim.owner);
+    return;
+  }
+  deposit.onchainTxId = claim.key;
 
   const result = store.approveDeposit(id);
   if (!result) return;
   deposit.autoApproved = true;
+  deposit.autoDone = true;
   deposit.autoResult = 'credited';
   store.logEvent(deposit.userId, 'auto top-up credited', {
     depositId: id, amount: deposit.amount, txHash: deposit.txHash, valueNanoTon,
+    verifiedBy: deposit.verifiedBy,
   });
-  console.log('[deposit-auto] #' + id + ' credited', deposit.amount, 'C to', deposit.userId);
+  console.log('[deposit-auto] #' + id + ' credited', deposit.amount, 'C to', deposit.userId, '(' + deposit.verifiedBy + ')');
 }
 
 // After a restart, pick up wallet top-ups that were still waiting for their
@@ -189,7 +255,7 @@ function resumeAutoCredits() {
   if (!DEPOSIT_AUTO_CREDIT) return;
   let n = 0;
   for (const d of store.listDeposits('pending')) {
-    if (!d || !d.auto) continue;
+    if (!d || !d.auto || d.autoDone) continue;
     if (Date.now() - Number(d.requestedAt || 0) > AUTO_CREDIT_WINDOW_MS) continue;
     scheduleAutoCredit(d.id, 0);
     n++;
@@ -197,23 +263,44 @@ function resumeAutoCredits() {
   if (n) console.log('[deposit-auto] resumed', n, 'pending wallet top-up(s)');
 }
 
+// Safety net behind the per-request retry chain: re-arm a check for any pending
+// automatic top-up that has no timer running, so a dropped timer (or a request
+// created while the indexer was rate-limiting) can never strand a real payment
+// in the manual queue.
+function sweepAutoCredits() {
+  if (!DEPOSIT_AUTO_CREDIT) return;
+  for (const d of store.listDeposits('pending')) {
+    if (!d || !d.auto || d.autoDone) continue;
+    if (autoCreditTimers.has(d.id)) continue;
+    if (Date.now() - Number(d.requestedAt || 0) > AUTO_CREDIT_WINDOW_MS) continue;
+    scheduleAutoCredit(d.id, 0);
+  }
+}
+
 // TON Connect: when a player tops up by paying from a connected wallet
 // (Tonkeeper / Telegram Wallet / MyTonWallet...), the client sends the signed
-// transaction BOC instead of a hand-pasted hash. We hash the BOC server-side
-// so admins get a real, searchable message hash in the pending list.
-let TonCell = null;
-try { TonCell = require('@ton/core').Cell; } catch (err) {
-  console.warn('TON Connect top-up hashing disabled (@ton/core missing):', err.message || err);
-}
-function txHashFromBoc(boc) {
-  if (!TonCell) return '';
-  if (typeof boc !== 'string' || boc.length < 32 || boc.length > 40000) return '';
-  try {
-    const cell = TonCell.fromBoc(Buffer.from(boc, 'base64'))[0];
-    return cell.hash().toString('hex');
-  } catch (err) {
-    return '';
-  }
+// transaction BOC instead of a hand-pasted hash. Read it server-side:
+//   txHash       — hash of the signed external message (what admins see),
+//   payer        — the wallet that signed it, i.e. the on-chain sender,
+//   expectedNano — the exact amount the signed transfer carries.
+// payer + expectedNano are what make the automatic credit possible: the wallet
+// relays its own internal transfer, so the hash above is NOT the one that shows
+// up on the deposit address — the (sender, amount) pair is.
+function readSignedTopup(boc) {
+  const parsed = parseSignedBoc(boc);
+  if (!parsed || !parsed.ok || !parsed.txHash) return null;
+  const to = depositAddress();
+  const transfers = Array.isArray(parsed.transfers) ? parsed.transfers : [];
+  const mine = transfers.filter((t) => t && addressesEqual(t.dest, to));
+  return {
+    txHash: parsed.txHash,
+    payer: parsed.payer || '',
+    expectedNano: mine.length ? Number(mine[0].valueNanoTon) || 0 : 0,
+    transfersSeen: transfers.length,
+    // Parsed transfers exist but none of them pays us → the player signed
+    // something else entirely. Nothing to credit.
+    paysElsewhere: transfers.length > 0 && mine.length === 0,
+  };
 }
 
 try {
@@ -772,13 +859,20 @@ app.post('/api/deposit', (req, res) => {
     return res.status(400).json({ error: 'invalid amount' });
   }
   // Paid straight from a connected TON wallet? The client sends the signed
-  // transaction BOC — derive its message hash here instead of trusting input.
+  // transaction BOC — read the real destination/amount/sender out of it here
+  // instead of trusting anything the client typed.
   let fromConnectedWallet = false;
+  let signed = null;
   if (!txHash && req.body && req.body.boc) {
-    txHash = txHashFromBoc(req.body.boc);
-    if (!txHash) {
+    signed = readSignedTopup(req.body.boc);
+    if (!signed) {
       return res.status(400).json({ error: 'invalid transaction payload' });
     }
+    if (signed.paysElsewhere) {
+      store.logEvent(userId, 'top-up paid elsewhere', { txHash: signed.txHash, sender });
+      return res.status(400).json({ error: 'transaction is not addressed to the top-up address' });
+    }
+    txHash = signed.txHash;
     fromConnectedWallet = true;
   }
   if (!txHash) {
@@ -787,6 +881,14 @@ app.post('/api/deposit', (req, res) => {
 
   const result = store.requestDeposit(userId, displayName(user), amount, txHash, sender);
   if (!result.ok) return res.status(400).json({ error: result.error });
+
+  if (signed) {
+    // The signed transaction wins over client input: the wallet that signed it
+    // is the on-chain sender, and the amount inside it is what will arrive.
+    if (signed.payer) result.request.wallet = signed.payer;
+    if (signed.expectedNano > 0) result.request.expectedNano = signed.expectedNano;
+    result.request.signed = true;
+  }
 
   // Top-ups are credited automatically: whether the player pays from a
   // connected wallet (BOC) or pastes a transaction hash, the server watches
@@ -965,6 +1067,11 @@ app.post('/internal/deposits/:id/approve', async (req, res) => {
     const vres = await verifyDepositClaim({
       txHash: deposit.txHash,
       depositAddress,
+      // Same matchers the automatic path uses, so a connected-wallet payment
+      // that the sweeper somehow missed can still be approved on its merits.
+      expectedSource: deposit.wallet || '',
+      expectedValueNanoTon: Number(deposit.expectedNano) || 0,
+      notBeforeSec: Math.floor(Number(deposit.requestedAt || 0) / 1000),
       rpcUrl: TON_RPC_URL,
       apiKey: TON_API_KEY,
     });
@@ -987,6 +1094,17 @@ app.post('/internal/deposits/:id/approve', async (req, res) => {
         error: 'on-chain transfer is real but below the minimum value (' + vres.valueNanoTon + ' < ' + MIN_DEPOSIT_NANO_TON + ' nanoTON)',
       });
     }
+    // Same single-use rule the automatic path enforces: one transfer, one
+    // credited request — whoever approves it.
+    const claim = claimTransfer(deposit, vres);
+    if (!claim.ok) {
+      return res.status(409).json({
+        ok: false,
+        error: 'this on-chain transfer already credited request #' + claim.owner,
+      });
+    }
+    deposit.onchainTxId = claim.key;
+    deposit.verifiedBy = vres.matchedBy || 'hash';
     res.setHeader('X-Deposit-Onchain', 'verified:' + (vres.valueNanoTon || 0));
   }
   const result = store.approveDeposit(id);
@@ -1299,7 +1417,12 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 3000;
 const start = store.ready || Promise.resolve();
 start.then(() => {
+  rebuildSpentTransfers();
   resumeAutoCredits();
+  // Belt and braces: re-check every pending automatic top-up on an interval so
+  // no real payment can get stranded in the manual queue.
+  const sweep = setInterval(sweepAutoCredits, AUTO_CREDIT_SWEEP_MS);
+  if (sweep.unref) sweep.unref();
   app.listen(PORT, () => {
     const info = store.persistInfo();
     console.log(`GRM FLAP backend listening on :${PORT}`);

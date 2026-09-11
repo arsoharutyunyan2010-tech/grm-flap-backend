@@ -23,7 +23,6 @@ ARTWORK = {
     "pvp-win": (None, (384, 384)),
     # Only the tap / pipe-opening illustrations; scoring is explained in HTML.
     "how-to-play": ((70, 222, 526, 587), (640, 400)),
-    "tasks-chest": (None, (384, 384)),
     "referral-friends": ((0, 0, 1584, 672), (768, 400)),
 }
 

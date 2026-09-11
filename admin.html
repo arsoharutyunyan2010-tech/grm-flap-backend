@@ -366,8 +366,9 @@
         '</td>' +
         '<td>'+ d.amount +' FLAP ($'+(d.amount/100).toFixed(2)+')</td>' +
         '<td class="status-'+d.status+'">'+ d.status +
-          (d.autoApproved ? '<div style="opacity:.7;margin-top:4px;">auto (on-chain)</div>'
-            : (d.auto ? '<div style="opacity:.7;margin-top:4px;">wallet · auto-checking</div>' : '')) +
+          (d.autoApproved ? '<div style="opacity:.7;margin-top:4px;">auto ('+ esc(d.verifiedBy || 'on-chain') +')</div>'
+            : (d.auto ? '<div style="opacity:.7;margin-top:4px;">wallet · auto-checking'+
+                (d.autoResult ? ' — '+ esc(d.autoResult) : '') +'</div>' : '')) +
           (d.claimedAmount != null ? '<div style="opacity:.7;margin-top:4px;">claimed '+ d.claimedAmount +'</div>' : '') +
         '</td>' +
         '<td>'+ actions +'</td>';
