@@ -166,6 +166,15 @@
     user-select: none;
   }
   .screen-art--modal{ width: auto; height: clamp(100px, 18vh, 148px); }
+  /* Result illustrations are the emotional payoff of a run: show them big and
+     luminous instead of a small stamp that sinks into the dark card. */
+  #gameOverArt, #newBestArt{
+    width: 100%;
+    height: auto;
+    max-height: clamp(150px, 26vh, 210px);
+    object-fit: contain;
+    filter: saturate(1.15) brightness(1.1) drop-shadow(0 8px 24px rgba(0,0,0,0.55)) drop-shadow(0 0 22px rgba(244,197,66,0.30));
+  }
   .screen-art--page{ width: auto; max-height: 190px; margin: 18px auto 20px; }
   .screen-art.art-unavailable{ display: none !important; }
   .search-art{ position: relative; }
@@ -189,6 +198,7 @@
     .art-overlay .card{ padding: 14px 16px 18px; }
     .art-overlay button:not(.stake-chip){ padding: 11px 16px; }
     .screen-art--modal{ height: 96px; margin-bottom: 8px; }
+    #gameOverArt, #newBestArt{ max-height: 140px; }
   }
   @media (prefers-reduced-motion: reduce){
     .search-dots span{ animation: none; }
@@ -617,18 +627,18 @@
     width:100%;
     padding:18px 18px;
     border-radius:20px;
-    border:2px solid rgba(244,197,66,0.85);
-    background: linear-gradient(135deg, rgba(244,197,66,0.26), rgba(255,255,255,0.06));
+    border:2px solid #ffd76a;
+    background: linear-gradient(135deg, rgba(255,215,106,0.52) 0%, rgba(244,197,66,0.34) 48%, rgba(255,244,214,0.20) 100%);
     color: var(--ink);
     cursor:pointer;
     text-align:left;
-    box-shadow: 0 10px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,233,168,0.25), 0 0 26px rgba(244,197,66,0.28);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,244,214,0.55), 0 0 34px rgba(244,197,66,0.45);
     animation: homeCtaPulse 2.4s ease-in-out infinite;
   }
   /* The one button on the menu has to be impossible to miss. */
   @keyframes homeCtaPulse{
-    0%, 100%{ box-shadow: 0 10px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,233,168,0.25), 0 0 20px rgba(244,197,66,0.20); }
-    50%{ box-shadow: 0 12px 30px rgba(0,0,0,0.50), inset 0 0 0 2px rgba(255,233,168,0.60), 0 0 42px rgba(244,197,66,0.50); }
+    0%, 100%{ box-shadow: 0 10px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,244,214,0.50), 0 0 26px rgba(244,197,66,0.35); }
+    50%{ box-shadow: 0 12px 30px rgba(0,0,0,0.50), inset 0 0 0 2px rgba(255,244,214,0.80), 0 0 48px rgba(244,197,66,0.65); }
   }
   @media (prefers-reduced-motion: reduce){
     .game-card{ animation: none; }
@@ -651,16 +661,18 @@
     font-weight:900;
     letter-spacing:2px;
     line-height:1;
-    background: linear-gradient(180deg, #ffe9a8, var(--gold) 55%, var(--gold-dark));
+    background: linear-gradient(180deg, #fffbe8, #ffe9a8 40%, var(--gold) 75%, var(--gold-dark));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+    filter: drop-shadow(0 2px 3px rgba(43,16,58,0.8));
   }
   .game-card-desc{
     display:block;
     font-size:12px;
-    opacity:0.75;
+    opacity:0.95;
     margin-top:4px;
+    text-shadow: 0 1px 2px rgba(43,16,58,0.7);
   }
   .game-card-go{
     margin-left:auto;
@@ -1138,8 +1150,6 @@
 
 <div class="page hidden" id="page-home">
   <div class="page-inner">
-    <div class="home-hello" id="homeGreeting" data-i18n="welcome">Welcome to FLAPY GAMES</div>
-    <div class="home-section-title" data-i18n="games">Games</div>
     <div class="home-games">
       <button type="button" class="game-card" id="homeFlapyBtn">
         <img class="game-card-img" src="" data-art="logo.png" alt="">
