@@ -74,7 +74,7 @@ function signedBoc(fromAddr, toAddr, nano, seq) {
 }
 
 // One toncenter-v2 shaped transaction on the deposit address's history.
-function ledgerTx({ source, valueNano, hash }) {
+function ledgerTx({ source, valueNano, hash, memo }) {
   return {
     '@type': 'raw.transaction',
     address: { account_address: DEPOSIT.toRawString() },
@@ -85,6 +85,7 @@ function ledgerTx({ source, valueNano, hash }) {
       destination: DEPOSIT.toRawString(),
       value: String(valueNano),
       hash: hash || crypto.randomBytes(32).toString('hex'),
+      message: memo || '',
     },
     out_msgs: [],
   };
@@ -147,6 +148,7 @@ async function main() {
       TON_RPC_URL: 'http://127.0.0.1:' + indexerPort + '/api/v2',
       TON_USD_PRICE: '2.5',
       MIN_DEPOSIT_NANO_TON: '10000000',
+      DEPOSIT_CHAIN_WATCH_MS: '5000',
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
@@ -297,6 +299,54 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const stF = await post('/api/deposit-status', { initData: initDataF, requestId: f.body.requestId });
     check('unpaid claim is never credited', stF.body && stF.body.status === 'pending', JSON.stringify(stF.body));
+
+    // ---- 8) player paid in the wallet app and never came back: MEMO -----
+    console.log('\n8) CHAIN WATCH — transfer carrying the top-up code is credited without any client callback');
+    const WALLET_MEMO = new Address(0, Buffer.alloc(32, 0x77));
+    const userH = { id: 555000008, first_name: 'Memo', username: 'memo_payer' };
+    const initDataH = makeInitData(userH);
+    const h = await post('/api/topup-intent', { initData: initDataH, amount: 100, wallet: '' });
+    check('top-up code issued', h.status === 200 && h.body && h.body.ok && /^GRM-/.test(h.body.code) && !!h.body.payload, JSON.stringify(h.body));
+    ledger = [ledgerTx({ source: WALLET_MEMO, valueNano: NANO_04, memo: h.body.code })];
+    let stH = null;
+    for (let i = 0; i < 80; i++) {
+      const r = await post('/api/topup-intent-status', { initData: initDataH, code: h.body.code });
+      stH = r.body;
+      if (stH && stH.status === 'approved') break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    check('credited from the chain sweep alone', !!stH && stH.status === 'approved', JSON.stringify(stH));
+    check('100 C landed', !!stH && Number(stH.cBalance) === 100, 'cBalance=' + (stH && stH.cBalance));
+    // same ledger row stays credited only once across further sweeps
+    await new Promise((resolve) => setTimeout(resolve, 5500));
+    const againH = await post('/api/topup-intent-status', { initData: initDataH, code: h.body.code });
+    check('the same transfer is never credited twice by the sweep', againH.body && Number(againH.body.cBalance) === 100, 'cBalance=' + (againH.body && againH.body.cBalance));
+
+    // ---- 9) linked wallet pays without a memo --------------------------
+    console.log('\n9) CHAIN WATCH — transfer from a linked wallet (no memo) is credited to its owner');
+    const WALLET_LINKED = new Address(0, Buffer.alloc(32, 0x88));
+    const userI = { id: 555000009, first_name: 'Linked', username: 'linked_payer' };
+    const initDataI = makeInitData(userI);
+    const l = await post('/api/link-wallet', { initData: initDataI, address: WALLET_LINKED.toString() });
+    check('wallet linked', l.status === 200 && l.body && l.body.ok, JSON.stringify(l.body));
+    ledger = [ledgerTx({ source: WALLET_LINKED, valueNano: 200000000n })]; // 0.2 TON = $0.50 = 50 C
+    let balI = 0;
+    for (let i = 0; i < 80; i++) {
+      const r = await post('/api/deposit-status', { initData: initDataI, requestId: 0 });
+      // 404 for unknown request, so read the balance via the admin list instead
+      const rows = (await (await fetch(base + '/internal/deposits', { headers: { 'x-admin-key': ADMIN } })).json()).deposits || [];
+      const mine = rows.find((d) => String(d.userId) === String(userI.id) && d.status === 'approved');
+      if (mine) { balI = mine.amount; break; }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    check('credited by sender match, amount = what actually arrived (50 C)', balI === 50, 'amount=' + balI);
+
+    // ---- 10) unknown sender, no memo → nothing happens -----------------
+    console.log('\n10) CHAIN WATCH — unknown sender without memo is left alone');
+    ledger = [ledgerTx({ source: STRANGER, valueNano: NANO_04 })];
+    await new Promise((resolve) => setTimeout(resolve, 5500));
+    const rowsAll = (await (await fetch(base + '/internal/deposits', { headers: { 'x-admin-key': ADMIN } })).json()).deposits || [];
+    check('no deposit was invented for a stranger', !rowsAll.some((d) => d.source === 'chain-watch' && d.onchainSource && d.onchainSource === STRANGER.toRawString()), '');
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit');

@@ -20,7 +20,7 @@ const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
 const BOTS = require('./bots.js');
-const { verifyDepositClaim, parseSignedBoc, addressesEqual } = require('./verifyDeposit.js');
+const { verifyDepositClaim, parseSignedBoc, addressesEqual, listRecentInbound, buildCommentPayload } = require('./verifyDeposit.js');
 
 // Optional on-chain deposit verification (see verifyDeposit.js). OFF by default
 // so existing manual-approval deployments are unaffected; turn on by setting
@@ -182,6 +182,9 @@ async function tryAutoCredit(id, attempt) {
     // wallet's external message has a different hash than the relayed one.
     expectedSource: deposit.wallet || '',
     expectedValueNanoTon: Number(deposit.expectedNano) || 0,
+    // The memo the mini app placed in the transfer comment — proves the
+    // payment is for this request regardless of which wallet paid.
+    expectedMemo: deposit.memo || '',
     notBeforeSec: Math.floor(Number(deposit.requestedAt || 0) / 1000),
     rpcUrl: TON_RPC_URL,
     apiKey: TON_API_KEY,
@@ -242,6 +245,8 @@ async function tryAutoCredit(id, attempt) {
   deposit.autoApproved = true;
   deposit.autoDone = true;
   deposit.autoResult = 'credited';
+  if (deposit.memo) store.consumeTopupIntent(deposit.memo, id);
+  if (vres.source) store.linkWallet(deposit.userId, vres.source);
   store.logEvent(deposit.userId, 'auto top-up credited', {
     depositId: id, amount: deposit.amount, txHash: deposit.txHash, valueNanoTon,
     verifiedBy: deposit.verifiedBy,
@@ -274,6 +279,125 @@ function sweepAutoCredits() {
     if (autoCreditTimers.has(d.id)) continue;
     if (Date.now() - Number(d.requestedAt || 0) > AUTO_CREDIT_WINDOW_MS) continue;
     scheduleAutoCredit(d.id, 0);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chain watcher. The per-request flow above only works when the mini app
+// comes back from the wallet and reports the signed transaction. Players
+// routinely pay inside Tonkeeper / Telegram Wallet and never return, or pay
+// from a wallet that is not the connected one. So the server also reads the
+// deposit address's own history and credits any inbound transfer it can
+// attribute to a player:
+//   1. by MEMO   — the transfer comment is a top-up code we issued
+//                  (/api/topup-intent). Unguessable, so it alone is proof.
+//   2. by SENDER — the transfer comes from a wallet the player connected via
+//                  TON Connect (linked at connect time, /api/link-wallet).
+// The credited amount is what actually arrived (TON → USD → C), never more
+// than the intent asked for. Each ledger row is recorded as a deposit with its
+// transaction id as txHash, so it can only be credited once.
+const CHAIN_WATCH_ENABLED = DEPOSIT_AUTO_CREDIT && process.env.DEPOSIT_CHAIN_WATCH !== 'false';
+const CHAIN_WATCH_MS = Math.max(5000, Math.floor(Number(process.env.DEPOSIT_CHAIN_WATCH_MS) || 20000));
+const CHAIN_WATCH_LIMIT = Math.max(5, Math.min(100, Math.floor(Number(process.env.DEPOSIT_CHAIN_WATCH_LIMIT) || 50)));
+let chainSweepBusy = false;
+const chainSweepStartedSec = Math.floor(Date.now() / 1000);
+
+function transferAlreadyRecorded(item) {
+  const ids = [item.txId].concat(item.hashes || []).filter(Boolean).map((h) => String(h).toLowerCase());
+  for (const d of store.listDeposits()) {
+    if (!d) continue;
+    const h = String(d.txHash || '').toLowerCase();
+    if (h && ids.indexOf(h) >= 0) return true;
+    if (d.onchainTxId) {
+      const key = String(d.onchainTxId);
+      if (item.txId && key.indexOf('|' + String(item.txId).toLowerCase() + '|') >= 0) return true;
+    }
+  }
+  return false;
+}
+
+async function sweepChain() {
+  if (!CHAIN_WATCH_ENABLED || chainSweepBusy) return;
+  const address = depositAddress();
+  if (!address) return;
+  chainSweepBusy = true;
+  try {
+    const res = await listRecentInbound({ depositAddress: address, rpcUrl: TON_RPC_URL, apiKey: TON_API_KEY, limit: CHAIN_WATCH_LIMIT });
+    if (!res.ok) return;
+    // Never touch transfers that pre-date this feature / the last watermark.
+    const floor = Math.max(store.getChainWatermark() || 0, chainSweepStartedSec - 24 * 3600);
+    const linked = store.allLinkedWallets();
+    let newest = 0;
+    for (const item of res.items) {
+      if (item.utime && item.utime > newest) newest = item.utime;
+      if (item.utime && item.utime < floor) continue;
+      if (MIN_DEPOSIT_NANO_TON > 0 && item.valueNanoTon < MIN_DEPOSIT_NANO_TON) continue;
+      if (transferAlreadyRecorded(item)) continue;
+
+      let userId = '';
+      let name = '';
+      let cap = 0;
+      let how = '';
+      let intent = null;
+      if (item.memo) {
+        intent = store.findOpenIntentByMemo(item.memo);
+        if (intent) { userId = intent.userId; name = intent.name; cap = Number(intent.amount) || 0; how = 'memo'; }
+      }
+      if (!userId && item.source) {
+        const owner = linked.find((w) => addressesEqual(w.address, item.source));
+        if (owner) {
+          userId = owner.userId;
+          name = store.bestKnownName ? store.bestKnownName(userId) : 'Player';
+          how = 'linked-wallet';
+          // If that player has an open intent from this wallet, honour its cap
+          // so the credited amount never exceeds what they were quoted.
+          const mine = store.listTopupIntents('open')
+            .filter((i) => i.userId === userId)
+            .sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+          if (mine.length) { intent = mine[0]; cap = Number(intent.amount) || 0; }
+        }
+      }
+      if (!userId) continue; // unknown payer — stays for the admin (manual hash flow)
+
+      // A pending request (BOC / pasted hash) for this same transfer may be
+      // mid-check: let that path win to avoid a race, it credits the same row.
+      const pendingSame = store.listDeposits('pending').some((d) => d && d.auto && !d.autoDone && (
+        (d.memo && item.memo && d.memo === item.memo) ||
+        (d.wallet && item.source && addressesEqual(d.wallet, item.source) && Number(d.expectedNano) > 0 &&
+          Math.abs(Number(d.expectedNano) - item.valueNanoTon) <= Math.max(Number(d.expectedNano) * 0.02, 1000))
+      ));
+      if (pendingSame) continue;
+
+      const price = await tonUsdPrice();
+      if (!(price > 0)) return; // no rate → try again next sweep, never guess
+      let amount = Math.floor((item.valueNanoTon / 1e9) * price * FLAP_PER_USD);
+      if (cap > 0) {
+        // Tolerate fee shaving / price drift the same way the request flow
+        // does: close enough to the quote → credit the quote, never more.
+        amount = amount >= Math.floor(cap * (1 - AUTO_CREDIT_TOLERANCE)) ? cap : Math.min(amount, cap);
+      }
+      if (amount <= 0) continue;
+
+      const rec = store.creditChainDeposit(userId, name, amount, item.txId || (item.hashes && item.hashes[0]), {
+        source: 'chain-watch', verifiedBy: how, memo: item.memo || undefined,
+        wallet: item.source || undefined, onchainSource: item.source || '', valueNanoTon: item.valueNanoTon,
+        onchainTxId: ['chain', String(item.txId || '').toLowerCase(), String(item.source || '').toLowerCase(), String(item.valueNanoTon)].join('|'),
+      });
+      if (!rec.ok) continue;
+      if (intent && how === 'memo') store.consumeTopupIntent(intent.code, rec.deposit.id);
+      if (item.source) store.linkWallet(userId, item.source);
+      store.logEvent(userId, 'auto top-up credited (chain watch)', {
+        depositId: rec.deposit.id, amount, valueNanoTon: item.valueNanoTon, verifiedBy: how, txId: item.txId,
+      });
+      console.log('[deposit-chain] #' + rec.deposit.id + ' credited', amount, 'C to', userId, '(' + how + ')');
+    }
+    // Only advance the watermark once we processed a full page; keep a
+    // generous overlap so a late-indexed transfer is still seen.
+    if (newest > 0) store.setChainWatermark(Math.max(store.getChainWatermark() || 0, newest - 6 * 3600));
+  } catch (err) {
+    console.warn('[deposit-chain] sweep failed:', (err && err.message) || err);
+  } finally {
+    chainSweepBusy = false;
   }
 }
 
@@ -858,6 +982,13 @@ app.post('/api/deposit', (req, res) => {
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ error: 'invalid amount' });
   }
+  // Optional top-up code (see /api/topup-intent) the client put into the
+  // transfer comment. Only honoured when it belongs to this player and is open.
+  let memo = '';
+  if (req.body && typeof req.body.memo === 'string') {
+    const it = store.getTopupIntent(req.body.memo);
+    if (it && it.userId === userId && it.status === 'open') memo = it.code;
+  }
   // Paid straight from a connected TON wallet? The client sends the signed
   // transaction BOC — read the real destination/amount/sender out of it here
   // instead of trusting anything the client typed.
@@ -885,10 +1016,14 @@ app.post('/api/deposit', (req, res) => {
   if (signed) {
     // The signed transaction wins over client input: the wallet that signed it
     // is the on-chain sender, and the amount inside it is what will arrive.
-    if (signed.payer) result.request.wallet = signed.payer;
+    if (signed.payer) {
+      result.request.wallet = signed.payer;
+      store.linkWallet(userId, signed.payer);
+    }
     if (signed.expectedNano > 0) result.request.expectedNano = signed.expectedNano;
     result.request.signed = true;
   }
+  if (memo) result.request.memo = memo;
 
   // Top-ups are credited automatically: whether the player pays from a
   // connected wallet (BOC) or pastes a transaction hash, the server watches
@@ -1022,6 +1157,72 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
 app.get('/internal/deposits', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ deposits: store.listDeposits(req.query.status) });
+});
+
+// Step 0 of a top-up: the player says how much C they want. We hand back an
+// unguessable code to place in the transfer comment (and, for TON Connect, the
+// ready-made payload cell). Whether the wallet reports back or not, the chain
+// watcher credits the transfer that carries this code.
+app.post('/api/topup-intent', (req, res) => {
+  const user = authenticateFresh(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  const userId = String(user.id);
+  if (!store.allowRequest('topupintent:' + userId, 20, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many top-up requests, try again later' });
+  }
+  const amount = Number(req.body && req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'invalid amount' });
+  const wallet = typeof (req.body && req.body.wallet) === 'string' ? req.body.wallet.trim().slice(0, 80) : '';
+  const made = store.createTopupIntent(userId, displayName(user), amount, wallet);
+  if (!made.ok) return res.status(400).json({ error: made.error });
+  if (wallet) store.linkWallet(userId, wallet);
+  res.json({
+    ok: true,
+    code: made.intent.code,
+    amount: made.intent.amount,
+    depositAddress: depositAddress(),
+    payload: buildCommentPayload(made.intent.code),
+    autoCredit: CHAIN_WATCH_ENABLED,
+  });
+});
+
+// Remember a TON Connect wallet as belonging to this player. Any transfer from
+// it to the deposit address is then credited automatically.
+app.post('/api/link-wallet', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  const userId = String(user.id);
+  if (!store.allowRequest('linkwallet:' + userId, 30, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  const address = typeof (req.body && req.body.address) === 'string' ? req.body.address.trim().slice(0, 80) : '';
+  if (!address || !/^[A-Za-z0-9_:-]{40,80}$/.test(address)) return res.status(400).json({ error: 'invalid address' });
+  store.linkWallet(userId, address);
+  res.json({ ok: true, wallets: store.getLinkedWallets(userId) });
+});
+
+// Status of a top-up intent (by code): tells the mini app when the chain
+// watcher has credited the transfer carrying that code.
+app.post('/api/topup-intent-status', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  const userId = String(user.id);
+  if (!store.allowRequest('intentstatus:' + userId, 120, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  const it = store.getTopupIntent(req.body && req.body.code);
+  if (!it || it.userId !== userId) return res.status(404).json({ error: 'not found' });
+  const dep = it.depositId != null ? store.getDeposit(it.depositId) : null;
+  res.json({
+    ok: true,
+    code: it.code,
+    status: it.status === 'consumed' ? 'approved' : it.status, // open | approved | expired
+    amount: dep ? dep.amount : it.amount,
+    requestId: it.depositId != null ? it.depositId : null,
+    cBalance: store.getCBalance(userId),
+  });
 });
 
 // Status of a single top-up request, for the player who created it. Lets the
@@ -1423,6 +1624,13 @@ start.then(() => {
   // no real payment can get stranded in the manual queue.
   const sweep = setInterval(sweepAutoCredits, AUTO_CREDIT_SWEEP_MS);
   if (sweep.unref) sweep.unref();
+  if (CHAIN_WATCH_ENABLED) {
+    const chain = setInterval(() => { sweepChain(); }, CHAIN_WATCH_MS);
+    if (chain.unref) chain.unref();
+    const first = setTimeout(() => { sweepChain(); }, 3000);
+    if (first.unref) first.unref();
+    console.log('[deposit-chain] watching', depositAddress(), 'every', CHAIN_WATCH_MS, 'ms');
+  }
   app.listen(PORT, () => {
     const info = store.persistInfo();
     console.log(`GRM FLAP backend listening on :${PORT}`);

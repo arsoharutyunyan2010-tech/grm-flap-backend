@@ -86,6 +86,16 @@ const withdrawals = [];           // { id, userId, name, address, amount, status
 let withdrawalSeq = 1;
 const deposits = [];              // { id, userId, name, amount, txHash, wallet?, status, requestedAt }
 let depositSeq = 1;
+// Top-up intents: "I am about to pay $X" — each one gets an unguessable memo
+// the player puts in the transfer comment, so the on-chain sweep can credit
+// the right account even if the mini app never hears back from the wallet.
+const topupIntents = new Map();   // code -> { code, userId, name, amount, wallet, createdAt, status, depositId?, expectedNano? }
+// TON wallets a player has connected via TON Connect. A transfer from one of
+// them to the deposit address is credited to that player automatically.
+const linkedWallets = new Map();  // userId -> [address, ...] (raw form)
+// Ledger position below which the sweep never looks: transfers older than
+// this were handled by the pre-existing manual flow.
+let chainWatermark = 0;
 
 const knownUsers = new Set();
 // Small admin-only directory used to map a Telegram user ID to the name that
@@ -167,6 +177,13 @@ function snapshot() {
     withdrawalSeq,
     deposits,
     depositSeq,
+    topupIntents: Array.from(topupIntents.values()),
+    linkedWallets: (function () {
+      const out = {};
+      for (const [uid, arr] of linkedWallets) out[String(uid)] = arr;
+      return out;
+    })(),
+    chainWatermark,
     knownUsers: Array.from(knownUsers).map(String),
     users,
     totalRuns,
@@ -201,6 +218,7 @@ function snapshot() {
 const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
   'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'users', 'totalRuns',
+  'topupIntents', 'linkedWallets', 'chainWatermark',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
   'bans', 'antiCheatEvents', 'runHistory',
 ]);
@@ -274,6 +292,22 @@ function hydrate(data) {
   }
   const maxDepId = deposits.reduce((m, d) => Math.max(m, Number(d.id) || 0), 0);
   depositSeq = Math.max(Number(data.depositSeq) || 1, maxDepId + 1);
+
+  topupIntents.clear();
+  if (Array.isArray(data.topupIntents)) {
+    for (const it of data.topupIntents) {
+      if (it && it.code) topupIntents.set(String(it.code), it);
+    }
+  }
+  linkedWallets.clear();
+  const lw = data.linkedWallets || {};
+  if (lw && typeof lw === 'object' && !Array.isArray(lw)) {
+    for (const uid of Object.keys(lw)) {
+      const arr = Array.isArray(lw[uid]) ? lw[uid].filter((a) => typeof a === 'string' && a).slice(0, 10) : [];
+      if (arr.length) linkedWallets.set(String(uid), arr);
+    }
+  }
+  chainWatermark = Number(data.chainWatermark) || 0;
 
   knownUsers.clear();
   if (Array.isArray(data.knownUsers)) {
@@ -567,6 +601,27 @@ function mergeSnapshots(base, other) {
   }
   out.withdrawalSeq = Math.max(Number(out.withdrawalSeq) || 1, Number(other.withdrawalSeq) || 1);
   out.depositSeq = Math.max(Number(out.depositSeq) || 1, Number(other.depositSeq) || 1);
+  // top-up intents: union by code, a consumed intent always wins over an open one
+  {
+    const byCode = new Map();
+    for (const row of other.topupIntents || []) if (row && row.code) byCode.set(String(row.code), row);
+    for (const row of out.topupIntents || []) {
+      if (!row || !row.code) continue;
+      const cur = byCode.get(String(row.code));
+      if (!cur || row.status === 'consumed' || cur.status !== 'consumed') byCode.set(String(row.code), row);
+    }
+    out.topupIntents = Array.from(byCode.values());
+  }
+  out.linkedWallets = out.linkedWallets || {};
+  for (const [uid, arr] of Object.entries(other.linkedWallets || {})) {
+    const cur = new Set(Array.isArray(out.linkedWallets[uid]) ? out.linkedWallets[uid] : []);
+    for (const a of arr || []) cur.add(a);
+    out.linkedWallets[uid] = Array.from(cur).slice(0, 10);
+  }
+  out.chainWatermark = Math.min(
+    Number(out.chainWatermark) || Number(other.chainWatermark) || 0,
+    Number(other.chainWatermark) || Number(out.chainWatermark) || 0,
+  );
 
   // users / counters
   const users = new Set([...(out.knownUsers || []), ...(other.knownUsers || [])].map(String));
@@ -1609,6 +1664,125 @@ function requestDeposit(userId, name, amount, txHash, walletAddress) {
 function getDeposit(id) {
   return deposits.find((d) => d && d.id === Number(id)) || null;
 }
+
+/* ---------------- top-up intents / linked wallets / chain sweep ---------- */
+
+const INTENT_TTL_MS = 24 * 60 * 60 * 1000;
+
+function createTopupIntent(userId, name, amount, wallet) {
+  userId = String(userId);
+  amount = Math.floor(Number(amount));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1e9) return { ok: false, error: 'invalid amount' };
+  // Drop stale intents of this user so the map does not grow without bound.
+  const now = Date.now();
+  let open = 0;
+  for (const it of topupIntents.values()) {
+    if (it.userId !== userId) continue;
+    if (it.status === 'open' && now - Number(it.createdAt || 0) > INTENT_TTL_MS) it.status = 'expired';
+    if (it.status === 'open') open++;
+  }
+  if (open >= 20) return { ok: false, error: 'too many open top-up codes, pay one of them first' };
+  let code = '';
+  do {
+    code = 'GRM-' + crypto.randomBytes(5).toString('hex').toUpperCase();
+  } while (topupIntents.has(code));
+  const intent = {
+    code, userId, name: String(name || 'Player').slice(0, 120), amount,
+    wallet: String(wallet || '').trim().slice(0, 80),
+    createdAt: now, status: 'open',
+  };
+  topupIntents.set(code, intent);
+  pruneTopupIntents();
+  scheduleSave();
+  return { ok: true, intent };
+}
+function getTopupIntent(code) {
+  return topupIntents.get(String(code || '').trim().toUpperCase()) || null;
+}
+function findOpenIntentByMemo(memo) {
+  const it = getTopupIntent(memo);
+  if (!it || it.status !== 'open') return null;
+  return it;
+}
+function consumeTopupIntent(code, depositId) {
+  const it = getTopupIntent(code);
+  if (!it) return null;
+  it.status = 'consumed';
+  it.depositId = depositId;
+  it.consumedAt = Date.now();
+  scheduleSave();
+  return it;
+}
+function listTopupIntents(status) {
+  const arr = Array.from(topupIntents.values());
+  return status ? arr.filter((i) => i.status === status) : arr;
+}
+function pruneTopupIntents() {
+  const now = Date.now();
+  for (const [code, it] of topupIntents) {
+    const age = now - Number(it.createdAt || 0);
+    if (it.status === 'open' && age > INTENT_TTL_MS) it.status = 'expired';
+    if (it.status !== 'open' && age > 7 * INTENT_TTL_MS) topupIntents.delete(code);
+  }
+}
+
+function linkWallet(userId, address) {
+  userId = String(userId);
+  address = String(address || '').trim().slice(0, 80);
+  if (!address) return false;
+  const arr = linkedWallets.get(userId) || [];
+  if (arr.indexOf(address) >= 0) return true;
+  arr.push(address);
+  while (arr.length > 10) arr.shift();
+  linkedWallets.set(userId, arr);
+  scheduleSave();
+  return true;
+}
+function getLinkedWallets(userId) {
+  return (linkedWallets.get(String(userId)) || []).slice();
+}
+// Every (userId, address) pair — the sweep resolves the on-chain sender with
+// its own address comparison (friendly vs raw forms).
+function allLinkedWallets() {
+  const out = [];
+  for (const [uid, arr] of linkedWallets) for (const a of arr) out.push({ userId: uid, address: a });
+  return out;
+}
+
+function getChainWatermark() { return chainWatermark; }
+function setChainWatermark(sec) {
+  sec = Math.floor(Number(sec) || 0);
+  if (sec > 0 && sec !== chainWatermark) {
+    chainWatermark = sec;
+    scheduleSave();
+  }
+  return chainWatermark;
+}
+
+// A payment the sweep discovered on-chain: record it as an already-approved
+// deposit and credit the account in one step. `txId` doubles as the txHash,
+// so the ledger row can never be recorded twice.
+function creditChainDeposit(userId, name, amount, txId, meta) {
+  userId = String(userId);
+  amount = Math.floor(Number(amount));
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: 'invalid amount' };
+  const hash = String(txId || '').trim().toLowerCase();
+  if (hash.length < 8 || hash.length > 128) return { ok: false, error: 'invalid transaction id' };
+  if (deposits.some((d) => d && String(d.txHash || '').toLowerCase() === hash)) {
+    return { ok: false, error: 'transaction already recorded' };
+  }
+  const now = Date.now();
+  const request = Object.assign({
+    id: depositSeq++, userId, name: String(name || 'Player').slice(0, 120), amount, txHash: hash,
+    status: 'approved', requestedAt: now, approvedAt: now,
+    auto: true, autoApproved: true, autoDone: true, autoResult: 'credited',
+  }, meta || {});
+  deposits.push(request);
+  const cBalance = creditCBalance(userId, amount);
+  creditReferralCommissions(userId, amount);
+  scheduleSave();
+  return { ok: true, deposit: request, cBalance };
+}
 function listDeposits(status) {
   return status ? deposits.filter(d => d.status === status) : deposits.slice();
 }
@@ -2302,6 +2476,9 @@ module.exports = {
   getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, getDeposit, listDeposits, approveDeposit, rejectDeposit,
+  createTopupIntent, getTopupIntent, findOpenIntentByMemo, consumeTopupIntent, listTopupIntents,
+  linkWallet, getLinkedWallets, allLinkedWallets,
+  getChainWatermark, setChainWatermark, creditChainDeposit,
   bestKnownName,
   trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,

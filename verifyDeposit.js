@@ -85,6 +85,26 @@ function itemSource(item) {
   return (item && item.in_msg && item.in_msg.source) || '';
 }
 
+// Text comment carried by the inbound message (toncenter v2 exposes it either
+// as a decoded `message` string or as msg_data.text in base64). Used to match
+// a payment to the top-up intent whose memo was placed in the transfer.
+function itemMemo(item) {
+  const m = item && item.in_msg;
+  if (!m) return '';
+  if (typeof m.message === 'string' && m.message.trim()) return m.message.trim();
+  const d = m.msg_data;
+  if (d && typeof d.text === 'string' && d.text) {
+    try {
+      const buf = Buffer.from(d.text, 'base64');
+      const txt = buf.toString('utf8').trim();
+      if (txt) return txt;
+    } catch (e) { /* not base64 */ }
+    return String(d.text).trim();
+  }
+  if (typeof m.comment === 'string' && m.comment.trim()) return m.comment.trim();
+  return '';
+}
+
 function itemUtime(item) {
   const u = Number(item && item.utime);
   return Number.isFinite(u) && u > 0 ? u : 0;
@@ -226,6 +246,10 @@ async function verifyDepositClaim(o) {
   const maxPages = Math.max(1, Math.min(10, Number(o.maxPages) || 5));
   const expectedSource = String(o.expectedSource || '').trim();
   const expectedValue = Number(o.expectedValueNanoTon) || 0;
+  // Unguessable per-request memo written into the transfer comment. When the
+  // ledger row carries it, that alone proves which top-up the money is for —
+  // even if the player paid from a different wallet than the one connected.
+  const expectedMemo = String(o.expectedMemo || '').trim();
   const tolerance = Math.min(0.5, Math.max(0, Number(o.valueTolerance) >= 0
     ? Number(o.valueTolerance)
     : DEFAULT_VALUE_TOLERANCE));
@@ -237,7 +261,7 @@ async function verifyDepositClaim(o) {
   // collide), the signer alone is not proof of value.
   const canMatchTransfer = !!(expectedSource && expectedValue > 0);
 
-  if ((!txHash || txHash.length < 8) && !canMatchTransfer) {
+  if ((!txHash || txHash.length < 8) && !canMatchTransfer && !expectedMemo) {
     return { ok: false, reason: 'on-chain verification requires a tx hash and deposit address' };
   }
   if (!depositAddress) {
@@ -297,6 +321,17 @@ async function verifyDepositClaim(o) {
 
       if (toDeposit) {
         sameAddressAny = true;
+        if (expectedMemo && itemMemo(item) === expectedMemo) {
+          const utime = itemUtime(item);
+          const timeOk = !notBefore || utime === 0 || utime >= notBefore;
+          if (timeOk) {
+            best = {
+              matchedBy: 'memo', valueNanoTon: itemValueNanoTon(item), source: itemSource(item), utime,
+              txId: itemTxId(item), toDeposit: true,
+            };
+            break;
+          }
+        }
         if (canMatchTransfer) {
           const source = itemSource(item);
           const value = itemValueNanoTon(item);
@@ -341,12 +376,71 @@ async function verifyDepositClaim(o) {
   return { ok: false, found: false, reason, sameAddressAny, foundAnyHash, scanned };
 }
 
+/**
+ * Fetch the most recent inbound transfers of the deposit address in one call,
+ * normalised to { txId, source, valueNanoTon, memo, utime }. Used by the
+ * periodic reconciliation sweep to match payments that never reported back
+ * to the mini app (player paid inside the wallet and did not return).
+ */
+async function listRecentInbound(o) {
+  o = o || {};
+  const depositAddress = String(o.depositAddress || '').trim();
+  if (!depositAddress) return { ok: false, reason: 'no deposit address', items: [] };
+  const limit = Math.max(5, Math.min(100, Number(o.limit) || 50));
+  const rpcUrl = (String(o.rpcUrl || '').trim().replace(/\/+$/, '')) || 'https://toncenter.com/api/v2';
+  const fetchImpl = o.fetchImpl || (typeof fetch === 'function' ? fetch : null);
+  if (!fetchImpl) return { ok: false, reason: 'no network transport available', items: [] };
+  const headers = {};
+  if (o.apiKey) headers['X-API-Key'] = o.apiKey;
+  const url = `${rpcUrl}/getTransactions?address=${encodeURIComponent(depositAddress)}&limit=${limit}`;
+  let resp;
+  try {
+    resp = await fetchImpl(url, { headers, method: 'GET' });
+  } catch (e) {
+    return { ok: false, reason: 'on-chain lookup failed', items: [] };
+  }
+  if (!resp || !resp.ok) return { ok: false, reason: 'on-chain lookup failed', http: resp && resp.status, items: [] };
+  const body = await resp.json();
+  const list = body && body.ok ? (body.result || []) : (body && body.result);
+  if (!Array.isArray(list)) return { ok: false, reason: 'bad indexer response', items: [] };
+  const items = [];
+  for (const item of list) {
+    if (!addressesEqual(itemDestination(item), depositAddress)) continue;
+    const value = itemValueNanoTon(item);
+    if (!(value > 0)) continue;
+    items.push({
+      txId: itemTxId(item),
+      source: itemSource(item),
+      valueNanoTon: value,
+      memo: itemMemo(item),
+      utime: itemUtime(item),
+      hashes: itemHashes(item),
+    });
+  }
+  return { ok: true, items };
+}
+
+/**
+ * Build the base64 BOC of a plain text-comment payload (op=0 + UTF-8 text) so
+ * the mini app can attach the top-up memo to the TON Connect transfer.
+ */
+function buildCommentPayload(text) {
+  if (!TonCore || typeof TonCore.beginCell !== 'function') return '';
+  try {
+    return TonCore.beginCell().storeUint(0, 32).storeStringTail(String(text || '')).endCell().toBoc().toString('base64');
+  } catch (e) {
+    return '';
+  }
+}
+
 module.exports = {
   verifyDepositClaim,
+  listRecentInbound,
+  buildCommentPayload,
   parseSignedBoc,
   addressesEqual,
   _t: {
-    asHex, isHashEqual, itemHashes, itemValueNanoTon, itemSource, itemUtime,
+    asHex, isHashEqual, itemHashes, itemValueNanoTon, itemSource, itemUtime, itemMemo,
     itemTxId, itemDestination, addressesEqual, collectRelaxedMessages,
   },
 };

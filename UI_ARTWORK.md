@@ -10,7 +10,7 @@ The browser loads prepared, mobile-sized **`img/ui/*.webp`** files:
 | Source / derivative basename | Where it appears |
 | --- | --- |
 | `mascot-crash` | Classic crash/continue card; PvP loss |
-| `game-over-banner` | Ordinary classic result; pending or rejected verification |
+| _(none)_ | Ordinary classic result shows no illustration — only the GAME OVER title and stats |
 | `trophy-new-best` | A confirmed new classic record (or a local record in explicit demo mode) |
 | `pvp-battle-banner` | Stake selection, opponent confirmation, ready/turn cards, and draws |
 | `pvp-searching` | Matchmaking queue, with native animated search dots |

@@ -17,7 +17,6 @@ DEST = ROOT / "img" / "ui"
 ARTWORK = {
     "mascot-crash": (None, (384, 384)),
     "trophy-new-best": (None, (384, 384)),
-    "game-over-banner": ((268, 322, 756, 702), (640, 400)),
     "pvp-battle-banner": ((180, 86, 1196, 595), (640, 400)),
     "pvp-searching": ((160, 20, 1248, 602), (640, 400)),
     "pvp-win": (None, (384, 384)),

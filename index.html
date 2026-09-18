@@ -168,7 +168,7 @@
   .screen-art--modal{ width: auto; height: clamp(100px, 18vh, 148px); }
   /* Result illustrations are the emotional payoff of a run: show them big and
      luminous instead of a small stamp that sinks into the dark card. */
-  #gameOverArt, #newBestArt{
+  #newBestArt{
     width: 100%;
     height: auto;
     max-height: clamp(150px, 26vh, 210px);
@@ -198,7 +198,7 @@
     .art-overlay .card{ padding: 14px 16px 18px; }
     .art-overlay button:not(.stake-chip){ padding: 11px 16px; }
     .screen-art--modal{ height: 96px; margin-bottom: 8px; }
-    #gameOverArt, #newBestArt{ max-height: 140px; }
+    #newBestArt{ max-height: 140px; }
   }
   @media (prefers-reduced-motion: reduce){
     .search-dots span{ animation: none; }
@@ -1134,7 +1134,6 @@
         <div class="hint" id="continueHint"></div>
       </div>
       <div id="finalMode" class="hidden">
-        <img id="gameOverArt" class="screen-art screen-art--modal" src="/img/ui/game-over-banner.webp" width="488" height="380" loading="lazy" decoding="async" alt="" aria-hidden="true">
         <img id="newBestArt" class="screen-art screen-art--modal hidden" src="/img/ui/trophy-new-best.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
         <div class="title" style="font-size:26px;" data-i18n="gameOver">GAME OVER</div>
         <div class="stat-row"><span data-i18n="score">Score</span><b id="finalScore">0</b></div>
@@ -1251,6 +1250,15 @@
               <input type="text" id="depositPayTo" class="field-input" readonly value="UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd" placeholder="UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd" autocomplete="off">
               <button type="button" id="depositCopyBtn" class="copy-btn" data-i18n="copy">COPY</button>
             </div>
+          </div>
+          <button type="button" id="depositMemoBtn" class="secondary" data-i18n="getMemo">GET PAYMENT CODE</button>
+          <div id="depositMemoWrap" class="hidden">
+            <label class="field-label" data-i18n="memoLabel">Put this code in the transfer comment</label>
+            <div class="addr-row">
+              <input type="text" id="depositMemo" class="field-input" readonly value="" autocomplete="off">
+              <button type="button" id="depositMemoCopyBtn" class="copy-btn" data-i18n="copy">COPY</button>
+            </div>
+            <div class="hint" id="depositMemoMsg"></div>
           </div>
           <label class="field-label" data-i18n="txHash">Transaction hash</label>
           <input type="text" id="depositTx" class="field-input" placeholder="…" autocomplete="off">
@@ -1930,7 +1938,7 @@ window.FLAPY_ART = {
       pts:" pts", loading:"Loading…",
       connectWallet:"CONNECT WALLET", walletConnected:"Wallet connected",
       payWithWallet:"PAY WITH CONNECTED WALLET", connectFirst:"Connect your wallet first.",
-      payWalletTitle:"PAY VIA CONNECTED WALLET", manualTopup:"MANUAL TOP-UP", disconnectWallet:"DISCONNECT WALLET",
+      getMemo:"GET PAYMENT CODE", memoLabel:"Put this code in the transfer comment", memoHint:"Send the TON with this comment — the balance is credited automatically once the transfer is confirmed.", payWalletTitle:"PAY VIA CONNECTED WALLET", manualTopup:"MANUAL TOP-UP", disconnectWallet:"DISCONNECT WALLET",
       sendingTx:"Confirm the payment in your wallet…", txCancelled:"Payment cancelled.",
       payError:"Payment failed — try the manual transfer above.",
       rateError:"Could not fetch the TON rate — try again soon.",
@@ -2001,7 +2009,7 @@ window.FLAPY_ART = {
       pts:" оч.", loading:"Загрузка…",
       connectWallet:"ПОДКЛЮЧИТЬ КОШЕЛЁК", walletConnected:"Кошелёк подключён",
       payWithWallet:"ОПЛАТИТЬ С ПОДКЛЮЧЁННОГО КОШЕЛЬКА", connectFirst:"Сначала подключите кошелёк.",
-      payWalletTitle:"ОПЛАТА ПОДКЛЮЧЁННЫМ КОШЕЛЬКОМ", manualTopup:"ПОПОЛНЕНИЕ ВРУЧНУЮ", disconnectWallet:"ОТКЛЮЧИТЬ КОШЕЛЁК",
+      getMemo:"ПОЛУЧИТЬ КОД ОПЛАТЫ", memoLabel:"Укажите этот код в комментарии к переводу", memoHint:"Отправьте TON с этим комментарием — баланс зачислится автоматически после подтверждения перевода.", payWalletTitle:"ОПЛАТА ПОДКЛЮЧЁННЫМ КОШЕЛЬКОМ", manualTopup:"ПОПОЛНЕНИЕ ВРУЧНУЮ", disconnectWallet:"ОТКЛЮЧИТЬ КОШЕЛЁК",
       sendingTx:"Подтвердите оплату в кошельке…", txCancelled:"Платёж отменён.",
       payError:"Платёж не прошёл — воспользуйтесь ручным переводом выше.",
       rateError:"Не удалось получить курс TON — попробуйте позже.",
@@ -2072,7 +2080,7 @@ window.FLAPY_ART = {
       pts:" оч.", loading:"Завантаження…",
       connectWallet:"ПІДКЛЮЧИТИ ГАМАНЕЦЬ", walletConnected:"Гаманець підключено",
       payWithWallet:"СПЛАТИТИ З ПІДКЛЮЧЕНОГО ГАМАНЦЯ", connectFirst:"Спочатку підключіть гаманець.",
-      payWalletTitle:"ОПЛАТА ПІДКЛЮЧЕНИМ ГАМАНЦЕМ", manualTopup:"ПОПОВНЕННЯ ВРУЧНУ", disconnectWallet:"ВІДКЛЮЧИТИ ГАМАНЕЦЬ",
+      getMemo:"ОТРИМАТИ КОД ОПЛАТИ", memoLabel:"Вкажіть цей код у коментарі до переказу", memoHint:"Надішліть TON із цим коментарем — баланс зарахується автоматично після підтвердження переказу.", payWalletTitle:"ОПЛАТА ПІДКЛЮЧЕНИМ ГАМАНЦЕМ", manualTopup:"ПОПОВНЕННЯ ВРУЧНУ", disconnectWallet:"ВІДКЛЮЧИТИ ГАМАНЕЦЬ",
       sendingTx:"Підтвердьте оплату в гаманці…", txCancelled:"Платіж скасовано.",
       payError:"Платіж не вдався — скористайтеся ручним переказом вище.",
       rateError:"Не вдалося отримати курс TON — спробуйте пізніше.",
@@ -2143,7 +2151,7 @@ window.FLAPY_ART = {
       pts:" 分", loading:"加载中…",
       connectWallet:"连接钱包", walletConnected:"钱包已连接",
       payWithWallet:"使用已连接的钱包支付", connectFirst:"请先连接钱包。",
-      payWalletTitle:"使用已连接钱包支付", manualTopup:"手动充值", disconnectWallet:"断开钱包",
+      getMemo:"获取付款代码", memoLabel:"请在转账备注中填写此代码", memoHint:"附带此备注发送 TON，转账确认后余额将自动到账。", payWalletTitle:"使用已连接钱包支付", manualTopup:"手动充值", disconnectWallet:"断开钱包",
       sendingTx:"请在钱包中确认付款…", txCancelled:"支付已取消。",
       payError:"支付失败——请使用上方手动转账。",
       rateError:"无法获取 TON 汇率——请稍后再试。",
@@ -2214,7 +2222,7 @@ window.FLAPY_ART = {
       pts:" अंक", loading:"लोड हो रहा है…",
       connectWallet:"वॉलेट कनेक्ट करें", walletConnected:"वॉलेट कनेक्ट हो गया",
       payWithWallet:"कनेक्ट किए गए वॉलेट से भुगतान करें", connectFirst:"पहले अपना वॉलेट कनेक्ट करें।",
-      payWalletTitle:"कनेक्टेड वॉलेट से भुगतान", manualTopup:"मैन्युअल टॉप-अप", disconnectWallet:"वॉलेट डिस्कनेक्ट करें",
+      getMemo:"भुगतान कोड पाएँ", memoLabel:"यह कोड ट्रांसफ़र टिप्पणी में लिखें", memoHint:"इस टिप्पणी के साथ TON भेजें — ट्रांसफ़र की पुष्टि होते ही बैलेंस अपने आप जुड़ जाएगा।", payWalletTitle:"कनेक्टेड वॉलेट से भुगतान", manualTopup:"मैन्युअल टॉप-अप", disconnectWallet:"वॉलेट डिस्कनेक्ट करें",
       sendingTx:"अपने वॉलेट में भुगतान की पुष्टि करें…", txCancelled:"भुगतान रद्द किया गया।",
       payError:"भुगतान विफल — ऊपर दिए गए मैन्युअल ट्रांसफर का उपयोग करें।",
       rateError:"TON की दर प्राप्त नहीं हो सकी — बाद में प्रयास करें।",
@@ -2693,9 +2701,24 @@ window.FLAPY_ART = {
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
     return apiFetch('/api/deposit', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, txHash: txHash }) });
   }
-  function requestDepositBoc(amount, boc, sender){
+  function requestDepositBoc(amount, boc, sender, memo){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
-    return apiFetch('/api/deposit', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, boc: boc, sender: sender }) });
+    return apiFetch('/api/deposit', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, boc: boc, sender: sender, memo: memo || '' }) });
+  }
+  // Ask the server for a one-time top-up code. It goes into the transfer
+  // comment, so the server can credit the payment even if the wallet never
+  // reports back to the mini app (or the player pays from another wallet).
+  function createTopupIntent(amount, wallet){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    return apiFetch('/api/topup-intent', { method:'POST', body: JSON.stringify({ initData: initData, amount: amount, wallet: wallet || '' }) });
+  }
+  function fetchIntentStatus(code){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    return apiFetch('/api/topup-intent-status', { method:'POST', body: JSON.stringify({ initData: initData, code: code }) });
+  }
+  function linkWallet(address){
+    if (DEMO_MODE || !address) return Promise.resolve();
+    return apiFetch('/api/link-wallet', { method:'POST', body: JSON.stringify({ initData: initData, address: address }) }).catch(function(){});
   }
   function fetchDepositStatus(requestId){
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
@@ -2926,7 +2949,6 @@ window.FLAPY_ART = {
     state = 'playing';
   }
   function setFinalArtwork(isNewBest){
-    document.getElementById('gameOverArt').classList.toggle('hidden', isNewBest);
     document.getElementById('newBestArt').classList.toggle('hidden', !isNewBest);
     newBestBadge.classList.toggle('hidden', !isNewBest);
   }
@@ -3301,6 +3323,9 @@ window.FLAPY_ART = {
         var raw = w && w.account && w.account.address;
         tonWalletAddr = raw ? TON_CONNECT_UI.toUserFriendlyAddress(raw) : '';
         if (tonWalletAddr) {
+          // Tie this wallet to the game account: transfers from it to the
+          // top-up address are credited automatically by the server.
+          linkWallet(tonWalletAddr);
           var wa = document.getElementById('walletAddress');
           if (wa && (!wa.value.trim() || tonWalletAutoFilled)) {
             wa.value = tonWalletAddr;
@@ -3386,12 +3411,23 @@ window.FLAPY_ART = {
     var payTo = (document.getElementById('depositPayTo').value || '').trim();
     if (!payTo) { msg.textContent = t('rateError'); return; }
     msg.textContent = t('sendingTx');
-    fetchTonUsdPrice().then(function(price){
+    var intent = null;
+    // 1) register the intent (server-side memo) 2) sign the transfer carrying
+    // that memo 3) hand the signed BOC to the server. Even if step 3 never
+    // happens (wallet app did not return), the server's chain watcher finds
+    // the memo on-chain and credits the account by itself.
+    createTopupIntent(amt, tonWalletAddr).catch(function(){ return null; }).then(function(it){
+      intent = it && it.ok ? it : null;
+      if (intent && intent.depositAddress) payTo = intent.depositAddress;
+      return fetchTonUsdPrice();
+    }).then(function(price){
       var nano = Math.max(1, Math.round((amt / FLAP_PER_USD / price) * 1e9));
+      var message = { address: payTo, amount: String(nano) };
+      if (intent && intent.payload) message.payload = intent.payload;
       return tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600,
         network: TON_CONNECT_UI.CHAIN.MAINNET,
-        messages: [{ address: payTo, amount: String(nano) }]
+        messages: [message]
       }).catch(function(err){
         var m = String((err && (err.message || err.code)) || err || '');
         if (/reject|cancel/i.test(m)) throw new Error('cancelled');
@@ -3401,19 +3437,89 @@ window.FLAPY_ART = {
       var boc = res && res.boc;
       if (!boc) throw new Error('no-boc');
       msg.textContent = t('submitting');
-      return requestDepositBoc(amt, boc, tonWalletAddr).then(function(r){
+      return requestDepositBoc(amt, boc, tonWalletAddr, intent && intent.code).then(function(r){
         if (r && r.auto && r.requestId != null) {
           msg.textContent = t('topupConfirming');
           watchAutoTopup(r.requestId);
         } else {
           msg.textContent = t('topupPaid') + (r && r.requestId != null ? ('#' + r.requestId) : '');
         }
+      }, function(err){
+        // Server did not take the BOC (e.g. network blip) — the chain watcher
+        // will still credit the memo'd transfer; keep watching the intent.
+        if (intent && intent.code) {
+          msg.textContent = t('topupConfirming');
+          watchIntent(intent.code, msg);
+          return;
+        }
+        throw err;
       });
     }).catch(function(err){
       var m = String((err && err.message) || '');
       msg.textContent = m === 'rate' ? t('rateError') : (m === 'cancelled' ? t('txCancelled') : t('payError'));
     });
   });
+
+  // Manual flow: payment code for the transfer comment.
+  var memoBtn = document.getElementById('depositMemoBtn');
+  var currentMemo = '';
+  if (memoBtn) memoBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    var msg = document.getElementById('depositMemoMsg');
+    var amt = parseFloat(document.getElementById('depositAmountManual').value);
+    if (DEMO_MODE) { msg.textContent = 'Demo mode'; return; }
+    if (!(amt > 0)) { document.getElementById('depositMsgManual').textContent = t('enterAmount'); return; }
+    createTopupIntent(amt, tonWalletAddr).then(function(it){
+      if (!it || !it.code) throw new Error('no-code');
+      currentMemo = it.code;
+      document.getElementById('depositMemo').value = it.code;
+      document.getElementById('depositMemoWrap').classList.remove('hidden');
+      if (it.depositAddress) document.getElementById('depositPayTo').value = it.depositAddress;
+      msg.textContent = t('memoHint');
+      watchIntent(it.code, msg);
+    }).catch(function(err){ msg.textContent = 'Error: ' + (err.message || err); });
+  });
+  var memoCopyBtn = document.getElementById('depositMemoCopyBtn');
+  if (memoCopyBtn) memoCopyBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    var code = document.getElementById('depositMemo').value;
+    if (!code) return;
+    function ok(){ memoCopyBtn.textContent = t('copied'); setTimeout(function(){ memoCopyBtn.textContent = t('copy'); }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(ok, ok);
+    else {
+      var ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (err) {}
+      document.body.removeChild(ta); ok();
+    }
+  });
+
+  // Poll a top-up intent until the chain watcher credits its transfer.
+  var intentTimer = null;
+  function watchIntent(code, msgEl){
+    if (intentTimer) { clearTimeout(intentTimer); intentTimer = null; }
+    var tries = 0;
+    function poll(){
+      tries++;
+      fetchIntentStatus(code).then(function(st){
+        if (st && st.status === 'approved') {
+          if (msgEl) msgEl.textContent = t('topupCredited') + (st.amount != null ? (' +' + st.amount + ' C') : '');
+          profileCache = null;
+          fetchProfile().then(function(p){
+            profileCache = p;
+            fillWalletFromProfile(p);
+            if (!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache();
+          }).catch(function(){});
+          return;
+        }
+        if (tries >= 90) return;
+        intentTimer = setTimeout(poll, tries < 12 ? 8000 : 20000);
+      }).catch(function(){
+        if (tries >= 90) return;
+        intentTimer = setTimeout(poll, 20000);
+      });
+    }
+    intentTimer = setTimeout(poll, 10000);
+  }
 
   // Wallet top-ups are credited automatically once the transfer is confirmed
   // on-chain. Poll the request until the server flips it to "approved" and then
