@@ -3888,10 +3888,15 @@ window.FLAPY_ART = {
   var tasksCheckBusy = {};
 
   function openTelegramLink(url){
+    var u = String(url || '');
     try {
-      if (tg && typeof tg.openTelegramLink === 'function') tg.openTelegramLink(url);
-      else window.open(url, '_blank');
-    } catch(e){ try { window.open(url, '_blank'); } catch(e2){} }
+      if (/^https:\/\/t\.me\//.test(u)) {
+        if (tg && typeof tg.openTelegramLink === 'function') { tg.openTelegramLink(u); return; }
+      } else if (tg && typeof tg.openLink === 'function') {
+        tg.openLink(u); return;
+      }
+      window.open(u, '_blank');
+    } catch(e){ try { window.open(u, '_blank'); } catch(e2){} }
   }
 
   function taskRewardHtml(reward){
@@ -3927,15 +3932,17 @@ window.FLAPY_ART = {
 
       var actions = document.createElement('div');
       actions.className = 'task-actions';
-      var openBtn = document.createElement('button');
-      openBtn.type = 'button';
-      openBtn.className = 'task-btn';
-      openBtn.textContent = t('taskOpen');
-      openBtn.addEventListener('click', function(e){
-        e.preventDefault();
-        openTelegramLink(task.url);
-      });
-      actions.appendChild(openBtn);
+      if (task.url){
+        var openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'task-btn';
+        openBtn.textContent = t('taskOpen');
+        openBtn.addEventListener('click', function(e){
+          e.preventDefault();
+          openTelegramLink(task.url);
+        });
+        actions.appendChild(openBtn);
+      }
 
       if (task.done){
         var badge = document.createElement('span');

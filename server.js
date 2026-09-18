@@ -668,17 +668,83 @@ const SENSITIVE_MAX_AGE_SECONDS =
 // ---------------------------------------------------------------------------
 // TASKS ("ЗАДАНИЯ" page): subscription tasks for the game's OWN Telegram
 // channel and chat. The bot (BOT_TOKEN) MUST be an administrator of both, or
-// getChatMember cannot see memberships and verification will fail. Usernames
-// are configurable so the tasks can point at any channel/chat; leaving one
-// empty hides that task. TASKS_REWARD_FLAP is the one-time FLAP bonus per
-// completed task (0 = no reward).
-const TASKS_CHANNEL = (process.env.TASKS_CHANNEL || '@GRMFLAP').trim().replace(/^@/, '');
-const TASKS_CHAT = (process.env.TASKS_CHAT || '@GRMFLAPCHAT').trim().replace(/^@/, '');
+// getChatMember cannot see memberships and verification will fail.
+//
+// Configuration per task:
+//   TASKS_CHANNEL / TASKS_CHAT  — the verification target: a public @username
+//     (or a t.me/<name> link) OR a numeric chat id (-100…, required for
+//     PRIVATE chats — an invite link alone cannot be verified).
+//   TASKS_CHANNEL_URL / TASKS_CHAT_URL — what the OPEN button opens. Derived
+//     from the username automatically; set it explicitly for private chats
+//     (the t.me/+invite link).
+// Leaving TASKS_CHAT empty hides the chat task. TASKS_REWARD_FLAP is the
+// one-time FLAP bonus per completed task (0 = no reward).
+function parseChatRef(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  // Numeric Telegram chat id (private chats / channels): -100xxxxxxxxxx
+  if (/^-?\d{5,}$/.test(v)) return { chatId: v, username: '' };
+  let name = v;
+  const link = v.match(/^(?:https?:\/\/)?t\.me\/(.+)$/i);
+  if (link) {
+    const tail = link[1].replace(/\/+$/, '');
+    // An invite link (t.me/+hash) identifies a PRIVATE chat: it can be opened
+    // by players but the Bot API cannot resolve it — a numeric id is needed.
+    if (tail.charAt(0) === '+') return { chatId: '', username: '', invite: 'https://t.me/' + tail };
+    name = tail.split('/')[0];
+  } else {
+    name = v.replace(/^@/, '');
+  }
+  if (!/^[A-Za-z0-9_]{3,64}$/.test(name)) return null;
+  return { chatId: '@' + name, username: name, invite: '' };
+}
+
+function taskUrlOverride(raw) {
+  const v = String(raw || '').trim();
+  if (!v || v.length > 300 || !/^https:\/\/[^\s]+$/.test(v)) return '';
+  return v;
+}
+
 const TASKS_REWARD_FLAP = Math.max(0, Math.floor(Number(process.env.TASKS_REWARD_FLAP) || 0));
+const TASKS_CHANNEL_URL = taskUrlOverride(process.env.TASKS_CHANNEL_URL);
+const TASKS_CHAT_URL = taskUrlOverride(process.env.TASKS_CHAT_URL);
 
 const TASKS = [];
-if (TASKS_CHANNEL) TASKS.push({ id: 'join_channel', chatId: TASKS_CHANNEL, kind: 'channel', url: 'https://t.me/' + TASKS_CHANNEL });
-if (TASKS_CHAT) TASKS.push({ id: 'join_chat', chatId: TASKS_CHAT, kind: 'chat', url: 'https://t.me/' + TASKS_CHAT });
+(function buildTasks() {
+  const channelRef = parseChatRef(process.env.TASKS_CHANNEL || '@FFLAPY');
+  const chatRaw = String(process.env.TASKS_CHAT || '').trim();
+  const chatRef = parseChatRef(chatRaw);
+
+  if (channelRef) {
+    TASKS.push({
+      id: 'join_channel',
+      chatId: channelRef.chatId,
+      kind: 'channel',
+      url: TASKS_CHANNEL_URL || (channelRef.username ? 'https://t.me/' + channelRef.username : (channelRef.invite || '')),
+    });
+  } else if (String(process.env.TASKS_CHANNEL || '').trim()) {
+    console.error('TASKS_CHANNEL="' + process.env.TASKS_CHANNEL + '" is not a @username, t.me link or numeric id — channel task hidden.');
+  }
+
+  if (chatRef && chatRef.chatId) {
+    TASKS.push({
+      id: 'join_chat',
+      chatId: chatRef.chatId,
+      kind: 'chat',
+      url: TASKS_CHAT_URL || (chatRef.username ? 'https://t.me/' + chatRef.username : (chatRef.invite || '')),
+    });
+  } else if (chatRaw) {
+    // A private chat can be verified ONLY by its numeric id: Telegram does not
+    // let a bot resolve an invite link. Hide the task instead of promising a
+    // CHECK that can never succeed.
+    console.error(
+      'TASKS_CHAT="' + chatRaw + '" is an invite link — Telegram cannot verify it directly.' +
+      ' Set TASKS_CHAT to the numeric chat id (forward any message from the chat to @userinfobot to get it),' +
+      ' add the bot as an administrator there, and put the invite link into TASKS_CHAT_URL. Chat task hidden.'
+    );
+  }
+  // TASKS_CHAT empty on purpose -> chat task simply hidden.
+})();
 
 // Statuses that mean the user is currently inside the chat/channel. "restricted"
 // users may still be subscribed (e.g. muted), so they count as members.

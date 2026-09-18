@@ -179,21 +179,36 @@ The TASKS page in the Mini App shows subscription tasks for the game's own
 Telegram channel and chat. Configuration lives in the environment:
 
 ```env
-TASKS_CHANNEL=@GRMFLAP      # channel username; empty = task hidden
-TASKS_CHAT=@GRMFLAPCHAT     # chat username; empty = task hidden
-TASKS_REWARD_FLAP=1         # one-time FLAP bonus per completed task (0 = off)
+TASKS_CHANNEL=@FFLAPY      # public channel: @username or t.me link
+TASKS_CHAT=                # chat: @username or NUMERIC id (-100…); empty = hidden
+TASKS_CHANNEL_URL=         # optional: what OPEN opens (else derived)
+TASKS_CHAT_URL=            # optional: what OPEN opens (invite link etc.)
+TASKS_REWARD_FLAP=1        # one-time FLAP bonus per completed task (0 = off)
 ```
 
 **The bot (`BOT_TOKEN`) must be an administrator of the channel and the chat** —
 otherwise Telegram's `getChatMember` cannot see memberships and CHECK answers
 "verification unavailable" (HTTP 503).
 
-Flow: the player taps **OPEN** (`t.me/<username>`), joins, returns and taps
-**✓ CHECK**. The client calls `POST /api/tasks/check`; the server re-verifies
-membership via the Telegram Bot API (`getChatMember`), marks the task done and
-credits the reward **exactly once** (persisted in `tasksDone` in the store).
-Client claims are never trusted, and a failed/unknown Telegram check never
-marks the task done.
+### Private chat (t.me/+invite link)?
+
+Telegram does not let a bot resolve an invite link, so a private chat is
+verified by its NUMERIC id:
+
+1. Add the bot as an administrator of the chat.
+2. Forward any message from that chat to **@userinfobot** (or @getidsbot) —
+   it answers with the id, e.g. `-1001234567890`.
+3. Set `TASKS_CHAT=-1001234567890` and `TASKS_CHAT_URL=https://t.me/+…`
+   (the invite link players should open).
+
+If `TASKS_CHAT` contains only an invite link, the server logs a warning and
+hides the chat task instead of showing a CHECK that can never succeed.
+
+Flow: the player taps **OPEN**, joins, returns and taps **✓ CHECK**. The client
+calls `POST /api/tasks/check`; the server re-verifies membership via the
+Telegram Bot API (`getChatMember`), marks the task done and credits the reward
+**exactly once** (persisted in `tasksDone` in the store). Client claims are
+never trusted, and a failed/unknown Telegram check never marks the task done.
 
 API:
 - `POST /api/tasks` `{ initData }` → `{ tasks: [{ id, kind, url, reward, done }], balance }`

@@ -29,7 +29,8 @@ process.env.PORT = '4783';
 process.env.NODE_ENV = '';
 process.env.BOT_TOKEN = '12345:TEST-TOKEN';
 process.env.TASKS_CHANNEL = '@TestChan';
-process.env.TASKS_CHAT = '@TestChat';
+process.env.TASKS_CHAT = '-1009999990100'; // private chat: verified by numeric id
+process.env.TASKS_CHAT_URL = 'https://t.me/+InviteHash';  // what players open
 process.env.TASKS_REWARD_FLAP = '1';
 
 const store = require('../store.js');
@@ -37,9 +38,11 @@ const store = require('../store.js');
 // --- mock Telegram Bot API --------------------------------------------------
 // membership: true = member, false = left, 'error' = telegram answers !ok
 const membership = new Map();
+const lastChatId = { value: '' };
 global.fetch = async function (url, opts) {
   if (String(url).indexOf('api.telegram.org') === -1) throw new Error('unexpected fetch ' + url);
   const body = JSON.parse(opts.body);
+  lastChatId.value = String(body.chat_id);
   const key = body.chat_id + ':' + body.user_id;
   const state = membership.has(key) ? membership.get(key) : false;
   if (state === 'error') {
@@ -123,16 +126,22 @@ store.ready.then(async () => {
   const carolAuth = signInitData(carol);
 
   console.log('\n1) /api/tasks lists channel + chat tasks');
-  membership.set('TestChan:' + alice.id, false);
-  membership.set('TestChat:' + alice.id, false);
+  membership.set('@TestChan:' + alice.id, false);
+  membership.set('-1009999990100:' + alice.id, false);
   const list = await postJson(4783, '/api/tasks', { initData: aliceAuth });
   check('answers 200 with two tasks', list.status === 200 && Array.isArray(list.tasks) && list.tasks.length === 2, JSON.stringify(list));
   check('channel task points at t.me/TestChan', list.tasks[0] && list.tasks[0].url === 'https://t.me/TestChan' && list.tasks[0].kind === 'channel', JSON.stringify(list.tasks[0]));
-  check('chat task points at t.me/TestChat', list.tasks[1] && list.tasks[1].url === 'https://t.me/TestChat' && list.tasks[1].kind === 'chat', JSON.stringify(list.tasks[1]));
+  check('chat task opens the private invite link', list.tasks[1] && list.tasks[1].url === 'https://t.me/+InviteHash' && list.tasks[1].kind === 'chat', JSON.stringify(list.tasks[1]));
   check('tasks start not done with the configured reward', list.tasks.every((t) => t.done === false && t.reward === 1));
+  // membership stays false here — these calls only prove WHICH chat_id the
+  // server sends to the Telegram API (no side effects, done:false).
+  await postJson(4783, '/api/tasks/check', { initData: aliceAuth, taskId: 'join_channel' });
+  check('username is sent with @ to the Telegram API', lastChatId.value === '@TestChan', 'chat_id=' + lastChatId.value);
+  await postJson(4783, '/api/tasks/check', { initData: aliceAuth, taskId: 'join_chat' });
+  check('private chat is verified by its numeric id', lastChatId.value === '-1009999990100', 'chat_id=' + lastChatId.value);
 
   console.log('\n2) check refuses a non-member');
-  membership.set('TestChan:' + bob.id, false);
+  membership.set('@TestChan:' + bob.id, false);
   const nope2 = await postJson(4783, '/api/tasks/check', { initData: bobAuth, taskId: 'join_channel' });
   check('not-a-member answers done:false', nope2.status === 200 && nope2.done === false, JSON.stringify(nope2));
   const bobList = await postJson(4783, '/api/tasks', { initData: bobAuth });
@@ -140,13 +149,13 @@ store.ready.then(async () => {
   check('Bob earned nothing', bobList.balance === 0, 'balance=' + bobList.balance);
 
   console.log('\n3) member gets marked done + rewarded exactly once');
-  membership.set('TestChan:' + alice.id, true);
+  membership.set('@TestChan:' + alice.id, true);
   const ok1 = await postJson(4783, '/api/tasks/check', { initData: aliceAuth, taskId: 'join_channel' });
   check('member check answers done:true', ok1.status === 200 && ok1.done === true, JSON.stringify(ok1));
   check('reward credited once', ok1.reward === 1 && ok1.balance === 1, JSON.stringify(ok1));
   const again = await postJson(4783, '/api/tasks/check', { initData: aliceAuth, taskId: 'join_channel' });
   check('re-check is idempotent (already done, no double reward)', again.done === true && again.already === true && again.reward === 0 && again.balance === 1, JSON.stringify(again));
-  membership.set('TestChat:' + alice.id, true);
+  membership.set('-1009999990100:' + alice.id, true);
   const ok2 = await postJson(4783, '/api/tasks/check', { initData: aliceAuth, taskId: 'join_chat' });
   check('second task pays separately', ok2.done === true && ok2.balance === 2, JSON.stringify(ok2));
   const aliceList = await postJson(4783, '/api/tasks', { initData: aliceAuth });
@@ -154,7 +163,7 @@ store.ready.then(async () => {
   check('admin sees soft "task done" events', store.listAntiCheatEvents(50).filter((e) => e.reason === 'task done').length >= 2);
 
   console.log('\n4) Telegram failure -> 503, task stays open');
-  membership.set('TestChan:' + carol.id, 'error');
+  membership.set('@TestChan:' + carol.id, 'error');
   const errRes = await postJson(4783, '/api/tasks/check', { initData: carolAuth, taskId: 'join_channel' });
   check('unavailable verification answers 503', errRes.status === 503, JSON.stringify(errRes));
   const carolList = await postJson(4783, '/api/tasks', { initData: carolAuth });
