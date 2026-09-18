@@ -97,6 +97,12 @@ let depositSeq = 1;
 // address must never be able to collect somebody else's payment.
 const tonWallets = new Map();     // canonical address -> { address, userId, name, proven, provenAt, linkedAt }
 
+// Per-user TASKS completion (the "ЗАДАНИЯ" page: subscribe to the game's own
+// Telegram channel / chat). userId -> { [taskId]: { at, reward } }. The server
+// only marks a task done after a real getChatMember check, and the reward is
+// credited exactly once thanks to this map.
+const tasksDone = new Map();     // userId -> { [taskId]: { at, reward } }
+
 const knownUsers = new Set();
 // Small admin-only directory used to map a Telegram user ID to the name that
 // was received from Telegram. The ID remains the source of truth for bans;
@@ -204,6 +210,11 @@ function snapshot() {
         for (const [uid, row] of m) rows[uid] = row;
         out[day] = rows;
       }
+      return out;
+    })(),
+    tasksDone: (function () {
+      const out = {};
+      for (const [uid, row] of tasksDone) out[String(uid)] = row;
       return out;
     })(),
   });
@@ -424,6 +435,22 @@ function hydrate(data) {
       });
     }
     dailyInvites.set(day, m);
+  }
+
+  tasksDone.clear();
+  const tasksIn = data.tasksDone || {};
+  if (tasksIn && typeof tasksIn === 'object' && !Array.isArray(tasksIn)) {
+    for (const uid of Object.keys(tasksIn)) {
+      const row = tasksIn[uid];
+      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+      const clean = {};
+      for (const taskId of Object.keys(row)) {
+        const entry = row[taskId];
+        if (!entry || typeof entry !== 'object') continue;
+        clean[String(taskId).slice(0, 40)] = { at: Number(entry.at) || 0, reward: Number(entry.reward) || 0 };
+      }
+      if (Object.keys(clean).length) tasksDone.set(String(uid), clean);
+    }
   }
 }
 
@@ -677,6 +704,16 @@ function mergeSnapshots(base, other) {
     for (const [uid, row] of Object.entries(rows || {})) {
       const cur = out.dailyInvites[day][uid];
       if (!cur || (Number(row && row.count) || 0) > (Number(cur.count) || 0)) out.dailyInvites[day][uid] = row;
+    }
+  }
+
+  // tasks ("ЗАДАНИЯ") completion: union per user — a completed task stays done
+  out.tasksDone = out.tasksDone || {};
+  for (const [uid, row] of Object.entries(other.tasksDone || {})) {
+    const cur = out.tasksDone[uid];
+    if (!cur) { out.tasksDone[uid] = row; continue; }
+    for (const [taskId, entry] of Object.entries(row || {})) {
+      if (!cur[taskId]) cur[taskId] = entry;
     }
   }
 
@@ -1585,6 +1622,30 @@ function creditCBalance(userId, amount) {
   cBalances.set(String(userId), bal);
   scheduleSave();
   return bal;
+}
+
+// --- TASKS ("ЗАДАНИЯ" page): subscribe to the game's channel / chat ---------
+function getTasksDone(userId) {
+  const row = tasksDone.get(String(userId));
+  return row ? Object.assign({}, row) : {};
+}
+function isTaskDone(userId, taskId) {
+  const row = tasksDone.get(String(userId));
+  return !!(row && row[String(taskId)]);
+}
+/**
+ * Marks a task complete for the user. Idempotent: returns false when the task
+ * was already done, so the caller must credit the reward only on true.
+ */
+function markTaskDone(userId, taskId, reward) {
+  const uid = String(userId);
+  const id = String(taskId).slice(0, 40);
+  const row = tasksDone.get(uid) || {};
+  if (row[id]) return false;
+  row[id] = { at: Date.now(), reward: Number(reward) || 0 };
+  tasksDone.set(uid, row);
+  scheduleSave();
+  return true;
 }
 
 const MIN_WITHDRAW_FLAP = Math.max(1, Math.floor(Number(process.env.MIN_WITHDRAW_FLAP) || 10));
@@ -2499,6 +2560,7 @@ module.exports = {
   rewardHistory,
   updateAllTimeBest, getAllTimeBest,
   getBalance, creditBalance, getCBalance, creditCBalance,
+  getTasksDone, isTaskDone, markTaskDone,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, getDeposit, listDeposits, approveDeposit, rejectDeposit,
   linkTonWallet, proveTonWallet, unlinkTonWallet, findTonWallet,

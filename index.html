@@ -508,6 +508,45 @@
   .rotate-card{ max-width: 320px; }
   .rotate-phone{ font-size: 54px; margin-bottom: 12px; }
   .tasks-title-row{ position:relative; padding-right: 48px; }
+  /* TASKS page: subscription task cards (channel / chat) */
+  .task-emoji{
+    width:34px; height:34px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:17px; flex-shrink:0;
+    background:rgba(244,197,66,0.14);
+    box-shadow: inset 0 0 0 2px rgba(244,197,66,0.4);
+  }
+  .task-actions{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
+  .task-btn{
+    all:unset; cursor:pointer;
+    padding:9px 12px; border-radius:10px;
+    font-size:11px; font-weight:900; letter-spacing:0.4px; line-height:1;
+    background:rgba(255,255,255,0.10); color:#fff7e6;
+    box-shadow: inset 0 0 0 1px rgba(244,197,66,0.45);
+    white-space:nowrap;
+  }
+  .task-btn.primary{
+    background:linear-gradient(180deg,#ffe9a8,var(--gold)); color:#1b1033;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.25);
+  }
+  .task-btn[disabled]{ opacity:0.55; cursor:default; }
+  .task-done-badge{
+    display:inline-flex; align-items:center;
+    padding:9px 12px; border-radius:10px;
+    font-size:11px; font-weight:900; letter-spacing:0.4px; line-height:1;
+    color:var(--gold);
+    background:rgba(244,197,66,0.13);
+    box-shadow: inset 0 0 0 1px rgba(244,197,66,0.45);
+    white-space:nowrap;
+  }
+  .task-reward{
+    display:inline-flex; align-items:center; gap:3px;
+    margin-top:3px;
+    color:var(--gold); font-weight:800; font-size:12px;
+  }
+  .task-reward .tiny-coin{ width:14px; height:14px; margin:0; }
+  .task-msg{ margin-top:3px; font-size:11px; color:#ffb3b3; font-weight:600; }
+  .task-msg.hidden{ display:none; }
   .burger-btn{
     all: unset;
     position:absolute; top:0; right:0;
@@ -1340,6 +1379,7 @@
     <div class="lb-list" id="tasksList">
       <div class="hint" data-i18n="comingSoon">Coming soon.</div>
     </div>
+    <div class="hint hidden" id="tasksNote" data-i18n="tasksNote">Subscriptions are verified by the server — join, then tap CHECK.</div>
   </div>
 </div>
 
@@ -1922,6 +1962,13 @@ window.FLAPY_ART = {
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
       dailyPrize:"Daily prize", monthLockedTitle:"MONTHLY LEADERBOARD LOCKED", monthLockedSub:"Opens when there are 1000 online players.",
       tasks:"TASKS", comingSoon:"Coming soon.", tasksSub:"Complete tasks and earn rewards.",
+      taskChannelTitle:"SUBSCRIBE TO OUR CHANNEL", taskChatTitle:"JOIN OUR CHAT",
+      taskOpen:"OPEN", taskCheck:"✓ CHECK", taskChecking:"CHECKING…", taskDone:"DONE ✓",
+      taskNotJoined:"You are not subscribed yet — join first, then tap CHECK.",
+      taskCheckFail:"Could not verify right now — try again in a minute.",
+      tasksNote:"Subscriptions are verified by the server — join, then tap CHECK.",
+      tasksDemoHint:"Open the game from Telegram to see tasks.",
+      tasksLoadError:"Could not load tasks — tap here to retry.",
       referral:"REFERRAL", refSub:"Invite friends. Earn {c} when they top up.",
       refLink:"Your link", refL1:"Level 1 · 7%", refL2:"Level 2 · 3%", refL3:"Level 3 · 1%",
       refEarned:"Earned", refPeople:"Your invites",
@@ -2284,6 +2331,7 @@ window.FLAPY_ART = {
     document.querySelectorAll(".lang-opt").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
     });
+    if (typeof tasksStateKnown !== "undefined" && tasksStateKnown) paintTasks();
     if (startBtn && !startBtn.disabled && !awaitingPlayAfterAd && startAdStep === 0) {
       /* leave dynamic labels to their own setters */
     }
@@ -3697,6 +3745,7 @@ window.FLAPY_ART = {
     if (page === 'wallet') loadWalletPage();
     if (page === 'leaderboard') loadLeaderboardPage(false);
     if (page === 'referral') loadReferralPage();
+    if (page === 'tasks') loadTasksPage();
   }
   function showGameMenu(){
     // The HOME page is the hub. Opening FLAPY brings the actual game into
@@ -3833,6 +3882,145 @@ window.FLAPY_ART = {
     document.body.removeChild(ta);
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(ok).catch(function(){});
   });
+  // --- TASKS ("ЗАДАНИЯ"): subscribe to the game's own channel & chat ---------
+  var tasksState = [];
+  var tasksStateKnown = false;
+  var tasksCheckBusy = {};
+
+  function openTelegramLink(url){
+    try {
+      if (tg && typeof tg.openTelegramLink === 'function') tg.openTelegramLink(url);
+      else window.open(url, '_blank');
+    } catch(e){ try { window.open(url, '_blank'); } catch(e2){} }
+  }
+
+  function taskRewardHtml(reward){
+    if (!(reward > 0)) return '';
+    var coinSrc = artBlobUrl('c-coin.png');
+    var coin = coinSrc ? '<img class="tiny-coin" src="' + coinSrc + '" alt="FLAP">' : '';
+    return '<div class="task-reward">+' + reward + ' ' + coin + 'FLAP</div>';
+  }
+
+  function paintTasks(){
+    var list = document.getElementById('tasksList');
+    if (!list) return;
+    list.innerHTML = '';
+    var note = document.getElementById('tasksNote');
+    if (!tasksState.length){
+      list.innerHTML = '<div class="hint">' + t('comingSoon') + '</div>';
+      if (note) note.classList.add('hidden');
+      return;
+    }
+    var anyPending = false;
+    tasksState.forEach(function(task){
+      var row = document.createElement('div');
+      row.className = 'lb-row';
+      var emoji = task.kind === 'chat' ? '💬' : '📣';
+      var title = t(task.kind === 'chat' ? 'taskChatTitle' : 'taskChannelTitle');
+      var body = document.createElement('div');
+      body.className = 'lb-body';
+      body.innerHTML = '<div class="lb-name">' + title + '</div>' + taskRewardHtml(task.reward);
+      row.appendChild(document.createElement('div'));
+      row.firstChild.className = 'task-emoji';
+      row.firstChild.textContent = emoji;
+      row.appendChild(body);
+
+      var actions = document.createElement('div');
+      actions.className = 'task-actions';
+      var openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'task-btn';
+      openBtn.textContent = t('taskOpen');
+      openBtn.addEventListener('click', function(e){
+        e.preventDefault();
+        openTelegramLink(task.url);
+      });
+      actions.appendChild(openBtn);
+
+      if (task.done){
+        var badge = document.createElement('span');
+        badge.className = 'task-done-badge';
+        badge.textContent = t('taskDone');
+        actions.appendChild(badge);
+      } else {
+        anyPending = true;
+        var checkBtn = document.createElement('button');
+        checkBtn.type = 'button';
+        checkBtn.className = 'task-btn primary';
+        checkBtn.textContent = t('taskCheck');
+        var msg = document.createElement('div');
+        msg.className = 'task-msg hidden';
+        checkBtn.addEventListener('click', function(e){
+          e.preventDefault();
+          if (tasksCheckBusy[task.id] || DEMO_MODE) return;
+          tasksCheckBusy[task.id] = true;
+          checkBtn.disabled = true;
+          openBtn.disabled = true;
+          checkBtn.textContent = t('taskChecking');
+          msg.classList.add('hidden');
+          apiFetch('/api/tasks/check', { method:'POST', body: JSON.stringify({ initData: initData, taskId: task.id }) })
+            .then(function(res){
+              tasksCheckBusy[task.id] = false;
+              if (res && res.done){
+                task.done = true;
+                paintTasks();
+              } else {
+                checkBtn.disabled = false;
+                openBtn.disabled = false;
+                checkBtn.textContent = t('taskCheck');
+                msg.textContent = t('taskNotJoined');
+                msg.classList.remove('hidden');
+              }
+            })
+            .catch(function(){
+              tasksCheckBusy[task.id] = false;
+              checkBtn.disabled = false;
+              openBtn.disabled = false;
+              checkBtn.textContent = t('taskCheck');
+              msg.textContent = t('taskCheckFail');
+              msg.classList.remove('hidden');
+            });
+        });
+        actions.appendChild(checkBtn);
+        body.appendChild(msg);
+      }
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+    if (note){
+      if (anyPending) note.classList.remove('hidden');
+      else note.classList.add('hidden');
+    }
+  }
+
+  function loadTasksPage(){
+    var list = document.getElementById('tasksList');
+    if (!list) return;
+    if (DEMO_MODE){
+      tasksState = [];
+      paintTasks();
+      list.innerHTML = '<div class="hint">' + t('tasksDemoHint') + '</div>';
+      return;
+    }
+    if (tasksStateKnown) paintTasks();
+    apiFetch('/api/tasks', { method:'POST', body: JSON.stringify({ initData: initData }) })
+      .then(function(res){
+        tasksState = (res && res.tasks) || [];
+        tasksStateKnown = true;
+        paintTasks();
+      })
+      .catch(function(){
+        if (!tasksStateKnown){
+          list.innerHTML = '';
+          var err = document.createElement('div');
+          err.className = 'hint';
+          err.textContent = t('tasksLoadError');
+          err.addEventListener('click', function(){ loadTasksPage(); });
+          list.appendChild(err);
+        }
+      });
+  }
+
   function drawBackground(){
     if (artReady(ART.bg)) {
       ctx.drawImage(ART.bg, 0, 0, LW, LH);
@@ -4348,6 +4536,23 @@ window.FLAPY_ART = {
     // access card appears when they tap the FLAPY game card.
     if (DEMO_MODE) {
       accessLocked = false;
+      return;
+    }
+    checkGameAccess().then(function(){
+      resumePvpIfAny();
+    }).catch(function(){});
+    // Pick up top-ups that were still being confirmed when the app was closed.
+    resumeTopupWatch();
+  }
+  resetGame();
+  init();
+  requestAnimationFrame(loop);
+})();
+</script>
+<script src="/ui-home-gameover-fix.js"></script>
+</body>
+</html>
+lse;
       return;
     }
     checkGameAccess().then(function(){

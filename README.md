@@ -173,6 +173,32 @@ npm install node-telegram-bot-api
 MINI_APP_URL=https://yourdomain.com/index.html node bot.js
 ```
 
+## Tasks (ЗАДАНИЯ) — subscribe to the game's channel & chat
+
+The TASKS page in the Mini App shows subscription tasks for the game's own
+Telegram channel and chat. Configuration lives in the environment:
+
+```env
+TASKS_CHANNEL=@GRMFLAP      # channel username; empty = task hidden
+TASKS_CHAT=@GRMFLAPCHAT     # chat username; empty = task hidden
+TASKS_REWARD_FLAP=1         # one-time FLAP bonus per completed task (0 = off)
+```
+
+**The bot (`BOT_TOKEN`) must be an administrator of the channel and the chat** —
+otherwise Telegram's `getChatMember` cannot see memberships and CHECK answers
+"verification unavailable" (HTTP 503).
+
+Flow: the player taps **OPEN** (`t.me/<username>`), joins, returns and taps
+**✓ CHECK**. The client calls `POST /api/tasks/check`; the server re-verifies
+membership via the Telegram Bot API (`getChatMember`), marks the task done and
+credits the reward **exactly once** (persisted in `tasksDone` in the store).
+Client claims are never trusted, and a failed/unknown Telegram check never
+marks the task done.
+
+API:
+- `POST /api/tasks` `{ initData }` → `{ tasks: [{ id, kind, url, reward, done }], balance }`
+- `POST /api/tasks/check` `{ initData, taskId }` → `{ ok, done, reward, balance }`
+
 ## Rewarded ads
 
 `index.html` has a `showRewardedAd()` stub with a commented example for

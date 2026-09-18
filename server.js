@@ -664,6 +664,67 @@ const INIT_DATA_MAX_AGE_SECONDS = 12 * 60 * 60;
 // has to prove identity again anyway, we just demand a freshly-signed token.
 const SENSITIVE_MAX_AGE_SECONDS =
   Math.max(60, Math.floor(Number(process.env.SENSITIVE_AUTH_MAX_AGE_SECONDS) || (20 * 60)));
+
+// ---------------------------------------------------------------------------
+// TASKS ("ЗАДАНИЯ" page): subscription tasks for the game's OWN Telegram
+// channel and chat. The bot (BOT_TOKEN) MUST be an administrator of both, or
+// getChatMember cannot see memberships and verification will fail. Usernames
+// are configurable so the tasks can point at any channel/chat; leaving one
+// empty hides that task. TASKS_REWARD_FLAP is the one-time FLAP bonus per
+// completed task (0 = no reward).
+const TASKS_CHANNEL = (process.env.TASKS_CHANNEL || '@GRMFLAP').trim().replace(/^@/, '');
+const TASKS_CHAT = (process.env.TASKS_CHAT || '@GRMFLAPCHAT').trim().replace(/^@/, '');
+const TASKS_REWARD_FLAP = Math.max(0, Math.floor(Number(process.env.TASKS_REWARD_FLAP) || 0));
+
+const TASKS = [];
+if (TASKS_CHANNEL) TASKS.push({ id: 'join_channel', chatId: TASKS_CHANNEL, kind: 'channel', url: 'https://t.me/' + TASKS_CHANNEL });
+if (TASKS_CHAT) TASKS.push({ id: 'join_chat', chatId: TASKS_CHAT, kind: 'chat', url: 'https://t.me/' + TASKS_CHAT });
+
+// Statuses that mean the user is currently inside the chat/channel. "restricted"
+// users may still be subscribed (e.g. muted), so they count as members.
+const TELEGRAM_MEMBER_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
+
+// Override only for local dev / staging (e.g. a mock Telegram API). Production
+// never sets it and keeps hitting the real api.telegram.org.
+const TELEGRAM_API_BASE = (process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/+$/, '');
+
+/**
+ * True/false membership per Telegram getChatMember, or null when the check
+ * could not be performed (no token, Telegram unreachable, non-2xx, bad shape).
+ * null must NEVER be treated as "not a member" — the client is told to retry.
+ */
+async function isTelegramMember(chatId, userId) {
+  if (!BOT_TOKEN || typeof fetch !== 'function') return null;
+  let resp;
+  try {
+    resp = await fetch(TELEGRAM_API_BASE + '/bot' + BOT_TOKEN + '/getChatMember', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, user_id: Number(userId) }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(10 * 1000) : undefined,
+    });
+  } catch (err) {
+    return null;
+  }
+  if (!resp || !resp.ok) return null;
+  let data;
+  try { data = await resp.json(); } catch (err) { return null; }
+  if (!data || data.ok !== true || !data.result || typeof data.result.status !== 'string') return null;
+  return TELEGRAM_MEMBER_STATUSES.has(data.result.status);
+}
+
+function taskView(task, doneRow) {
+  const done = !!(doneRow && doneRow[task.id]);
+  return {
+    id: task.id,
+    kind: task.kind,
+    url: task.url,
+    reward: TASKS_REWARD_FLAP,
+    done,
+    doneAt: done ? (doneRow[task.id].at || 0) : 0,
+  };
+}
+
 if (process.env.SESSION_SECRET || BOT_TOKEN) {
   AC.setSessionSecret(process.env.SESSION_SECRET || BOT_TOKEN);
 }
@@ -757,6 +818,66 @@ app.post('/api/access', (req, res) => {
   }
   trackTelegramUser(user, AC.clientIp(req));
   res.json({ ok: true, userId: String(user.id), name: displayName(user) });
+});
+
+// ---------------------------------------------------------------------------
+// TASKS ("ЗАДАНИЯ"): subscription tasks for the game's own Telegram channel
+// and chat. The client lists the tasks, opens t.me links and asks the server
+// to CHECK each one; the server re-verifies membership through the Telegram
+// Bot API (getChatMember) and only then marks the task done + credits the
+// one-time FLAP reward. A client claim is never trusted on its own.
+app.post('/api/tasks', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  if (!store.allowRequest('tasks:' + user.id, 30, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  trackTelegramUser(user, AC.clientIp(req));
+  const doneRow = store.getTasksDone(String(user.id));
+  res.json({
+    tasks: TASKS.map((task) => taskView(task, doneRow)),
+    balance: store.getBalance(String(user.id)),
+  });
+});
+
+app.post('/api/tasks/check', async (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  // Verification hits api.telegram.org — keep this tight so the endpoint
+  // cannot be abused as a Telegram API amplifier.
+  if (!store.allowRequest('taskcheck:' + user.id, 8, 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  trackTelegramUser(user, AC.clientIp(req));
+
+  const task = TASKS.find((t) => t.id === req.body.taskId);
+  if (!task) return res.status(400).json({ error: 'unknown task' });
+
+  const userId = String(user.id);
+  const doneRow = store.getTasksDone(userId);
+  if (doneRow[task.id]) {
+    return res.json({ ok: true, done: true, already: true, reward: 0, balance: store.getBalance(userId) });
+  }
+
+  const member = await isTelegramMember(task.chatId, user.id);
+  if (member === null) {
+    // Unknown state (Telegram unreachable / bot not in the chat) — never
+    // mark the task done and never punish the player for our outage.
+    return res.status(503).json({ error: 'verification unavailable, try again in a minute' });
+  }
+  if (!member) {
+    return res.json({ ok: true, done: false, reward: 0, balance: store.getBalance(userId) });
+  }
+
+  // Credit the reward exactly once — markTaskDone is idempotent.
+  const firstTime = store.markTaskDone(userId, task.id, TASKS_REWARD_FLAP);
+  const balance = firstTime && TASKS_REWARD_FLAP > 0
+    ? store.creditBalance(userId, TASKS_REWARD_FLAP)
+    : store.getBalance(userId);
+  store.logEvent(userId, 'task done', { taskId: task.id, reward: firstTime ? TASKS_REWARD_FLAP : 0 });
+  res.json({ ok: true, done: true, reward: firstTime ? TASKS_REWARD_FLAP : 0, balance });
 });
 
 app.post('/api/start-session', (req, res) => {
