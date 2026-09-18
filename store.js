@@ -8,6 +8,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+// Canonical TON address form (friendly UQ…/EQ… and raw 0:… are the same
+// account). verifyDeposit.js has no dependencies of its own, so no cycle.
+const { normalizeAddress } = require('./verifyDeposit.js');
 
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
 const FALLBACK_FILE = path.join(__dirname, 'data', 'store.json');
@@ -86,6 +89,13 @@ const withdrawals = [];           // { id, userId, name, address, amount, status
 let withdrawalSeq = 1;
 const deposits = [];              // { id, userId, name, amount, txHash, wallet?, status, requestedAt }
 let depositSeq = 1;
+// TON wallets attached to a player account, keyed by canonical address.
+// `proven` is set ONLY when the server itself read that address out of a
+// transaction the wallet signed (a TON Connect top-up), i.e. ownership is
+// cryptographically established. Automatic crediting of transfers spotted on
+// the deposit address is limited to proven wallets — an unproven, self-reported
+// address must never be able to collect somebody else's payment.
+const tonWallets = new Map();     // canonical address -> { address, userId, name, proven, provenAt, linkedAt }
 
 const knownUsers = new Set();
 // Small admin-only directory used to map a Telegram user ID to the name that
@@ -167,6 +177,7 @@ function snapshot() {
     withdrawalSeq,
     deposits,
     depositSeq,
+    tonWallets: Array.from(tonWallets.values()),
     knownUsers: Array.from(knownUsers).map(String),
     users,
     totalRuns,
@@ -200,7 +211,7 @@ function snapshot() {
 
 const KNOWN_SNAPSHOT_FIELDS = new Set([
   'version', 'savedAt', 'savedBy', 'periodBoards', 'allTimeBest', 'balances', 'cBalances',
-  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'knownUsers', 'users', 'totalRuns',
+  'withdrawals', 'withdrawalSeq', 'deposits', 'depositSeq', 'tonWallets', 'knownUsers', 'users', 'totalRuns',
   'rewardHistory', 'pvpMatches', 'pvpHouseC', 'pvpQueue', 'referrals', 'dailyInvites',
   'bans', 'antiCheatEvents', 'runHistory',
 ]);
@@ -274,6 +285,20 @@ function hydrate(data) {
   }
   const maxDepId = deposits.reduce((m, d) => Math.max(m, Number(d.id) || 0), 0);
   depositSeq = Math.max(Number(data.depositSeq) || 1, maxDepId + 1);
+
+  tonWallets.clear();
+  if (Array.isArray(data.tonWallets)) {
+    for (const w of data.tonWallets) {
+      const row = sanitizeTonWallet(w);
+      if (!row) continue;
+      const key = normalizeAddress(row.address);
+      if (!key) continue;
+      const prev = tonWallets.get(key);
+      // A proven attachment always wins over an unproven claim on restore.
+      if (prev && (prev.proven || !row.proven)) continue;
+      tonWallets.set(key, row);
+    }
+  }
 
   knownUsers.clear();
   if (Array.isArray(data.knownUsers)) {
@@ -567,6 +592,25 @@ function mergeSnapshots(base, other) {
   }
   out.withdrawalSeq = Math.max(Number(out.withdrawalSeq) || 1, Number(other.withdrawalSeq) || 1);
   out.depositSeq = Math.max(Number(out.depositSeq) || 1, Number(other.depositSeq) || 1);
+
+  // attached wallets: union by canonical address, a proven link always wins
+  {
+    const byAddr = new Map();
+    for (const row of (out.tonWallets || []).concat(other.tonWallets || [])) {
+      const clean = sanitizeTonWallet(row);
+      if (!clean) continue;
+      const key = normalizeAddress(clean.address);
+      if (!key) continue;
+      const cur = byAddr.get(key);
+      if (!cur) { byAddr.set(key, clean); continue; }
+      if (clean.proven && !cur.proven) byAddr.set(key, clean);
+      else if (clean.proven && cur.proven) {
+        cur.provenAt = Math.min(Number(cur.provenAt) || 0, Number(clean.provenAt) || 0);
+      }
+      cur.linkedAt = Math.min(Number(cur.linkedAt) || Date.now(), Number(clean.linkedAt) || Date.now());
+    }
+    out.tonWallets = Array.from(byAddr.values());
+  }
 
   // users / counters
   const users = new Set([...(out.knownUsers || []), ...(other.knownUsers || [])].map(String));
@@ -1631,6 +1675,161 @@ function rejectDeposit(id) {
   return d;
 }
 
+/* ------------------------------------------------------------------ *
+ * TON wallets attached to a player account
+ * ------------------------------------------------------------------ */
+
+function sanitizeTonWallet(row) {
+  if (!row || typeof row !== 'object') return null;
+  const address = String(row.address || '').trim().slice(0, 120);
+  const userId = String(row.userId || '').trim();
+  if (!address || !userId) return null;
+  return {
+    address,
+    userId,
+    name: String(row.name || '').slice(0, 120),
+    proven: !!row.proven,
+    provenAt: Number(row.provenAt) || 0,
+    linkedAt: Number(row.linkedAt) || Date.now(),
+    lastSeenAt: Number(row.lastSeenAt) || 0,
+    source: String(row.source || 'tonconnect').slice(0, 32),
+  };
+}
+
+/**
+ * Attach a wallet the player connected in the mini app. This is a convenience
+ * link only (prefilled withdrawals, "your wallet" display): it does NOT allow
+ * automatic crediting until the same address is proven by a signed transaction.
+ */
+function linkTonWallet(userId, address, opts) {
+  userId = String(userId);
+  const row = sanitizeTonWallet({
+    address,
+    userId,
+    name: (opts && opts.name) || '',
+    source: (opts && opts.source) || 'tonconnect',
+    linkedAt: Date.now(),
+  });
+  if (!row) return { ok: false, error: 'invalid TON address' };
+  const key = normalizeAddress(row.address);
+  if (!key) return { ok: false, error: 'invalid TON address' };
+  const existing = tonWallets.get(key);
+  if (existing) {
+    if (existing.proven && existing.userId !== userId) {
+      // Somebody else already proved ownership of this wallet. Never move a
+      // proven attachment: that is how a payment finds its account.
+      return { ok: false, error: 'wallet already attached to another account' };
+    }
+    existing.address = row.address;
+    existing.userId = userId;
+    if (row.name) existing.name = row.name;
+    existing.lastSeenAt = Date.now();
+    existing.source = row.source;
+    scheduleSave();
+    return { ok: true, wallet: existing, alreadyLinked: true };
+  }
+  tonWallets.set(key, row);
+  scheduleSave();
+  return { ok: true, wallet: row };
+}
+
+/**
+ * Mark a wallet as PROVEN for this account. Only ever called with the payer
+ * address read out of a transaction the wallet signed (TON Connect top-up), so
+ * ownership is established by the blockchain itself.
+ */
+function proveTonWallet(userId, address, opts) {
+  userId = String(userId);
+  const raw = String(address || '').trim().slice(0, 120);
+  if (!raw) return null;
+  const key = normalizeAddress(raw);
+  if (!key) return null;
+  const now = Date.now();
+  const existing = tonWallets.get(key);
+  if (existing) {
+    if (existing.proven && existing.userId !== userId) return null; // another owner proved it first
+    existing.userId = userId;
+    existing.address = raw;
+    if (!existing.proven) { existing.proven = true; existing.provenAt = now; }
+    existing.lastSeenAt = now;
+    if (opts && opts.name) existing.name = String(opts.name).slice(0, 120);
+    scheduleSave();
+    return existing;
+  }
+  const row = {
+    address: raw,
+    userId,
+    name: String((opts && opts.name) || '').slice(0, 120),
+    proven: true,
+    provenAt: now,
+    linkedAt: now,
+    lastSeenAt: now,
+    source: String((opts && opts.source) || 'signed-tx').slice(0, 32),
+  };
+  tonWallets.set(key, row);
+  scheduleSave();
+  return row;
+}
+
+// Drop an UNPROVEN attachment (the player pressed "disconnect wallet"). Proven
+// ones stay: they are the audit trail of who really paid, and removing them
+// would let a player detach a wallet and re-attach it to farm a transfer twice.
+function unlinkTonWallet(userId, address) {
+  userId = String(userId);
+  const key = normalizeAddress(String(address || '').trim());
+  if (!key) return { ok: false, error: 'invalid TON address' };
+  const row = tonWallets.get(key);
+  if (!row || row.userId !== userId) return { ok: false, error: 'not found' };
+  if (row.proven) return { ok: false, error: 'verified wallets stay attached' };
+  tonWallets.delete(key);
+  scheduleSave();
+  return { ok: true };
+}
+
+function findTonWallet(address) {
+  const key = normalizeAddress(String(address || '').trim());
+  return (key && tonWallets.get(key)) || null;
+}
+
+function getTonWalletsForUser(userId) {
+  userId = String(userId);
+  return Array.from(tonWallets.values()).filter((w) => w && w.userId === userId);
+}
+
+function listProvenTonWallets() {
+  return Array.from(tonWallets.values()).filter((w) => w && w.proven);
+}
+
+// Pending top-up requests a freshly spotted transfer could belong to: the same
+// player, the same wallet, submitted before the transfer landed and still open.
+function listPendingDepositsForWallet(userId, address) {
+  userId = String(userId);
+  const key = normalizeAddress(String(address || '').trim());
+  if (!key) return [];
+  return deposits.filter((d) => d &&
+    d.status === 'pending' &&
+    String(d.userId) === userId &&
+    normalizeAddress(String(d.wallet || '')) === key);
+}
+
+// Has any top-up request ever referenced this on-chain identity / hash? Guards
+// the linked-wallet scanner against paying twice for a transfer that an admin
+// credited by hand (which leaves no on-chain identity behind).
+function hasDepositForTx(tokens) {
+  const wanted = (Array.isArray(tokens) ? tokens : [tokens])
+    .map((x) => String(x || '').trim().toLowerCase())
+    .filter((x) => x.length >= 8);
+  if (!wanted.length) return false;
+  const set = new Set(wanted);
+  for (const d of deposits) {
+    if (!d) continue;
+    if (set.has(String(d.txHash || '').toLowerCase())) return true;
+    if (set.has(String(d.onchainTxId || '').toLowerCase())) return true;
+    if (set.has(String(d.identity || '').toLowerCase())) return true;
+  }
+  return false;
+}
+
 function trackUser(userId, profile) {
   userId = String(userId);
   const now = Date.now();
@@ -2302,6 +2501,9 @@ module.exports = {
   getBalance, creditBalance, getCBalance, creditCBalance,
   requestWithdrawal, listWithdrawals, markWithdrawalPaid, MIN_WITHDRAW_FLAP,
   requestDeposit, getDeposit, listDeposits, approveDeposit, rejectDeposit,
+  linkTonWallet, proveTonWallet, unlinkTonWallet, findTonWallet,
+  getTonWalletsForUser, listProvenTonWallets, listPendingDepositsForWallet,
+  hasDepositForTx, normalizeAddress,
   bestKnownName,
   trackUser, listUsers, getTotalUsers, getActivePlayers, recordRun, getRunStats,
   pvpJoin, pvpCancel, pvpDecline, pvpReady, pvpAck, pvpForfeit, pvpHeartbeat, pvpStatus, pvpSubmitScore, PVP_STAKES,
