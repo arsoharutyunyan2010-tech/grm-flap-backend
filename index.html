@@ -166,9 +166,11 @@
     user-select: none;
   }
   .screen-art--modal{ width: auto; height: clamp(100px, 18vh, 148px); }
-  /* Result illustrations are the emotional payoff of a run: show them big and
+  /* The ordinary GAME OVER card carries NO illustration (removed at the
+     owner's request) — only a confirmed new record shows the trophy art.
+     Result illustrations are the emotional payoff of a run: show them big and
      luminous instead of a small stamp that sinks into the dark card. */
-  #gameOverArt, #newBestArt{
+  #newBestArt{
     width: 100%;
     height: auto;
     max-height: clamp(150px, 26vh, 210px);
@@ -176,6 +178,19 @@
     filter: saturate(1.15) brightness(1.1) drop-shadow(0 8px 24px rgba(0,0,0,0.55)) drop-shadow(0 0 22px rgba(244,197,66,0.30));
   }
   .screen-art--page{ width: auto; max-height: 190px; margin: 18px auto 20px; }
+  /* Transient notice used for automatic top-ups ("credited +50 C"). */
+  .app-toast{
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+    z-index: 9999; max-width: min(92vw, 420px);
+    padding: 11px 16px; border-radius: 14px;
+    background: rgba(20,10,40,0.94); color: #fff7e6;
+    border: 1px solid rgba(244,197,66,0.45);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    font-size: 13px; line-height: 1.35; font-weight: 700; text-align: center;
+    pointer-events: none;
+  }
+  .app-toast--ok{ border-color: rgba(120,230,150,0.75); color: #eafff0; }
+  .app-toast.hidden{ display: none; }
   .screen-art.art-unavailable{ display: none !important; }
   .search-art{ position: relative; }
   .search-art .screen-art{ width: 100%; height: auto; }
@@ -198,7 +213,7 @@
     .art-overlay .card{ padding: 14px 16px 18px; }
     .art-overlay button:not(.stake-chip){ padding: 11px 16px; }
     .screen-art--modal{ height: 96px; margin-bottom: 8px; }
-    #gameOverArt, #newBestArt{ max-height: 140px; }
+    #newBestArt{ max-height: 140px; }
   }
   @media (prefers-reduced-motion: reduce){
     .search-dots span{ animation: none; }
@@ -1134,7 +1149,6 @@
         <div class="hint" id="continueHint"></div>
       </div>
       <div id="finalMode" class="hidden">
-        <img id="gameOverArt" class="screen-art screen-art--modal" src="/img/ui/game-over-banner.webp" width="488" height="380" loading="lazy" decoding="async" alt="" aria-hidden="true">
         <img id="newBestArt" class="screen-art screen-art--modal hidden" src="/img/ui/trophy-new-best.webp" width="384" height="384" loading="lazy" decoding="async" alt="" aria-hidden="true">
         <div class="title" style="font-size:26px;" data-i18n="gameOver">GAME OVER</div>
         <div class="stat-row"><span data-i18n="score">Score</span><b id="finalScore">0</b></div>
@@ -1256,7 +1270,7 @@
           <input type="text" id="depositTx" class="field-input" placeholder="…" autocomplete="off">
           <button id="depositSubmitBtn" data-i18n="requestTopup">REQUEST TOP-UP</button>
           <div class="hint" id="depositMsgManual"></div>
-          <div class="reward-note" data-i18n="topupNote">Send the USD amount in TON to the address above, then paste the transaction hash. An admin will credit C after checking.</div>
+          <div class="reward-note" data-i18n="topupNote">Send the USD amount in TON to the address above, then paste the transaction hash (or the whole explorer link). The transfer is checked automatically and C is credited once it is confirmed on-chain.</div>
         </div>
       </div>
     </div>
@@ -1903,7 +1917,7 @@ window.FLAPY_ART = {
       txHash:"Transaction hash", requestTopup:"REQUEST TOP-UP", copy:"COPY", copied:"COPIED",
       enterTx:"Paste the TON transaction hash.",
       topupOk:"Top-up request submitted. The system checks the transfer automatically and credits C once it is confirmed on-chain.",
-      topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash. The transfer is checked automatically and C is credited once it is confirmed on-chain.",
+      topupNote:"Send the USD amount in TON to the address above, then paste the transaction hash (or the whole explorer link). The transfer is checked automatically and C is credited once it is confirmed on-chain.",
       leaderboard:"LEADERBOARD", lbSub:"Daily score leaders — prizes are shown by place", lbRecordsTitle:"Score records",
       daily:"DAILY", weekly:"WEEKLY", monthly:"MONTHLY", myRank:"My rating", lbViewScore:"SCORE", lbViewInvites:"INVITES",
       dailyPrize:"Daily prize", monthLockedTitle:"MONTHLY LEADERBOARD LOCKED", monthLockedSub:"Opens when there are 1000 online players.",
@@ -1936,7 +1950,11 @@ window.FLAPY_ART = {
       rateError:"Could not fetch the TON rate — try again soon.",
       wrongNetwork:"Switch your wallet to the TON mainnet.",
       topupPaid:"Payment sent. Top-up request submitted ",
-      payWalletNote:"Paying from the connected wallet is credited automatically as soon as the transfer is confirmed on-chain.",
+      payWalletNote:"Paying from the connected wallet is credited automatically as soon as the transfer is confirmed on-chain. Once that wallet is verified, any transfer it sends to the address above is credited by itself — no request and no hash needed.",
+      walletVerified:"verified — top-ups are credited automatically",
+      walletNotVerifiedYet:"make one payment to switch on automatic top-ups",
+      walletAttachedOther:"That wallet is already attached to another account.",
+      topupAlreadyCredited:"That payment was already added to your balance.",
       topupConfirming:"Payment sent — confirming on-chain, your balance updates automatically…",
       topupCredited:"Top-up credited!", topupRejected:"Top-up was rejected.",
       topupPending:"Still confirming. It will be credited automatically — request "
@@ -1974,7 +1992,7 @@ window.FLAPY_ART = {
       txHash:"Хэш транзакции", requestTopup:"ЗАПРОСИТЬ ПОПОЛНЕНИЕ", copy:"КОПИР.", copied:"СКОПИРОВАНО",
       enterTx:"Вставьте хэш TON-транзакции.",
       topupOk:"Заявка на пополнение отправлена. Система автоматически проверяет перевод и начислит C после подтверждения в сети.",
-      topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции. Перевод проверяется автоматически, C начислится после подтверждения в сети.",
+      topupNote:"Отправьте сумму в TON на адрес выше и вставьте хэш транзакции (или всю ссылку из обозревателя). Перевод проверяется автоматически, C начислится после подтверждения в сети.",
       leaderboard:"ЛИДЕРЫ", lbSub:"Лидеры дня по очкам — призы указаны по местам", lbRecordsTitle:"Рекорды",
       daily:"ДЕНЬ", weekly:"НЕДЕЛЯ", monthly:"МЕСЯЦ", myRank:"Моё место", lbViewScore:"ОЧКИ", lbViewInvites:"ПРИГЛАШЕНИЯ",
       dailyPrize:"Дневной приз", monthLockedTitle:"МЕСЯЧНЫЙ РЕЙТИНГ ЗАКРЫТ", monthLockedSub:"Откроется, когда онлайн будет 1000 игроков.",
@@ -2007,7 +2025,11 @@ window.FLAPY_ART = {
       rateError:"Не удалось получить курс TON — попробуйте позже.",
       wrongNetwork:"Переключите кошелёк на основную сеть TON.",
       topupPaid:"Платёж отправлен. Заявка на пополнение №",
-      payWalletNote:"Оплата с подключённого кошелька зачисляется автоматически, как только перевод подтверждён в сети.",
+      payWalletNote:"Оплата с подключённого кошелька зачисляется автоматически, как только перевод подтверждён в сети. После проверки кошелька любой его перевод на адрес выше зачисляется сам — без заявки и хэша.",
+      walletVerified:"проверен — пополнения зачисляются автоматически",
+      walletNotVerifiedYet:"совершите один платёж, чтобы включить автозачисление",
+      walletAttachedOther:"Этот кошелёк уже привязан к другому аккаунту.",
+      topupAlreadyCredited:"Этот платёж уже зачислен на ваш баланс.",
       topupConfirming:"Платёж отправлен — подтверждаем в сети, баланс обновится автоматически…",
       topupCredited:"Пополнение зачислено!", topupRejected:"Пополнение отклонено.",
       topupPending:"Ещё подтверждается. Зачислится автоматически — заявка №"
@@ -2045,7 +2067,7 @@ window.FLAPY_ART = {
       txHash:"Хеш транзакції", requestTopup:"ЗАПИТАТИ ПОПОВНЕННЯ", copy:"КОПІЯ", copied:"СКОПІЙОВАНО",
       enterTx:"Вставте хеш TON-транзакції.",
       topupOk:"Заявку на поповнення надіслано. Система автоматично перевіряє переказ і нарахує C після підтвердження в мережі.",
-      topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції. Переказ перевіряється автоматично, C нарахується після підтвердження в мережі.",
+      topupNote:"Надішліть суму в TON на адресу вище і вставте хеш транзакції (або все посилання з оглядача). Переказ перевіряється автоматично, C нарахується після підтвердження в мережі.",
       leaderboard:"ЛІДЕРИ", lbSub:"Лідери дня за балами — призи вказані по місцях", lbRecordsTitle:"Рекорди",
       daily:"ДЕНЬ", weekly:"ТИЖДЕНЬ", monthly:"МІСЯЦЬ", myRank:"Моє місце", lbViewScore:"БАЛИ", lbViewInvites:"ЗАПРОШЕННЯ",
       dailyPrize:"Денний приз", monthLockedTitle:"МІСЯЧНИЙ РЕЙТИНГ ЗАКРИТО", monthLockedSub:"Відкриється, коли онлайн буде 1000 гравців.",
@@ -2078,7 +2100,11 @@ window.FLAPY_ART = {
       rateError:"Не вдалося отримати курс TON — спробуйте пізніше.",
       wrongNetwork:"Переключіть гаманець на основну мережу TON.",
       topupPaid:"Платіж надіслано. Заявка на поповнення №",
-      payWalletNote:"Оплата з підключеного гаманця зараховується автоматично, щойно переказ підтверджено в мережі.",
+      payWalletNote:"Оплата з підключеного гаманця зараховується автоматично, щойно переказ підтверджено в мережі. Після перевірки гаманця будь-який його переказ на адресу вище зараховується сам — без заявки і хешу.",
+      walletVerified:"перевірено — поповнення зараховуються автоматично",
+      walletNotVerifiedYet:"зробіть один платіж, щоб увімкнути автоматичне зарахування",
+      walletAttachedOther:"Цей гаманець уже прив'язано до іншого акаунта.",
+      topupAlreadyCredited:"Цей платіж уже зараховано на ваш баланс.",
       topupConfirming:"Платіж надіслано — підтверджуємо в мережі, баланс оновиться автоматично…",
       topupCredited:"Поповнення зараховано!", topupRejected:"Поповнення відхилено.",
       topupPending:"Ще підтверджується. Зарахується автоматично — заявка №"
@@ -2116,7 +2142,7 @@ window.FLAPY_ART = {
       txHash:"交易哈希", requestTopup:"申请充值", copy:"复制", copied:"已复制",
       enterTx:"请粘贴 TON 交易哈希。",
       topupOk:"充值申请已提交，系统会自动核验转账，链上确认后到账 C。",
-      topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希。系统会自动核验转账，链上确认后自动充值 C。",
+      topupNote:"按美元金额向上面的地址发送 TON，然后粘贴交易哈希（或整个浏览器链接）。系统会自动核验转账，链上确认后自动充值 C。",
       leaderboard:"排行榜", lbSub:"今日分数排行 — 奖励按名次显示", lbRecordsTitle:"分数纪录",
       daily:"日榜", weekly:"周榜", monthly:"月榜", myRank:"我的排名", lbViewScore:"分数", lbViewInvites:"邀请",
       dailyPrize:"每日奖励", monthLockedTitle:"月榜已锁定", monthLockedSub:"在线玩家达到 1000 人时开放。",
@@ -2149,7 +2175,11 @@ window.FLAPY_ART = {
       rateError:"无法获取 TON 汇率——请稍后再试。",
       wrongNetwork:"请将钱包切换到 TON 主网。",
       topupPaid:"付款已发送。充值申请编号 ",
-      payWalletNote:"使用已连接钱包付款，链上确认后会自动到账。",
+      payWalletNote:"使用已连接钱包付款，链上确认后会自动到账。钱包通过验证后，它向上述地址的任何转账都会自动入账 — 无需申请，也无需哈希。",
+      walletVerified:"已验证 — 充值自动到账",
+      walletNotVerifiedYet:"完成一次付款即可开启自动充值",
+      walletAttachedOther:"该钱包已绑定到其他账户。",
+      topupAlreadyCredited:"该笔付款已计入您的余额。",
       topupConfirming:"付款已发送 — 正在链上确认，余额将自动更新…",
       topupCredited:"充值已到账！", topupRejected:"充值被拒绝。",
       topupPending:"仍在确认中，将自动到账 — 申请编号 "
@@ -2187,7 +2217,7 @@ window.FLAPY_ART = {
       txHash:"लेनदेन हैश", requestTopup:"जमा का अनुरोध", copy:"कॉपी", copied:"कॉपी हो गया",
       enterTx:"TON लेनदेन हैश चिपकाएँ।",
       topupOk:"जमा अनुरोध भेज दिया गया। सिस्टम ट्रांसफ़र की जाँच करके चेन पर पुष्टि होते ही C जोड़ देगा।",
-      topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ। ट्रांसफ़र स्वतः जाँचा जाएगा और चेन पर पुष्टि होते ही C जुड़ जाएगा।",
+      topupNote:"ऊपर दिए पते पर TON भेजें, फिर हैश चिपकाएँ (या एक्सप्लोरर लिंक)। ट्रांसफ़र स्वतः जाँचा जाएगा और चेन पर पुष्टि होते ही C जुड़ जाएगा।",
       leaderboard:"लीडरबोर्ड", lbSub:"दैनिक स्कोर लीडर — इनाम रैंक के साथ दिखेगा", lbRecordsTitle:"स्कोर रिकॉर्ड",
       daily:"दैनिक", weekly:"साप्ताहिक", monthly:"मासिक", myRank:"मेरी रैंक", lbViewScore:"स्कोर", lbViewInvites:"आमंत्रण",
       dailyPrize:"दैनिक इनाम", monthLockedTitle:"मासिक लीडरबोर्ड लॉक है", monthLockedSub:"1000 ऑनलाइन खिलाड़ी होने पर खुलेगा।",
@@ -2220,7 +2250,11 @@ window.FLAPY_ART = {
       rateError:"TON की दर प्राप्त नहीं हो सकी — बाद में प्रयास करें।",
       wrongNetwork:"अपने वॉलेट को TON मेननेट पर स्विच करें।",
       topupPaid:"भुगतान भेजा गया। टॉप-अप अनुरोध क्रमांक ",
-      payWalletNote:"कनेक्टेड वॉलेट से भुगतान चेन पर पुष्टि होते ही अपने आप जमा हो जाता है।",
+      payWalletNote:"कनेक्टेड वॉलेट से भुगतान चेन पर पुष्टि होते ही अपने आप जमा हो जाता है। वॉलेट सत्यापित होने के बाद, उससे ऊपर दिए पते पर किया गया कोई भी ट्रांसफ़र अपने आप जमा होता है — न अनुरोध, न हैश।",
+      walletVerified:"सत्यापित — टॉप-अप अपने आप जमा होते हैं",
+      walletNotVerifiedYet:"स्वतः जमा चालू करने के लिए एक भुगतान करें",
+      walletAttachedOther:"यह वॉलेट पहले ही दूसरे खाते से जुड़ा है।",
+      topupAlreadyCredited:"यह भुगतान पहले ही आपके बैलेंस में जुड़ चुका है।",
       topupConfirming:"भुगतान भेजा गया — चेन पर पुष्टि हो रही है, बैलेंस अपने आप अपडेट होगा…",
       topupCredited:"टॉप-अप जमा हो गया!", topupRejected:"टॉप-अप अस्वीकृत।",
       topupPending:"अभी पुष्टि हो रही है। यह अपने आप जमा होगा — अनुरोध "
@@ -2701,6 +2735,41 @@ window.FLAPY_ART = {
     if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
     return apiFetch('/api/deposit-status', { method:'POST', body: JSON.stringify({ initData: initData, requestId: requestId }) });
   }
+  // Attach the wallet the player just connected, so the server knows which
+  // address belongs to this account. Attaching alone is NOT proof of ownership:
+  // the server only auto-credits a wallet after it has seen a transaction that
+  // wallet signed (the first "PAY WITH CONNECTED WALLET" top-up).
+  function linkTonWallet(address){
+    if (DEMO_MODE) return Promise.reject(new Error('demo-mode'));
+    return apiFetch('/api/wallet/link', { method:'POST', body: JSON.stringify({ initData: initData, address: address }) });
+  }
+
+  // ── transient notice + haptics (used when a top-up lands by itself) ──
+  var toastTimer = null;
+  function haptic(kind){
+    try {
+      if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.notificationOccurred === 'function') {
+        tg.HapticFeedback.notificationOccurred(kind || 'success');
+      } else if (navigator.vibrate) { navigator.vibrate(18); }
+    } catch(e){}
+  }
+  function toast(text, ok){
+    if (!text) return;
+    var el = document.getElementById('appToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'appToast';
+      el.className = 'app-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.toggle('app-toast--ok', !!ok);
+    el.classList.remove('hidden');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ el.classList.add('hidden'); }, 4500);
+    if (ok) haptic('success');
+  }
 
   var profileCache = null;
   function flapUsd(n){ return '$' + ((Number(n)||0) / FLAP_PER_USD).toFixed(2); }
@@ -2926,7 +2995,8 @@ window.FLAPY_ART = {
     state = 'playing';
   }
   function setFinalArtwork(isNewBest){
-    document.getElementById('gameOverArt').classList.toggle('hidden', isNewBest);
+    // The GAME OVER card no longer shows any illustration: only a confirmed new
+    // record gets the trophy art (plus its translated badge).
     document.getElementById('newBestArt').classList.toggle('hidden', !isNewBest);
     newBestBadge.classList.toggle('hidden', !isNewBest);
   }
@@ -3140,6 +3210,7 @@ window.FLAPY_ART = {
     setAmt('walletBalance', bal, 'f');
     setAmt('walletCBalance', cBal, 'c');
     document.getElementById('walletUsd').textContent = totalUsd(p);
+    if (p && Array.isArray(p.tonWallets)) applyWalletList(p.tonWallets);
     var addr = (p && p.depositAddress) || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd';
     var payTo = document.getElementById('depositPayTo');
     if (payTo && addr) payTo.value = addr;
@@ -3159,6 +3230,9 @@ window.FLAPY_ART = {
     if (dmsg && DEMO_MODE) dmsg.textContent = 'Demo mode';
     if (dmsgM && DEMO_MODE) dmsgM.textContent = 'Demo mode';
     updateDepositUsd();
+    // A top-up confirmed while the player was somewhere else must still be
+    // picked up when they come back to the wallet.
+    resumeTopupWatch();
     if (profileCache) { fillWalletFromProfile(profileCache); return; }
     fetchProfile().then(function(p){
       profileCache = p;
@@ -3227,6 +3301,7 @@ window.FLAPY_ART = {
       document.getElementById('depositTx').value = '';
       if (r && r.auto && r.requestId != null) {
         msg.textContent = t('topupConfirming');
+        rememberTopup(r.requestId);
         watchAutoTopup(r.requestId, msg);
       } else {
         msg.textContent = t('topupOk');
@@ -3277,10 +3352,48 @@ window.FLAPY_ART = {
   var tonWalletAddr = '';
   var tonWalletAutoFilled = false;
   function tonShortAddr(a){ return a && a.length > 14 ? (a.slice(0, 6) + '…' + a.slice(-6)) : a; }
+  // The same account can be written bounceable (EQ…) or non-bounceable (UQ…),
+  // and the server answers with whichever form it saw. A user-friendly address
+  // is 2 flag chars + 44 account chars + 2 CRC chars, so compare the middle.
+  function sameTonAddress(a, b){
+    var A = String(a || '').trim(), B = String(b || '').trim();
+    if (!A || !B) return false;
+    if (A === B) return true;
+    if (/^[A-Za-z0-9_-]{48}$/.test(A) && /^[A-Za-z0-9_-]{48}$/.test(B)) return A.slice(2, 46) === B.slice(2, 46);
+    return A.toLowerCase() === B.toLowerCase();
+  }
   function tonConnected(){ return !!(tonConnectUI && tonConnectUI.wallet && tonConnectUI.wallet.account); }
+  // Wallets attached to this account, as the server knows them. `proven` means
+  // the server has seen a transaction that wallet signed, so transfers from it
+  // are credited automatically.
+  var attachedWallets = [];
+  function attachedWalletFor(addr){
+    for (var i = 0; i < attachedWallets.length; i++) {
+      if (sameTonAddress(attachedWallets[i] && attachedWallets[i].address, addr)) return attachedWallets[i];
+    }
+    return null;
+  }
+  function applyWalletList(list){
+    attachedWallets = Array.isArray(list) ? list : [];
+    renderTonConnectMsg();
+  }
   function renderTonConnectMsg(){
     var m = document.getElementById('tonConnectMsg');
-    if (m) m.textContent = tonWalletAddr ? (t('walletConnected') + ' · ' + tonShortAddr(tonWalletAddr)) : '';
+    if (!m) return;
+    var addr = tonWalletAddr || (attachedWallets.length ? attachedWallets[0].address : '');
+    if (!addr) { m.textContent = ''; return; }
+    var w = attachedWalletFor(addr);
+    var state = (w && w.proven) ? t('walletVerified') : t('walletNotVerifiedYet');
+    m.textContent = (tonWalletAddr ? (t('walletConnected') + ' · ') : '') + tonShortAddr(addr) + ' · ' + state;
+  }
+  function attachWalletOnServer(address){
+    if (DEMO_MODE || !address) return;
+    linkTonWallet(address).then(function(r){
+      if (r && Array.isArray(r.wallets)) applyWalletList(r.wallets);
+    }).catch(function(err){
+      // 409 = that wallet is verified on another account: say so, do not guess.
+      if (err && err.status === 409) toast(t('walletAttachedOther'), false);
+    });
   }
   function updateTonPicker(){
     var picker = document.getElementById('tonWalletPicker');
@@ -3309,6 +3422,9 @@ window.FLAPY_ART = {
         }
         updateTonPicker();
         renderTonConnectMsg();
+        // Attach the wallet to this game account so a payment made from it
+        // later (even outside the mini app) can be recognised and credited.
+        if (tonWalletAddr) attachWalletOnServer(tonWalletAddr);
       });
     } catch (e) {
       console.warn('TON Connect init failed:', e);
@@ -3336,6 +3452,9 @@ window.FLAPY_ART = {
     if (tonConnectUI && tonConnected()) {
       try { tonConnectUI.disconnect(); } catch (err) {}
     }
+    tonWalletAddr = '';
+    updateTonPicker();
+    renderTonConnectMsg();
   });
   updateTonPicker();
   function fetchTonUsdPrice(){
@@ -3404,7 +3523,8 @@ window.FLAPY_ART = {
       return requestDepositBoc(amt, boc, tonWalletAddr).then(function(r){
         if (r && r.auto && r.requestId != null) {
           msg.textContent = t('topupConfirming');
-          watchAutoTopup(r.requestId);
+          rememberTopup(r.requestId);
+          watchAutoTopup(r.requestId, msg);
         } else {
           msg.textContent = t('topupPaid') + (r && r.requestId != null ? ('#' + r.requestId) : '');
         }
@@ -3416,41 +3536,99 @@ window.FLAPY_ART = {
   });
 
   // Wallet top-ups are credited automatically once the transfer is confirmed
-  // on-chain. Poll the request until the server flips it to "approved" and then
-  // refresh the balances in place.
-  var autoTopupTimer = null;
+  // on-chain — but the player usually switches page or closes Telegram while
+  // that happens. So the request id is remembered locally, the watch resumes on
+  // the next start, and the balance updates (with a toast) wherever they are.
+  var TOPUP_STORE_KEY = 'grmflap_pending_topups';
+  var TOPUP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  var autoTopupTimers = {};
+  function readPendingTopups(){
+    try {
+      var list = JSON.parse(localStorage.getItem(TOPUP_STORE_KEY) || '[]');
+      if (!Array.isArray(list)) return [];
+      var now = Date.now();
+      return list.filter(function(x){
+        return x && x.id != null && (now - (Number(x.at) || 0)) < TOPUP_MAX_AGE_MS;
+      });
+    } catch(e){ return []; }
+  }
+  function writePendingTopups(list){
+    try { localStorage.setItem(TOPUP_STORE_KEY, JSON.stringify(list)); } catch(e){}
+  }
+  function rememberTopup(requestId){
+    if (requestId == null || DEMO_MODE) return;
+    var list = readPendingTopups().filter(function(x){ return String(x.id) !== String(requestId); });
+    list.push({ id: requestId, at: Date.now() });
+    writePendingTopups(list);
+  }
+  function forgetTopup(requestId){
+    writePendingTopups(readPendingTopups().filter(function(x){ return String(x.id) !== String(requestId); }));
+  }
+  // Balances come from the profile and are shown on two pages.
+  function refreshBalances(){
+    profileCache = null;
+    return fetchProfile().then(function(p){
+      profileCache = p;
+      fillWalletFromProfile(p);
+      var profPage = document.getElementById('page-profile');
+      if (profPage && !profPage.classList.contains('hidden')) renderProfileFromCache();
+      return p;
+    }).catch(function(){ return null; });
+  }
+  function topupMsgEl(){
+    var page = document.getElementById('page-wallet');
+    return (page && !page.classList.contains('hidden')) ? document.getElementById('depositMsg') : null;
+  }
   function watchAutoTopup(requestId, msgEl){
-    if (autoTopupTimer) { clearTimeout(autoTopupTimer); autoTopupTimer = null; }
+    if (DEMO_MODE || requestId == null) return;
+    var id = String(requestId);
+    if (autoTopupTimers[id]) return;                 // already being watched
     var tries = 0;
-    var msg = msgEl || document.getElementById('depositMsg');
+    var msg = msgEl || topupMsgEl();
+    function finish(text, ok){
+      forgetTopup(id);
+      delete autoTopupTimers[id];
+      var el = msg || topupMsgEl();
+      if (el && text) el.textContent = text;
+      if (text) toast(text, ok);
+    }
     function poll(){
       tries++;
-      fetchDepositStatus(requestId).then(function(st){
+      fetchDepositStatus(id).then(function(st){
         if (st && st.status === 'approved') {
-          if (msg) msg.textContent = t('topupCredited') + (st.amount != null ? (' +' + st.amount + ' C') : '');
-          profileCache = null;
-          fetchProfile().then(function(p){
-            profileCache = p;
-            fillWalletFromProfile(p);
-            if (!document.getElementById('page-profile').classList.contains('hidden')) renderProfileFromCache();
-          }).catch(function(){});
+          finish(t('topupCredited') + (st.amount != null ? (' +' + st.amount + ' C') : ''), true);
+          refreshBalances();
           return;
         }
-        if (st && st.status === 'rejected') {
-          if (msg) msg.textContent = t('topupRejected');
+        if (st && st.status === 'rejected') { finish(t('topupRejected'), false); return; }
+        // The same money already paid another request on this account (the
+        // attached-wallet scan spotted the transfer first). The balance is what
+        // the player cares about, so report it as credited and refresh.
+        if (st && /already credited/i.test(String(st.autoResult || ''))) {
+          finish(t('topupAlreadyCredited'), true);
+          refreshBalances();
           return;
         }
         if (tries >= 40) {
-          if (msg) msg.textContent = t('topupPending') + '#' + requestId;
+          // Stop polling for now; the id stays stored so the next app start
+          // picks it up again instead of silently dropping a real payment.
+          delete autoTopupTimers[id];
+          var el = msg || topupMsgEl();
+          if (el) el.textContent = t('topupPending') + '#' + id;
           return;
         }
-        autoTopupTimer = setTimeout(poll, tries < 10 ? 5000 : 12000);
+        autoTopupTimers[id] = setTimeout(poll, tries < 10 ? 5000 : 12000);
       }).catch(function(){
-        if (tries >= 40) return;
-        autoTopupTimer = setTimeout(poll, 12000);
+        if (tries >= 40) { delete autoTopupTimers[id]; return; }
+        autoTopupTimers[id] = setTimeout(poll, 12000);
       });
     }
-    autoTopupTimer = setTimeout(poll, 6000);
+    autoTopupTimers[id] = setTimeout(poll, 6000);
+  }
+  // Resume after a page switch, a reload or a Telegram restart.
+  function resumeTopupWatch(){
+    if (DEMO_MODE) return;
+    readPendingTopups().forEach(function(x){ watchAutoTopup(x.id); });
   }
 
   function applyLbViewState(){
@@ -4175,6 +4353,8 @@ window.FLAPY_ART = {
     checkGameAccess().then(function(){
       resumePvpIfAny();
     }).catch(function(){});
+    // Pick up top-ups that were still being confirmed when the app was closed.
+    resumeTopupWatch();
   }
   resetGame();
   init();

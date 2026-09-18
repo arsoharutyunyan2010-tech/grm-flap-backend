@@ -1,17 +1,17 @@
 # UI artwork integration
 
-The eight illustrations still used by the Mini App (the Tasks chest was removed
-from the Tasks screen at the owner's request, together with its source PNG).
+The seven illustrations still used by the Mini App (the Tasks chest was removed
+from the Tasks screen at the owner's request, together with its source PNG, and
+so was the picture above **GAME OVER** — that card now shows text only).
 The browser loads prepared, mobile-sized **`img/ui/*.webp`** files:
-**354,766 bytes total** instead of the multi-megabyte source PNGs.
+**319,696 bytes total** instead of the multi-megabyte source PNGs.
 
 ## Screen mapping
 
 | Source / derivative basename | Where it appears |
 | --- | --- |
 | `mascot-crash` | Classic crash/continue card; PvP loss |
-| `game-over-banner` | Ordinary classic result; pending or rejected verification |
-| `trophy-new-best` | A confirmed new classic record (or a local record in explicit demo mode) |
+| `trophy-new-best` | A confirmed new classic record (or a local record in explicit demo mode) — the only art on the classic result card |
 | `pvp-battle-banner` | Stake selection, opponent confirmation, ready/turn cards, and draws |
 | `pvp-searching` | Matchmaking queue, with native animated search dots |
 | `pvp-win` | PvP victory only; never a loss or draw |
@@ -75,8 +75,8 @@ update its `width`/`height` attributes in `index.html`.
 
 ## Verification
 
-`npm test` includes `npm run test:artwork`. The artwork suite checks all nine
-files, transfer budgets, image attributes, inline-script syntax, classic record
+`npm test` includes `npm run test:artwork`. The artwork suite checks all seven
+files, that the ordinary GAME OVER card carries no illustration, transfer budgets, image attributes, inline-script syntax, classic record
 states, stale/failed responses, PvP outcomes, missing-image handling, the new
 server record flag, and real HTTP delivery from an isolated Express instance.
 It does not access real player data or external services.

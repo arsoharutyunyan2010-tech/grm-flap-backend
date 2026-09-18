@@ -234,6 +234,49 @@ The Wallet page lets players link a real TON wallet via
   stored on the request (`deposit.wallet`, `deposit.expectedNano`,
   `deposit.verifiedBy`) and shown in `admin.html`.
 
+### Automatic crediting end to end
+
+A player who pays never waits for a human, and never has to explain anything:
+
+1. **Pay in the mini app.** The signed BOC proves which wallet paid and for how
+   much; the server polls the chain (`AUTO_CREDIT_DELAYS`, ~10 min window) and
+   credits the C balance itself.
+2. **Two indexers.** Every lookup goes through `scanDepositLedger`, which asks
+   toncenter first and falls back to **tonapi** (`TONAPI_URL` / `TONAPI_KEY`)
+   when the keyless public endpoint rate-limits or is unreachable. Rows from
+   both are normalised to one shape and a transfer's identity is
+   `(sender, amount, block time)` — never an indexer-specific id — so the same
+   payment cannot be credited twice through two providers.
+   `deposit.provider` records which one confirmed it.
+3. **Attached (verified) wallets.** The wallet that signed a payment is stored
+   on the account (`store.proveTonWallet`, persisted as `tonWallets`). A
+   background scan (`DEPOSIT_LINKED_SCAN_MS`, default 60 s) reads the deposit
+   address's newest transfers and credits **any** payment from a verified
+   wallet by itself — the player can pay straight from Tonkeeper / Wallet /
+   My Wallet without opening the top-up form, pasting a hash or pressing
+   anything. If they *do* have an open request for that money, that request is
+   credited instead of a second record being created.
+   Attaching a wallet by itself (`POST /api/wallet/link`) is a convenience only
+   and is **never** enough for an automatic credit: an address becomes
+   *verified* solely when the server reads it out of a transaction that wallet
+   signed. A verified wallet cannot be re-attached to another account.
+4. **Manual top-ups** accept a bare hash *or* a whole explorer link
+   (tonviewer / tonscan / ton.app) — `extractTxHash` pulls the hash out — and
+   are verified and credited automatically the same way.
+5. **One transfer, one credit.** `spentTransfers` + the store's permanently
+   burned `txHash` make double-crediting impossible, whichever path wins the
+   race.
+6. **The mini app follows along.** A submitted top-up id is kept in
+   `localStorage`, so the watch survives a page switch, a reload or a Telegram
+   restart; when the server credits it, balances refresh on the Wallet and
+   Profile pages and a toast confirms the amount.
+
+`POST /internal/deposits/scan` (admin key) forces a scan immediately — the
+first thing to run when a player says "I paid but nothing arrived".
+`GET /internal/stats` reports the scan counters, the number of verified
+wallets and the deposit configuration; the same configuration is printed on
+every boot so a missing environment variable is visible in the deploy log.
+
 ## Production notes
 
 - Swap `store.js`'s in-memory `Map`s for Redis (sessions — short TTL) and a

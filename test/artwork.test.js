@@ -16,7 +16,7 @@ const ROOT = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const serverSource = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
 const names = [
-  'mascot-crash', 'trophy-new-best', 'game-over-banner', 'pvp-battle-banner',
+  'mascot-crash', 'trophy-new-best', 'pvp-battle-banner',
   'pvp-searching', 'pvp-win', 'how-to-play', 'referral-friends',
 ];
 const assetPath = name => path.join(ROOT, 'img', 'ui', name + '.webp');
@@ -102,7 +102,7 @@ function clientHarness(overrides = {}) {
 const visible = el => !el.classList.contains('hidden');
 const flushPromises = () => new Promise(resolve => setImmediate(resolve));
 
-test('all eight illustrations are small, valid WebP files with lazy accessible markup', () => {
+test('all seven illustrations are small, valid WebP files with lazy accessible markup', () => {
   assert.deepEqual(fs.readdirSync(path.join(ROOT, 'img', 'ui')).sort(), names.map(n => n + '.webp').sort());
   let totalBytes = 0;
   for (const name of names) {
@@ -136,10 +136,26 @@ test('classic result artwork and the translated badge switch and reset together'
   const { context, get } = clientHarness();
   for (const newBest of [false, true, false]) {
     context.setFinalArtwork(newBest);
-    assert.equal(visible(get('gameOverArt')), !newBest);
     assert.equal(visible(get('newBestArt')), newBest);
     assert.equal(visible(get('newBestBadge')), newBest);
   }
+});
+
+test('the ordinary GAME OVER card carries no illustration at all', () => {
+  // Owner request: the picture above "GAME OVER" is removed. Only a confirmed
+  // new record still shows the trophy art.
+  assert.ok(!html.includes('game-over-banner'), 'banner art is not referenced any more');
+  assert.ok(!html.includes('gameOverArt'), 'no leftover element, style or script reference');
+  const start = html.indexOf('<div id="finalMode"');
+  assert.ok(start >= 0, 'result card exists');
+  const end = html.indexOf('id="restartBtn"', start);
+  const block = html.slice(start, end > start ? end : start + 2000);
+  const imgs = [...block.matchAll(/<img\b[^>]*>/g)].map(m => m[0]);
+  assert.equal(imgs.length, 1, 'only the new-record trophy is left on the card');
+  assert.match(imgs[0], /id="newBestArt"/);
+  assert.match(imgs[0], /class="[^"]*\bhidden\b/, 'the trophy starts hidden');
+  assert.ok(!fs.existsSync(path.join(ROOT, 'img', 'ui', 'game-over-banner.webp')), 'derivative deleted');
+  assert.ok(!fs.existsSync(path.join(ROOT, 'img', 'game-over-banner.png')), 'source PNG deleted');
 });
 
 test('pending verification resets a previous trophy; only a verified record restores it', async () => {
@@ -148,7 +164,6 @@ test('pending verification resets a previous trophy; only a verified record rest
   context.setFinalArtwork(true);
   context.finalizeRun();
   assert.equal(visible(get('newBestArt')), false);
-  assert.equal(visible(get('gameOverArt')), true);
   assert.equal(get('finalBest').textContent, 5);
   resolve({ verified: true, score: 9, allTimeBest: 9, newBest: true, ranks: { day: 3 } });
   await flushPromises();
@@ -168,7 +183,6 @@ test('server record flag wins over stale local bests (including tied scores)', a
     context.finalizeRun();
     await flushPromises();
     assert.equal(visible(get('newBestArt')), false);
-    assert.equal(visible(get('gameOverArt')), true);
   }
   const { context, get } = clientHarness({ best: 50 });
   context.finalizeRun();

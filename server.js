@@ -20,7 +20,7 @@ const { verifyInitData } = require('./telegramAuth.js');
 const store = require('./store.js');
 const AC = require('./anticheat.js');
 const BOTS = require('./bots.js');
-const { verifyDepositClaim, parseSignedBoc, addressesEqual } = require('./verifyDeposit.js');
+const { verifyDepositClaim, parseSignedBoc, addressesEqual, scanDepositLedger, transferIdentity, normalizeAddress } = require('./verifyDeposit.js');
 
 // Optional on-chain deposit verification (see verifyDeposit.js). OFF by default
 // so existing manual-approval deployments are unaffected; turn on by setting
@@ -53,6 +53,29 @@ const AUTO_CREDIT_WINDOW_MS = Math.max(
 // price moves between quoting and signing.
 const AUTO_CREDIT_TOLERANCE = Math.min(0.5, Math.max(0, Number(process.env.DEPOSIT_AUTO_CREDIT_TOLERANCE) || 0.12));
 const FLAP_PER_USD = 100; // 100 C = $1, same rate as the mini app
+
+// Top-ups spotted directly on-chain from a wallet ATTACHED to the account.
+// Once a player has paid with "PAY WITH CONNECTED WALLET" the server has read
+// that wallet out of a transaction IT signed, so ownership is proven. From then
+// on any transfer that wallet makes to DEPOSIT_TON_ADDRESS is picked up by a
+// background scan and credited by itself — the player does not have to open the
+// top-up form, paste a hash or wait for an admin. Turn off with
+// DEPOSIT_LINKED_SCAN=false.
+const LINKED_SCAN_ENABLED = DEPOSIT_AUTO_CREDIT && process.env.DEPOSIT_LINKED_SCAN !== 'false';
+const LINKED_SCAN_MS = Math.max(15 * 1000, Math.floor(Number(process.env.DEPOSIT_LINKED_SCAN_MS) || 60 * 1000));
+// How far back the scan looks on a cold start, so a payment made during a
+// deploy is still credited. Older transfers are never resurrected.
+const LINKED_SCAN_LOOKBACK_MS = Math.max(
+  60 * 1000,
+  Math.floor(Number(process.env.DEPOSIT_LINKED_SCAN_LOOKBACK_MS) || 30 * 60 * 1000),
+);
+const LINKED_SCAN_LIMIT = Math.max(10, Math.min(100, Math.floor(Number(process.env.DEPOSIT_LINKED_SCAN_LIMIT) || 50)));
+// First scan after boot. Short by default so a payment made during a deploy is
+// picked up almost immediately; raise it to keep a busy index out of the way.
+const LINKED_SCAN_FIRST_MS = Math.max(
+  1000,
+  Math.floor(Number(process.env.DEPOSIT_LINKED_SCAN_FIRST_MS) || Math.min(15000, LINKED_SCAN_MS)),
+);
 
 function depositAddress() {
   return (process.env.DEPOSIT_TON_ADDRESS || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd').trim();
@@ -92,13 +115,18 @@ async function tonUsdPrice() {
   return 0;
 }
 
+// C value of an on-chain amount. 0 when there is no usable TON price yet.
+async function paidCForValue(valueNanoTon) {
+  const price = await tonUsdPrice();
+  if (!(price > 0) || !(Number(valueNanoTon) > 0)) return 0;
+  return Math.floor((Number(valueNanoTon) / 1e9) * price * FLAP_PER_USD);
+}
+
 // Amount of C an on-chain payment is worth. Returns null when we have no price
 // (then we simply trust the claimed amount, the transfer itself is verified).
 async function creditableAmount(claimed, valueNanoTon) {
-  const price = await tonUsdPrice();
-  if (!(price > 0) || !(valueNanoTon > 0)) return null;
-  const paidUsd = (valueNanoTon / 1e9) * price;
-  const paidC = Math.floor(paidUsd * FLAP_PER_USD);
+  const paidC = await paidCForValue(valueNanoTon);
+  if (!(paidC > 0)) return null;
   // Never credit more than the player asked for; if they underpaid by more than
   // the tolerance, credit what actually arrived.
   if (paidC >= Math.floor(claimed * (1 - AUTO_CREDIT_TOLERANCE))) return claimed;
@@ -110,8 +138,14 @@ async function creditableAmount(claimed, valueNanoTon) {
 // amount from the same wallet — every one of them would find that transfer and
 // be credited. The key is the ledger row's own identity (transaction id +
 // sender + value), rebuilt from the stored deposits after a restart.
-const spentTransfers = new Map(); // transfer key -> deposit id that consumed it
+const spentTransfers = new Map(); // transfer identity -> deposit id that consumed it
+// The verifier derives a transfer's identity from (sender, amount, block time)
+// — or from the hash the player pasted — and NOT from the id a particular
+// indexer assigned. The same payment therefore has one identity whether it was
+// recognised through toncenter or through the tonapi fallback, and can never be
+// credited twice by two different code paths.
 function transferKey(vres) {
+  if (vres && vres.identity) return String(vres.identity);
   return [
     String((vres && vres.matchedBy) || 'hash'),
     String((vres && vres.txId) || ''),
@@ -167,6 +201,74 @@ function scheduleAutoCredit(depositId, attempt) {
   autoCreditTimers.set(id, timer);
 }
 
+/**
+ * Credit a request whose transfer has been confirmed on-chain. Shared by the
+ * per-request retry chain and by the attached-wallet scan, so both apply the
+ * same dust guard, the same price check and the same one-transfer-one-credit
+ * rule.
+ *
+ * @param {object} deposit  the pending request (mutated in place)
+ * @param {object} vres     verification result: { valueNanoTon, source, utime, txId, identity, matchedBy, provider }
+ * @param {object} [opts]   { silentReuse: do not strike the player for our own duplicate }
+ * @returns {Promise<{ok:boolean, amount?:number, reason?:string}>}
+ */
+async function creditVerifiedDeposit(deposit, vres, opts) {
+  opts = opts || {};
+  const valueNanoTon = Number((vres && vres.valueNanoTon) || 0);
+  if (MIN_DEPOSIT_NANO_TON > 0 && valueNanoTon < MIN_DEPOSIT_NANO_TON) {
+    deposit.autoResult = 'below minimum on-chain value (' + valueNanoTon + ')';
+    deposit.autoDone = true;
+    store.logEvent(deposit.userId, 'auto top-up below minimum', {
+      txHash: deposit.txHash, valueNanoTon, minimum: MIN_DEPOSIT_NANO_TON,
+    });
+    return { ok: false, reason: deposit.autoResult };
+  }
+
+  const claimed = Number(deposit.amount) || 0;
+  const credit = await creditableAmount(claimed, valueNanoTon);
+  if (credit != null && credit !== claimed) {
+    if (credit <= 0) {
+      deposit.autoResult = 'paid value too small to credit';
+      deposit.autoDone = true;
+      return { ok: false, reason: deposit.autoResult };
+    }
+    deposit.claimedAmount = claimed;
+    deposit.amount = credit;
+  }
+  deposit.valueNanoTon = valueNanoTon;
+  deposit.onchainSource = (vres && vres.source) || '';
+  deposit.verifiedBy = (vres && vres.matchedBy) || 'hash';
+  if (vres && vres.provider) deposit.provider = vres.provider;
+
+  // The transfer is real — but has it already paid for another request?
+  const claim = claimTransfer(deposit, vres);
+  if (!claim.ok) {
+    deposit.autoResult = 'on-chain transfer already credited to request #' + claim.owner;
+    deposit.autoDone = true;
+    if (!opts.silentReuse) {
+      store.addStrike(deposit.userId, 'reused transfer', {
+        txHash: deposit.txHash, owner: claim.owner, valueNanoTon,
+      });
+    }
+    console.warn('[deposit-auto] #' + deposit.id + ' refused: transfer already credited to #' + claim.owner);
+    return { ok: false, reason: deposit.autoResult };
+  }
+  deposit.onchainTxId = claim.key;
+  deposit.identity = claim.key;
+
+  const result = store.approveDeposit(deposit.id);
+  if (!result) return { ok: false, reason: 'already handled' };
+  deposit.autoApproved = true;
+  deposit.autoDone = true;
+  deposit.autoResult = 'credited';
+  store.logEvent(deposit.userId, 'auto top-up credited', {
+    depositId: deposit.id, amount: deposit.amount, txHash: deposit.txHash, valueNanoTon,
+    verifiedBy: deposit.verifiedBy,
+  });
+  console.log('[deposit-auto] #' + deposit.id + ' credited', deposit.amount, 'C to', deposit.userId, '(' + deposit.verifiedBy + ')');
+  return { ok: true, amount: deposit.amount };
+}
+
 async function tryAutoCredit(id, attempt) {
   const deposit = store.getDeposit(id);
   if (!deposit || deposit.status !== 'pending' || !deposit.auto) return;
@@ -199,54 +301,7 @@ async function tryAutoCredit(id, attempt) {
     return;
   }
 
-  const valueNanoTon = Number(vres.valueNanoTon || 0);
-  if (MIN_DEPOSIT_NANO_TON > 0 && valueNanoTon < MIN_DEPOSIT_NANO_TON) {
-    deposit.autoResult = 'below minimum on-chain value (' + valueNanoTon + ')';
-    deposit.autoDone = true;
-    store.logEvent(deposit.userId, 'auto top-up below minimum', {
-      txHash: deposit.txHash, valueNanoTon, minimum: MIN_DEPOSIT_NANO_TON,
-    });
-    return;
-  }
-
-  const claimed = Number(deposit.amount) || 0;
-  const credit = await creditableAmount(claimed, valueNanoTon);
-  if (credit != null && credit !== claimed) {
-    if (credit <= 0) {
-      deposit.autoResult = 'paid value too small to credit';
-      deposit.autoDone = true;
-      return;
-    }
-    deposit.claimedAmount = claimed;
-    deposit.amount = credit;
-  }
-  deposit.valueNanoTon = valueNanoTon;
-  deposit.onchainSource = vres.source || '';
-  deposit.verifiedBy = vres.matchedBy || 'hash';
-
-  // The transfer is real — but has it already paid for another request?
-  const claim = claimTransfer(deposit, vres);
-  if (!claim.ok) {
-    deposit.autoResult = 'on-chain transfer already credited to request #' + claim.owner;
-    deposit.autoDone = true;
-    store.addStrike(deposit.userId, 'reused transfer', {
-      txHash: deposit.txHash, owner: claim.owner, valueNanoTon,
-    });
-    console.warn('[deposit-auto] #' + id + ' refused: transfer already credited to #' + claim.owner);
-    return;
-  }
-  deposit.onchainTxId = claim.key;
-
-  const result = store.approveDeposit(id);
-  if (!result) return;
-  deposit.autoApproved = true;
-  deposit.autoDone = true;
-  deposit.autoResult = 'credited';
-  store.logEvent(deposit.userId, 'auto top-up credited', {
-    depositId: id, amount: deposit.amount, txHash: deposit.txHash, valueNanoTon,
-    verifiedBy: deposit.verifiedBy,
-  });
-  console.log('[deposit-auto] #' + id + ' credited', deposit.amount, 'C to', deposit.userId, '(' + deposit.verifiedBy + ')');
+  await creditVerifiedDeposit(deposit, vres);
 }
 
 // After a restart, pick up wallet top-ups that were still waiting for their
@@ -275,6 +330,194 @@ function sweepAutoCredits() {
     if (Date.now() - Number(d.requestedAt || 0) > AUTO_CREDIT_WINDOW_MS) continue;
     scheduleAutoCredit(d.id, 0);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Attached-wallet scan: credit a payment the player made straight from the
+// wallet that is attached to their account, with no request and no hash.
+// ---------------------------------------------------------------------------
+let linkedScanInFlight = false;
+let linkedScanTimer = null;
+const linkedScanStartedAt = Date.now();
+const linkedScanStats = { scans: 0, credited: 0, skipped: 0, candidates: 0, lastAt: 0, lastError: '', lastProvider: '' };
+
+// A stable, single-use token for a spotted transfer, used as the txHash of the
+// deposit record it creates (the store burns a hash forever, which is exactly
+// what keeps one transfer from being credited twice).
+function scanTxToken(identity, item) {
+  const base = String(identity || '').replace(/[^a-z0-9:_.-]/gi, '').toLowerCase();
+  const token = 'scan:' + (base || String((item && item.txId) || '').toLowerCase());
+  return token.slice(0, 120);
+}
+
+async function scanLinkedWalletTopups() {
+  if (!LINKED_SCAN_ENABLED || linkedScanInFlight) return { scanned: 0 };
+  const address = depositAddress();
+  if (!address) return { scanned: 0 };
+  const wallets = store.listProvenTonWallets();
+  if (!wallets.length) return { scanned: 0, reason: 'no attached wallets' };
+
+  linkedScanInFlight = true;
+  const startedAt = Date.now();
+  try {
+    const byAddr = new Map();
+    let earliestProof = startedAt;
+    for (const w of wallets) {
+      const key = store.normalizeAddress(w.address);
+      if (!key) continue;
+      byAddr.set(key, w);
+      earliestProof = Math.min(earliestProof, Number(w.provenAt) || startedAt);
+    }
+    if (!byAddr.size) return { scanned: 0, reason: 'no attached wallets' };
+
+    // Never look further back than the oldest proof, and never further than the
+    // cold-start lookback: an ancient transfer must not be resurrected.
+    const floorMs = Math.max(startedAt - LINKED_SCAN_LOOKBACK_MS, earliestProof - 120000);
+    const candidates = [];
+
+    const scan = await scanDepositLedger({
+      depositAddress: address,
+      rpcUrl: TON_RPC_URL,
+      apiKey: TON_API_KEY,
+      limit: LINKED_SCAN_LIMIT,
+      maxPages: 1,
+    }, (item) => {
+      if (!addressesEqual(item.destination, address)) return false;
+      const key = store.normalizeAddress(item.source);
+      const link = key ? byAddr.get(key) : null;
+      // Only a wallet that PROVED ownership by signing a transaction can have
+      // its transfers credited automatically.
+      if (!link || !link.proven) return false;
+      const value = Number(item.valueNanoTon) || 0;
+      if (MIN_DEPOSIT_NANO_TON > 0 && value < MIN_DEPOSIT_NANO_TON) return false;
+      const utimeMs = Number(item.utime) > 0 ? Number(item.utime) * 1000 : 0;
+      if (utimeMs && utimeMs < Math.max(floorMs, (Number(link.provenAt) || 0) - 120000)) return false;
+      if (utimeMs && utimeMs > startedAt + 120000) return false; // indexer clock skew
+      const identity = transferIdentity(item, '');
+      if (spentTransfers.has(identity)) return false;
+      if (store.hasDepositForTx([identity, item.txId].concat(item.hashes || []))) return false;
+      // An indexer that reports no block time cannot tell two identical payments
+      // apart, so a same-value credit for this player in the last minutes wins.
+      if (!utimeMs && store.listDeposits().some((d) => d &&
+        String(d.userId) === String(link.userId) &&
+        Number(d.valueNanoTon) === value &&
+        d.status === 'approved' &&
+        startedAt - Number(d.approvedAt || 0) < 15 * 60 * 1000)) return false;
+      candidates.push({ item, link, identity });
+      return false; // keep scanning: credit every candidate of this pass
+    });
+
+    linkedScanStats.scans++;
+    linkedScanStats.lastAt = startedAt;
+    linkedScanStats.lastProvider = scan.provider || '';
+    linkedScanStats.candidates += candidates.length;
+    if (!scan.ok && !candidates.length) {
+      linkedScanStats.lastError = scan.reason || 'indexer lookup failed';
+      return { scanned: 0, error: linkedScanStats.lastError };
+    }
+    linkedScanStats.lastError = '';
+
+    for (const cand of candidates) {
+      try {
+        const done = await creditSpottedTransfer(cand);
+        if (done && done.ok) linkedScanStats.credited++;
+        else linkedScanStats.skipped++;
+      } catch (err) {
+        linkedScanStats.skipped++;
+        linkedScanStats.lastError = (err && err.message) || String(err);
+        console.warn('[deposit-scan] credit failed:', linkedScanStats.lastError);
+      }
+    }
+    return { scanned: candidates.length };
+  } finally {
+    linkedScanInFlight = false;
+  }
+}
+
+/**
+ * Credit one transfer spotted on the deposit address from an attached wallet.
+ * If the player already has an open top-up request for that payment (they
+ * pressed PAY in the mini app, or pasted a hash), THAT request is credited so
+ * the screen they are watching flips to "credited"; otherwise a record is
+ * created for them automatically.
+ */
+async function creditSpottedTransfer(cand) {
+  const { item, link, identity } = cand;
+  const valueNanoTon = Number(item.valueNanoTon) || 0;
+  const paidC = await paidCForValue(valueNanoTon);
+  if (!(paidC > 0)) {
+    // No TON price yet (both rate sources unreachable): leave it for the next
+    // pass rather than guessing a value.
+    return { ok: false, reason: 'no TON price available yet' };
+  }
+  const utimeMs = Number(item.utime) > 0 ? Number(item.utime) * 1000 : Date.now();
+  const vres = {
+    ok: true,
+    matchedBy: 'linked-wallet',
+    valueNanoTon,
+    source: item.source,
+    utime: Number(item.utime) || 0,
+    txId: item.txId || '',
+    identity,
+    provider: item.provider || '',
+  };
+
+  // 1) An open request for exactly this payment? Credit it instead of creating
+  //    a second record for the same money.
+  const open = store.listPendingDepositsForWallet(link.userId, item.source);
+  const match = open.find((d) => {
+    const expected = Number(d.expectedNano) || 0;
+    if (expected > 0) return Math.abs(expected - valueNanoTon) <= Math.max(expected * 0.02, 1000);
+    const claimed = Number(d.amount) || 0;
+    return claimed > 0 && Math.abs(claimed - paidC) <= Math.max(claimed * AUTO_CREDIT_TOLERANCE, 1);
+  });
+  if (match) {
+    match.wallet = link.address;
+    match.expectedNano = Number(match.expectedNano) || valueNanoTon;
+    match.spotted = true;
+    match.spottedAt = utimeMs;
+    const r = await creditVerifiedDeposit(match, vres, { silentReuse: true });
+    if (r.ok) console.log('[deposit-scan] matched open request #' + match.id + ' for', link.userId);
+    return r;
+  }
+
+  // 2) Nobody asked for it — the player simply paid from their attached wallet.
+  const name = link.name || store.bestKnownName(link.userId) || 'Player';
+  const created = store.requestDeposit(link.userId, name, paidC, scanTxToken(identity, item), link.address);
+  if (!created.ok) return { ok: false, reason: created.error };
+  const deposit = created.request;
+  deposit.auto = true;
+  deposit.source = 'linked-wallet';
+  deposit.signed = false;
+  deposit.expectedNano = valueNanoTon;
+  deposit.spotted = true;
+  deposit.spottedAt = utimeMs;
+  deposit.autoDone = true;
+  const r = await creditVerifiedDeposit(deposit, vres, { silentReuse: true });
+  if (r.ok) {
+    console.log('[deposit-scan] credited', deposit.amount, 'C to', deposit.userId, 'from attached wallet', link.address);
+    store.logEvent(deposit.userId, 'attached-wallet top-up credited', {
+      depositId: deposit.id, amount: deposit.amount, valueNanoTon, wallet: link.address,
+    });
+  }
+  return r;
+}
+
+function startLinkedWalletScan() {
+  if (!LINKED_SCAN_ENABLED) return;
+  if (linkedScanTimer) clearInterval(linkedScanTimer);
+  linkedScanTimer = setInterval(() => {
+    scanLinkedWalletTopups().catch((err) => {
+      linkedScanStats.lastError = (err && err.message) || String(err);
+      console.warn('[deposit-scan] failed:', linkedScanStats.lastError);
+    });
+  }, LINKED_SCAN_MS);
+  if (linkedScanTimer.unref) linkedScanTimer.unref();
+  // One check shortly after boot picks up payments made during the deploy.
+  const kick = setTimeout(() => {
+    scanLinkedWalletTopups().catch(() => {});
+  }, LINKED_SCAN_FIRST_MS);
+  if (kick.unref) kick.unref();
 }
 
 // TON Connect: when a player tops up by paying from a connected wallet
@@ -791,6 +1034,11 @@ app.post('/api/profile', (req, res) => {
     flapBalance: store.getBalance(userId),
     cBalance: store.getCBalance(userId),
     depositAddress: process.env.DEPOSIT_TON_ADDRESS || 'UQAKc6kclPQL-oe_QeXv-JZ98jI_WBFaLYkWikjWPx3WFqEd',
+    // Automatic top-ups: the client shows "credited automatically" copy and
+    // keeps watching a pending request only when the server really does it.
+    depositAuto: DEPOSIT_AUTO_CREDIT,
+    depositAutoScan: LINKED_SCAN_ENABLED,
+    tonWallets: walletView(userId),
     rank: ranks.week,
     ranks,
     dayKey: store.currentDayKey(),
@@ -802,6 +1050,30 @@ app.post('/api/profile', (req, res) => {
 });
 
 const TON_ADDRESS_RE = /^(?:[A-Za-z0-9_-]{48}|-?\d:[0-9a-fA-F]{64})$/;
+
+/**
+ * Transaction hash from whatever the player actually pasted.
+ * Explorers are usually opened in the browser, so what lands in the field is
+ * often a whole tonviewer/tonscan/ton.app LINK instead of a bare hash. Pull the
+ * hash-looking token out of it rather than rejecting the top-up — a real
+ * payment must not fail verification because of a copy/paste detail.
+ */
+function extractTxHash(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const direct = AC.sanitizeTxHash(text);
+  if (direct) return direct;
+  if (text.length > 500 || /\s/.test(text)) return '';
+  const tokens = text.split(/[^A-Za-z0-9_-]+/).filter(Boolean);
+  for (const token of tokens) {
+    // 64 hex chars (a transaction/message hash) or a 48-char base64url id.
+    if (/^[0-9a-fA-F]{64}$/.test(token) || /^[A-Za-z0-9_-]{48}$/.test(token)) {
+      const clean = AC.sanitizeTxHash(token);
+      if (clean) return clean;
+    }
+  }
+  return '';
+}
 
 app.post('/api/withdraw', (req, res) => {
   const user = authenticateFresh(req.body && req.body.initData);
@@ -840,6 +1112,53 @@ function tadsReward(req, res) {
 app.get('/api/tads-reward', tadsReward);
 app.post('/api/tads-reward', tadsReward);
 
+// Attach / detach the TON wallet a player connected in the mini app. Attaching
+// is what makes an automatic top-up possible later: once the same wallet has
+// signed one payment (proved below in /api/deposit), transfers it sends to the
+// deposit address are spotted by the background scan and credited by themselves.
+app.post('/api/wallet/link', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  if (rejectBanned(user, res)) return;
+  const userId = String(user.id);
+  if (!store.allowRequest('walletlink:' + userId, 20, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'too many requests, slow down' });
+  }
+  const address = String((req.body && req.body.address) || '').trim().slice(0, 120);
+  if (!TON_ADDRESS_RE.test(address)) {
+    return res.status(400).json({ error: 'invalid TON address format' });
+  }
+  const result = store.linkTonWallet(userId, address, { name: displayName(user), source: 'tonconnect' });
+  if (!result.ok) return res.status(409).json({ error: result.error });
+  res.json({
+    ok: true,
+    address: result.wallet.address,
+    proven: !!result.wallet.proven,
+    wallets: walletView(userId),
+  });
+});
+
+app.post('/api/wallet/unlink', (req, res) => {
+  const user = authenticate(req.body && req.body.initData);
+  if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
+  const userId = String(user.id);
+  const address = String((req.body && req.body.address) || '').trim().slice(0, 120);
+  const result = store.unlinkTonWallet(userId, address);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json({ ok: true, wallets: walletView(userId) });
+});
+
+// What the mini app shows on the wallet screen: the attached addresses and
+// whether each one is already verified for automatic top-ups.
+function walletView(userId) {
+  return store.getTonWalletsForUser(userId).map((w) => ({
+    address: w.address,
+    proven: !!w.proven,
+    provenAt: Number(w.provenAt) || 0,
+    linkedAt: Number(w.linkedAt) || 0,
+  }));
+}
+
 app.post('/api/deposit', (req, res) => {
   const user = authenticateFresh(req.body && req.body.initData);
   if (!user) return res.status(401).json({ error: 'invalid Telegram auth' });
@@ -851,7 +1170,7 @@ app.post('/api/deposit', (req, res) => {
   }
 
   const amount = Number(req.body && req.body.amount);
-  let txHash = AC.sanitizeTxHash(req.body && req.body.txHash);
+  let txHash = extractTxHash(req.body && req.body.txHash);
   const sender = typeof (req.body && req.body.sender) === 'string'
     ? req.body.sender.trim().slice(0, 80)
     : '';
@@ -888,6 +1207,16 @@ app.post('/api/deposit', (req, res) => {
     if (signed.payer) result.request.wallet = signed.payer;
     if (signed.expectedNano > 0) result.request.expectedNano = signed.expectedNano;
     result.request.signed = true;
+    // A transaction this wallet SIGNED is cryptographic proof of ownership, so
+    // the wallet is now attached (and verified) on the account: from here on a
+    // transfer it makes to the deposit address is credited by itself.
+    if (signed.payer) {
+      store.proveTonWallet(userId, signed.payer, { name: displayName(user), source: 'signed-tx' });
+    }
+  } else if (sender && TON_ADDRESS_RE.test(sender)) {
+    // Only a convenience attachment (prefills withdrawals, shows "your wallet"):
+    // a self-reported address is NOT proof and never enables automatic credits.
+    store.linkTonWallet(userId, sender, { name: displayName(user), source: 'client' });
   }
 
   // Top-ups are credited automatically: whether the player pays from a
@@ -1021,7 +1350,26 @@ app.post('/internal/withdrawals/:id/paid', (req, res) => {
 
 app.get('/internal/deposits', (req, res) => {
   if (!requireAdmin(req, res)) return;
-  res.json({ deposits: store.listDeposits(req.query.status) });
+  res.json({ deposits: store.listDeposits(req.query.status), scan: Object.assign({}, linkedScanStats) });
+});
+
+// Force an attached-wallet scan right now. An admin uses it when a player says
+// "I paid but nothing arrived" instead of waiting for the next tick; the test
+// suite uses it instead of sleeping.
+app.post('/internal/deposits/scan', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  if (!LINKED_SCAN_ENABLED) {
+    return res.status(409).json({
+      ok: false,
+      error: 'attached-wallet scan is disabled (DEPOSIT_AUTO_CREDIT=false or DEPOSIT_LINKED_SCAN=false)',
+    });
+  }
+  try {
+    const result = await scanLinkedWalletTopups();
+    res.json(Object.assign({ ok: true }, result, { stats: Object.assign({}, linkedScanStats) }));
+  } catch (err) {
+    res.status(502).json({ ok: false, error: (err && err.message) || String(err) });
+  }
 });
 
 // Status of a single top-up request, for the player who created it. Lets the
@@ -1045,6 +1393,10 @@ app.post('/api/deposit-status', (req, res) => {
     status: deposit.status,
     auto: !!deposit.auto,
     amount: deposit.amount,
+    // The player's own request: telling them WHY it is still pending ("this
+    // transfer already credited request #12") beats an endless spinner.
+    autoResult: deposit.autoResult || '',
+    source: deposit.source || '',
     cBalance: store.getCBalance(userId),
   });
 });
@@ -1127,6 +1479,17 @@ app.get('/internal/stats', (req, res) => {
     activePlayers: store.getActivePlayers(),
     totalRuns: runStats.totalRuns,
     adminAudit: adminAudit.slice(-50),
+    deposits: {
+      autoCredit: DEPOSIT_AUTO_CREDIT,
+      onchainGate: DEPOSIT_ONCHAIN_ENABLED,
+      linkedScan: LINKED_SCAN_ENABLED,
+      linkedScanEveryMs: LINKED_SCAN_MS,
+      linkedWallets: store.listProvenTonWallets().length,
+      pendingAuto: autoCreditTimers.size,
+      scan: Object.assign({}, linkedScanStats),
+      address: depositAddress(),
+      indexer: TON_RPC_URL || 'https://toncenter.com/api/v2',
+    },
   }, store.persistInfo()));
 });
 
@@ -1419,6 +1782,7 @@ const start = store.ready || Promise.resolve();
 start.then(() => {
   rebuildSpentTransfers();
   resumeAutoCredits();
+  startLinkedWalletScan();
   // Belt and braces: re-check every pending automatic top-up on an interval so
   // no real payment can get stranded in the manual queue.
   const sweep = setInterval(sweepAutoCredits, AUTO_CREDIT_SWEEP_MS);
@@ -1428,6 +1792,19 @@ start.then(() => {
     console.log(`GRM FLAP backend listening on :${PORT}`);
     console.log('Persist backend:', info.backend, info.redis ? '(Upstash Redis)' : store.dataFile);
     console.log(`Persist state: ${info.loadState} | players: ${info.players} | durable: ${info.durable}`);
+    // Top-up configuration is money: print it on every boot so a missing env
+    // variable is visible in the deploy log instead of silently leaving real
+    // payments in the manual queue.
+    console.log('Deposits:',
+      'auto-credit=' + (DEPOSIT_AUTO_CREDIT ? 'ON' : 'OFF'),
+      '| attached-wallet scan=' + (LINKED_SCAN_ENABLED ? 'ON every ' + Math.round(LINKED_SCAN_MS / 1000) + 's' : 'OFF'),
+      '| address=' + depositAddress(),
+      '| indexer=' + (TON_RPC_URL || 'https://toncenter.com/api/v2') + ' (+ tonapi fallback)',
+      '| min=' + MIN_DEPOSIT_NANO_TON + ' nanoTON');
+    console.log('Attached wallets verified for automatic top-ups:', store.listProvenTonWallets().length);
+    if (!DEPOSIT_AUTO_CREDIT) {
+      console.warn('!!! DEPOSIT_AUTO_CREDIT=false — top-ups are NOT credited automatically; every payment waits for an admin in admin.html.');
+    }
     if (info.warning) console.warn('!!! DATA SAFETY WARNING:', info.warning);
     if (info.degraded) {
       console.error('!!! STORE DEGRADED — saving is blocked to protect existing player data.');

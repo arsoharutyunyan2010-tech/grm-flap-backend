@@ -84,6 +84,17 @@
   </table>
 
   <h2>Top-up requests</h2>
+  <p style="opacity:0.7;font-size:13px;max-width:760px;">
+    Top-ups are verified on-chain and credited <b>automatically</b>: a payment made with
+    PAY WITH CONNECTED WALLET, a transfer from a wallet already verified on the account,
+    or a pasted hash / explorer link. Rows below normally approve themselves — a pending
+    row means the chain has not shown the transfer yet.
+    <span id="scanInfo" style="opacity:.85;"></span>
+  </p>
+  <p>
+    <button class="pay-btn" onclick="scanDeposits()">Scan chain now</button>
+    <span style="opacity:0.6;font-size:12px;">forces the attached-wallet check immediately</span>
+  </p>
   <table>
     <thead><tr><th>ID</th><th>Player</th><th>TX hash</th><th>Amount</th><th>Status</th><th></th></tr></thead>
     <tbody id="dRows"><tr><td colspan="6">Enter admin key and press Load.</td></tr></tbody>
@@ -342,8 +353,40 @@
   function loadDeposits(key){
     fetch(API_BASE + '/internal/deposits', { headers: { 'x-admin-key': key } })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-      .then(function(d){ renderDeposits(d.deposits || [], key); })
+      .then(function(d){ renderDeposits(d.deposits || [], key); renderScanInfo(d.scan); })
       .catch(function(e){ document.getElementById('err').textContent = 'Deposits error: ' + e.message; });
+  }
+
+  // Forces the attached-wallet scan instead of waiting for the next tick —
+  // the first thing to do when a player says "I paid but nothing arrived".
+  window.scanDeposits = function(){
+    var key = getKey();
+    var info = document.getElementById('scanInfo');
+    if (info) info.textContent = ' scanning…';
+    fetch(API_BASE + '/internal/deposits/scan', {
+      method: 'POST',
+      headers: { 'x-admin-key': key, 'content-type': 'application/json' }
+    })
+      .then(function(r){ return r.json().then(function(b){ return { ok: r.ok, body: b }; }); })
+      .then(function(res){
+        if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error : 'scan failed');
+        if (info) info.textContent = ' scanned now: ' + (res.body.scanned || 0) + ' transfer(s) credited or matched.';
+        loadDeposits(key);
+      })
+      .catch(function(e){
+        if (info) info.textContent = '';
+        document.getElementById('err').textContent = 'Scan error: ' + e.message;
+      });
+  };
+
+  function renderScanInfo(scan){
+    var el = document.getElementById('scanInfo');
+    if (!el || !scan) return;
+    var when = scan.lastAt ? new Date(scan.lastAt).toLocaleTimeString() : 'never';
+    el.textContent = ' Last automatic scan: ' + when +
+      ' · credited ' + (scan.credited || 0) +
+      (scan.lastProvider ? ' · indexer ' + scan.lastProvider : '') +
+      (scan.lastError ? ' · error: ' + scan.lastError : '');
   }
 
   function renderDeposits(list, key){
@@ -366,10 +409,13 @@
         '</td>' +
         '<td>'+ d.amount +' FLAP ($'+(d.amount/100).toFixed(2)+')</td>' +
         '<td class="status-'+d.status+'">'+ d.status +
-          (d.autoApproved ? '<div style="opacity:.7;margin-top:4px;">auto ('+ esc(d.verifiedBy || 'on-chain') +')</div>'
+          (d.autoApproved ? '<div style="opacity:.7;margin-top:4px;">auto ('+ esc(d.verifiedBy || 'on-chain') +
+              (d.provider ? ' via ' + esc(d.provider) : '') + ')</div>'
             : (d.auto ? '<div style="opacity:.7;margin-top:4px;">wallet · auto-checking'+
                 (d.autoResult ? ' — '+ esc(d.autoResult) : '') +'</div>' : '')) +
           (d.claimedAmount != null ? '<div style="opacity:.7;margin-top:4px;">claimed '+ d.claimedAmount +'</div>' : '') +
+          (d.valueNanoTon ? '<div style="opacity:.7;margin-top:4px;">on-chain '+ (d.valueNanoTon/1e9).toFixed(4) +' TON</div>' : '') +
+          (d.source === 'linked-wallet' ? '<div style="opacity:.7;margin-top:4px;">spotted from the attached wallet</div>' : '') +
         '</td>' +
         '<td>'+ actions +'</td>';
       tbody.appendChild(tr);

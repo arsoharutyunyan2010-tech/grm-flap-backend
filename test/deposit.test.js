@@ -7,6 +7,11 @@
  * exercised: /api/deposit → readSignedTopup → verifyDepositClaim (sender +
  * amount + time + destination) → store.approveDeposit → /api/deposit-status.
  *
+ * It also covers the two ways a payment can be confirmed without anybody
+ * touching admin.html when the obvious path is unavailable: a fallback indexer
+ * (tonapi) when the primary one rate-limits, and the attached-wallet scan that
+ * credits a transfer made straight from a wallet the player already proved.
+ *
  * Run with:  npm run test:deposit
  */
 'use strict';
@@ -33,6 +38,13 @@ const ELSEWHERE = new Address(0, Buffer.alloc(32, 0x44));
 // still-pending request can (correctly!) claim a later scenario's transfer.
 const WALLET_SHORT = new Address(0, Buffer.alloc(32, 0x55));
 const WALLET_TWICE = new Address(0, Buffer.alloc(32, 0x66));
+const WALLET_FALLBACK = new Address(0, Buffer.alloc(32, 0x77)); // tonapi scenario
+const WALLET_LINKED = new Address(0, Buffer.alloc(32, 0x88));   // attached + verified
+const WALLET_UNPROVEN = new Address(0, Buffer.alloc(32, 0x99)); // attached only
+const WALLET_OPEN = new Address(0, Buffer.alloc(32, 0xaa));     // open request rescue
+const WALLET_URL = new Address(0, Buffer.alloc(32, 0xbb));      // pasted explorer link
+const NANO_02 = 200000000n; // 0.2 TON → $0.50 at the pinned $2.50 rate → 50 C
+const NANO_03 = 300000000n; // 0.3 TON → $0.75 → 75 C
 const NANO_04 = 400000000n; // 0.4 TON → $1.00 at the pinned $2.50 rate → 100 C
 
 let failures = 0;
@@ -90,14 +102,46 @@ function ledgerTx({ source, valueNano, hash }) {
   };
 }
 
+// One tonapi-v2 shaped event: what the FALLBACK indexer reports for the same
+// transfer (different ids, same sender / amount / time).
+function tonapiEvent({ source, valueNano, recipient }) {
+  return {
+    event_id: crypto.randomBytes(32).toString('hex'),
+    timestamp: Math.floor(Date.now() / 1000),
+    actions: [{
+      action_id: crypto.randomBytes(32).toString('hex'),
+      type: 'TonTransfer',
+      status: 'ok',
+      TonTransfer: {
+        sender: { address: source ? source.toRawString() : '' },
+        recipient: { address: (recipient || DEPOSIT).toRawString() },
+        amount: String(valueNano),
+        comment: '',
+      },
+    }],
+  };
+}
+
 async function main() {
   // ---- mock TON indexer -------------------------------------------------
-  let ledger = [];
+  let ledger = [];           // toncenter-shaped rows (primary indexer)
+  let tonapiLedger = [];     // tonapi-shaped events (fallback indexer)
+  let failToncenter = false; // simulate the keyless public endpoint rate-limiting
   const indexer = http.createServer((req, res) => {
     const url = req.url || '';
     if (url.indexOf('/getTransactions') === 0 || url.indexOf('/api/v2/getTransactions') === 0) {
+      if (failToncenter) {
+        res.writeHead(429, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'RATE_LIMIT' }));
+        return;
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true, result: ledger }));
+      return;
+    }
+    if (url.indexOf('/tonapi/blockchain/accounts/') === 0 && url.indexOf('/events') > 0) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ events: tonapiLedger }));
       return;
     }
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -145,6 +189,12 @@ async function main() {
       DEPOSIT_AUTO_CREDIT_WINDOW_MS: '30000',
       DEPOSIT_TON_ADDRESS: DEPOSIT.toString(),
       TON_RPC_URL: 'http://127.0.0.1:' + indexerPort + '/api/v2',
+      TONAPI_URL: 'http://127.0.0.1:' + indexerPort + '/tonapi',
+      // The attached-wallet scan is driven by hand (POST /internal/deposits/scan)
+      // so the assertions never depend on a timer firing mid-test.
+      DEPOSIT_LINKED_SCAN: 'true',
+      DEPOSIT_LINKED_SCAN_MS: '3600000',
+      DEPOSIT_LINKED_SCAN_FIRST_MS: '3600000',
       TON_USD_PRICE: '2.5',
       MIN_DEPOSIT_NANO_TON: '10000000',
     },
@@ -172,6 +222,21 @@ async function main() {
     try { json = await res.json(); } catch (e) { /* non-JSON */ }
     return { status: res.status, body: json };
   };
+
+  // The admin's view of every top-up request.
+  async function deposits() {
+    const res = await fetch(base + '/internal/deposits', { headers: { 'x-admin-key': ADMIN } });
+    return ((await res.json()).deposits) || [];
+  }
+  // Ask the server to look at the chain right now (what the interval does).
+  async function scan() {
+    const r = await post('/internal/deposits/scan', {}, { 'x-admin-key': ADMIN });
+    return r.body;
+  }
+  async function profile(initData) {
+    const r = await post('/api/profile', { initData });
+    return r.body || {};
+  }
 
   // Poll like the mini app does after a wallet payment.
   async function waitStatus(initData, requestId, want, tries) {
@@ -297,6 +362,125 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const stF = await post('/api/deposit-status', { initData: initDataF, requestId: f.body.requestId });
     check('unpaid claim is never credited', stF.body && stF.body.status === 'pending', JSON.stringify(stF.body));
+
+    // ---- 8) the primary indexer rate-limits — the fallback confirms it ----
+    console.log('\n8) toncenter returns 429 — the tonapi fallback confirms the payment');
+    failToncenter = true;
+    ledger = [];
+    tonapiLedger = [tonapiEvent({ source: WALLET_FALLBACK, valueNano: NANO_04 })];
+    const userH = { id: 555000008, first_name: 'Fallback', username: 'fallback_payer' };
+    const initDataH = makeInitData(userH);
+    const h = await post('/api/deposit', {
+      initData: initDataH, amount: 100, boc: signedBoc(WALLET_FALLBACK, DEPOSIT, NANO_04),
+    });
+    check('request accepted', h.status === 200 && h.body && h.body.ok, JSON.stringify(h.body));
+    const stH = await waitStatus(initDataH, h.body.requestId, 'approved', 60);
+    check('credited through the fallback indexer while the primary was rate-limiting',
+      !!stH && stH.status === 'approved', JSON.stringify(stH));
+    check('the paid 100 C landed', !!stH && Number(stH.cBalance) === 100, 'cBalance=' + (stH && stH.cBalance));
+    const rowH = (await deposits()).find((d) => d.id === h.body.requestId);
+    check('admin can see WHICH indexer confirmed it', !!rowH && rowH.provider === 'tonapi',
+      'provider=' + (rowH && rowH.provider));
+    failToncenter = false;
+    tonapiLedger = [];
+
+    // ---- 9) attached wallet: paid outside the mini app, credited anyway ---
+    console.log('\n9) ATTACHED WALLET — a transfer made outside the mini app is credited by itself');
+    const userI = { id: 555000009, first_name: 'Linked', username: 'linked_payer' };
+    const initDataI = makeInitData(userI);
+    // (a) one in-app payment proves the player owns this wallet
+    ledger = [ledgerTx({ source: WALLET_LINKED, valueNano: NANO_04 })];
+    const i1 = await post('/api/deposit', {
+      initData: initDataI, amount: 100, boc: signedBoc(WALLET_LINKED, DEPOSIT, NANO_04),
+    });
+    const stI1 = await waitStatus(initDataI, i1.body.requestId, 'approved', 60);
+    check('the in-app payment is credited and the wallet becomes verified',
+      !!stI1 && stI1.status === 'approved', JSON.stringify(stI1));
+    const profI = await profile(initDataI);
+    check('the wallet is attached to the account and marked verified',
+      Array.isArray(profI.tonWallets) && profI.tonWallets.some((w) => w.proven && w.address === WALLET_LINKED.toString()),
+      JSON.stringify(profI.tonWallets));
+    check('the mini app is told automatic top-ups are on', profI.depositAuto === true && profI.depositAutoScan === true,
+      JSON.stringify({ depositAuto: profI.depositAuto, depositAutoScan: profI.depositAutoScan }));
+    // (b) the same wallet pays again — no request, no hash, no button pressed
+    ledger = [ledgerTx({ source: WALLET_LINKED, valueNano: NANO_02 })];
+    const scanI = await scan();
+    check('the scan spotted exactly one transfer', !!scanI && scanI.ok === true && scanI.scanned === 1, JSON.stringify(scanI));
+    const profI2 = await profile(initDataI);
+    check('50 C arrived on the account by itself (100 + 50)', Number(profI2.cBalance) === 150, 'cBalance=' + profI2.cBalance);
+    const spotted = (await deposits()).filter((d) => String(d.userId) === String(userI.id) && d.source === 'linked-wallet');
+    check('admin sees one automatic record for it, already approved',
+      spotted.length === 1 && spotted[0].status === 'approved' && Number(spotted[0].amount) === 50,
+      JSON.stringify(spotted.map((d) => ({ id: d.id, amount: d.amount, status: d.status, by: d.verifiedBy }))));
+    check('it is labelled as verified from the attached wallet',
+      !!spotted[0] && spotted[0].verifiedBy === 'linked-wallet', 'verifiedBy=' + (spotted[0] && spotted[0].verifiedBy));
+    await scan();
+    const profI3 = await profile(initDataI);
+    check('scanning the same transfer again does not pay twice', Number(profI3.cBalance) === 150, 'cBalance=' + profI3.cBalance);
+
+    // ---- 10) attaching alone is not proof --------------------------------
+    console.log('\n10) attaching a wallet is NOT proof — it can never collect a transfer');
+    const userJ = { id: 555000010, first_name: 'Claimer', username: 'claimer' };
+    const initDataJ = makeInitData(userJ);
+    const link = await post('/api/wallet/link', { initData: initDataJ, address: WALLET_UNPROVEN.toString() });
+    check('a connected wallet can be attached for convenience',
+      link.status === 200 && link.body && link.body.ok === true && link.body.proven === false, JSON.stringify(link.body));
+    ledger = [ledgerTx({ source: WALLET_UNPROVEN, valueNano: NANO_04 })];
+    const scanJ = await scan();
+    check('the scan ignored the unverified wallet', !!scanJ && scanJ.scanned === 0, JSON.stringify(scanJ));
+    const profJ = await profile(initDataJ);
+    check('nothing was credited for a self-reported address', Number(profJ.cBalance) === 0, 'cBalance=' + profJ.cBalance);
+    const steal = await post('/api/wallet/link', { initData: initDataJ, address: WALLET_LINKED.toString() });
+    check('a verified wallet cannot be re-attached to another account', steal.status === 409, JSON.stringify(steal.body));
+    const badLink = await post('/api/wallet/link', { initData: initDataJ, address: 'not-an-address' });
+    check('a junk address is refused', badLink.status === 400, JSON.stringify(badLink.body));
+
+    // ---- 11) the scan rescues an open request the hash could not match ----
+    console.log('\n11) paid from the attached wallet but pasted a useless hash — still credited');
+    const userK = { id: 555000011, first_name: 'Open', username: 'open_request' };
+    const initDataK = makeInitData(userK);
+    ledger = [ledgerTx({ source: WALLET_OPEN, valueNano: NANO_04 })];
+    const k1 = await post('/api/deposit', {
+      initData: initDataK, amount: 100, boc: signedBoc(WALLET_OPEN, DEPOSIT, NANO_04),
+    });
+    await waitStatus(initDataK, k1.body.requestId, 'approved', 60);
+    const bogusHash = crypto.randomBytes(32).toString('hex');
+    const k2 = await post('/api/deposit', {
+      initData: initDataK, amount: 50, txHash: bogusHash, sender: WALLET_OPEN.toString(),
+    });
+    check('the manual request is accepted for checking', k2.status === 200 && k2.body && k2.body.ok, JSON.stringify(k2.body));
+    ledger = [ledgerTx({ source: WALLET_OPEN, valueNano: NANO_02, hash: crypto.randomBytes(32).toString('hex') })];
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const before = await post('/api/deposit-status', { initData: initDataK, requestId: k2.body.requestId });
+    check('the pasted hash matches nothing, so the request is still open',
+      before.body && before.body.status === 'pending', JSON.stringify(before.body));
+    const scanK = await scan();
+    check('the scan found the real transfer', !!scanK && scanK.scanned === 1, JSON.stringify(scanK));
+    const after = await post('/api/deposit-status', { initData: initDataK, requestId: k2.body.requestId });
+    check('THAT request was credited instead of opening a second one',
+      after.body && after.body.status === 'approved', JSON.stringify(after.body));
+    const rowsK = (await deposits()).filter((d) => String(d.userId) === String(userK.id));
+    check('one record per payment, no duplicates', rowsK.length === 2,
+      JSON.stringify(rowsK.map((d) => ({ id: d.id, amount: d.amount, status: d.status, source: d.source }))));
+    const profK = await profile(initDataK);
+    check('both payments are on the balance (100 + 50 C)', Number(profK.cBalance) === 150, 'cBalance=' + profK.cBalance);
+
+    // ---- 12) a pasted explorer link is as good as a pasted hash ----------
+    console.log('\n12) the player pastes a tonviewer LINK instead of a bare hash');
+    const urlHash = crypto.randomBytes(32).toString('hex');
+    ledger = [ledgerTx({ source: WALLET_URL, valueNano: NANO_03, hash: urlHash })];
+    const userL = { id: 555000012, first_name: 'Paster', username: 'link_paster' };
+    const initDataL = makeInitData(userL);
+    const l = await post('/api/deposit', {
+      initData: initDataL, amount: 75, txHash: 'https://tonviewer.com/transaction/' + urlHash,
+    });
+    check('the hash is read out of the link', l.status === 200 && l.body && l.body.ok, JSON.stringify(l.body));
+    const stL = await waitStatus(initDataL, l.body.requestId, 'approved', 60);
+    check('credited from the link', !!stL && stL.status === 'approved', JSON.stringify(stL));
+    check('the claimed 75 C landed', !!stL && Number(stL.cBalance) === 75, 'cBalance=' + (stL && stL.cBalance));
+    const junk = await post('/api/deposit', { initData: initDataL, amount: 75, txHash: 'https://example.com/no hash here' });
+    check('a link with no hash in it is still refused', junk.status === 400, JSON.stringify(junk.body));
+
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit');
